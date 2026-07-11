@@ -20,14 +20,21 @@ pub fn run() {
             let db = db::open_at(&db_path).expect("open db");
             db.migrate().expect("migrate");
 
-            // Seed WEB once (idempotent). data/web.canonical.json is bundled as a resource.
-            if let Ok(seed_path) = app
+            // Seed WEB once (idempotent). In a bundled build the data file is a
+            // resource; in `tauri dev` the resource dir isn't populated, so fall
+            // back to the project `data/` dir (resolved at compile time).
+            let mut seed_json: Option<String> = app
                 .path()
                 .resolve("web.canonical.json", tauri::path::BaseDirectory::Resource)
-            {
-                if let Ok(json) = std::fs::read_to_string(&seed_path) {
-                    db.seed_from_json(&json).expect("seed");
-                }
+                .ok()
+                .and_then(|p| std::fs::read_to_string(&p).ok());
+            if seed_json.is_none() {
+                let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../data/web.canonical.json");
+                seed_json = std::fs::read_to_string(&dev_path).ok();
+            }
+            if let Some(json) = seed_json {
+                db.seed_from_json(&json).expect("seed");
             }
 
             app.manage(AppState { db: Mutex::new(db), translation: "WEB".into() });
