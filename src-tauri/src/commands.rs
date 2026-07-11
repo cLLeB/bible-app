@@ -2,16 +2,19 @@ use crate::books::book_by_osis;
 use crate::db::{Db, SongSummary};
 use crate::events::{ProjectionState, VersePayload};
 use crate::reference::parse_reference;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 pub struct AppState {
     pub db: Mutex<Db>,
     pub translation: String, // active translation code, e.g. "WEB"
     pub current: Mutex<ProjectionState>, // what the projection should show
+    pub listening: Arc<AtomicBool>,      // mic listen loop active?
 }
 
-fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
+pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
     let book_name = book_by_osis(&rec.book_osis)
         .map(|b| b.name.to_string())
         .unwrap_or_else(|| rec.book_osis.clone());
@@ -184,4 +187,50 @@ pub fn blank_projection(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     project(&app, &state, ProjectionState::Blank)
+}
+
+// ---- Live listening (STT) ----
+
+fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
+    names
+        .iter()
+        .map(|n| dir.join(n))
+        .find(|p| p.exists())
+}
+
+/// Locate the whisper model + binary. Dev: project `models/` and `bin/` dirs.
+fn resolve_model_and_binary() -> Result<(PathBuf, PathBuf), String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or("bad project root")?
+        .to_path_buf();
+
+    let model = first_existing(
+        &root.join("models"),
+        &["ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin", "ggml-medium.en.bin"],
+    )
+    .ok_or("No whisper model found. Put e.g. ggml-base.en.bin in the project 'models' folder.")?;
+
+    let binary = first_existing(&root.join("bin"), &["whisper-cli.exe", "main.exe", "whisper.exe"])
+        .unwrap_or_else(|| PathBuf::from("whisper-cli")); // else rely on PATH
+
+    Ok((model, binary))
+}
+
+#[tauri::command]
+pub fn start_listening(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if state.listening.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let (model, binary) = resolve_model_and_binary()?;
+    state.listening.store(true, Ordering::SeqCst);
+    let flag = state.listening.clone();
+    let app2 = app.clone();
+    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model, binary));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_listening(state: tauri::State<'_, AppState>) {
+    state.listening.store(false, Ordering::SeqCst);
 }

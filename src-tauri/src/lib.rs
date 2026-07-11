@@ -1,13 +1,17 @@
+mod audio;
 mod books;
 mod commands;
 mod db;
+mod detect;
 mod events;
 mod reference;
 mod slides;
+mod stt;
 
 use commands::AppState;
 use events::ProjectionState;
-use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +47,7 @@ pub fn run() {
                 db: Mutex::new(db),
                 translation: "WEB".into(),
                 current: Mutex::new(ProjectionState::Blank),
+                listening: Arc::new(AtomicBool::new(false)),
             });
 
             // Closing the projection window should hide it, not destroy it,
@@ -70,6 +75,8 @@ pub fn run() {
             commands::get_song,
             commands::update_song,
             commands::delete_song,
+            commands::start_listening,
+            commands::stop_listening,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

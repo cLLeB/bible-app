@@ -1,0 +1,110 @@
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import {
+  blankProjection,
+  projectVerse,
+  startListening,
+  stopListening,
+  type VersePayload,
+} from "../api";
+
+export function ListenPanel() {
+  const [listening, setListening] = useState(false);
+  const [lines, setLines] = useState<string[]>([]);
+  const [candidates, setCandidates] = useState<VersePayload[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisteners = [
+      listen<string>("transcript", (e) => {
+        setLines((prev) => [e.payload, ...prev].slice(0, 6));
+      }),
+      listen<VersePayload>("verse-candidate", (e) => {
+        setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
+      }),
+      listen("listen-started", () => {
+        setListening(true);
+        setError(null);
+      }),
+      listen("listen-stopped", () => setListening(false)),
+      listen<string>("listen-error", (e) => setError(e.payload)),
+    ];
+    return () => {
+      unlisteners.forEach((u) => u.then((f) => f()));
+    };
+  }, []);
+
+  async function toggle(): Promise<void> {
+    try {
+      if (listening) {
+        await stopListening();
+        setListening(false);
+      } else {
+        setError(null);
+        await startListening();
+        setListening(true);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-3">
+        <h2 className="text-xl font-semibold">Live listening</h2>
+        <button
+          onClick={toggle}
+          className={`rounded px-4 py-2 text-white ${listening ? "bg-red-600" : "bg-green-600"}`}
+        >
+          {listening ? "■ Stop" : "● Start listening"}
+        </button>
+        {listening && <span className="text-sm text-green-700">listening…</span>}
+      </div>
+
+      {error && <p className="rounded bg-red-50 p-2 text-red-700">{error}</p>}
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className="mb-1 text-xs uppercase text-gray-500">Transcript</div>
+          <div className="min-h-24 space-y-1 rounded border p-2 text-sm">
+            {lines.length === 0 ? (
+              <span className="text-gray-400">Speak a reference, e.g. “John chapter 3 verse 16”.</span>
+            ) : (
+              lines.map((l, i) => (
+                <p key={i} className={i === 0 ? "text-black" : "text-gray-400"}>
+                  {l}
+                </p>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between text-xs uppercase text-gray-500">
+            <span>Detected verses</span>
+            <button onClick={() => blankProjection()} className="rounded border px-2 py-0.5 normal-case">
+              Blank
+            </button>
+          </div>
+          <div className="min-h-24 space-y-1">
+            {candidates.length === 0 ? (
+              <span className="text-sm text-gray-400">Detected references appear here.</span>
+            ) : (
+              candidates.map((c, i) => (
+                <button
+                  key={`${c.reference}-${i}`}
+                  onClick={() => projectVerse(c)}
+                  className="block w-full rounded border p-2 text-left hover:bg-green-50"
+                >
+                  <div className="text-sm font-semibold">{c.reference}</div>
+                  <div className="line-clamp-2 text-xs text-gray-600">{c.text}</div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

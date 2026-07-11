@@ -25,3 +25,7 @@ dist-ssr
 
 # Large generated Bible data (build-time normalized)
 data/web.canonical.json
+
+# Whisper model + binary (user-provided, large)
+/models/
+/bin/
