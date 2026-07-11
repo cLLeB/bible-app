@@ -1,8 +1,10 @@
 # Offline Church Bible App — Design Spec
 
 **Date:** 2026-07-11
-**Status:** Approved (design v2) → ready for implementation planning
+**Status:** 🧊 **FROZEN (v2)** — implementation phase
 **Location:** `C:\Users\kyere\Documents\codes\bible-app`
+
+> **Change control:** This architecture is frozen. No new features are added to this document unless they fix a *proven* architectural gap discovered during implementation. All new ideas go to `docs/BACKLOG.md`. From here on: build the vertical slices, validate assumptions with working code, and measure each component on target hardware.
 
 ---
 
