@@ -1,17 +1,20 @@
 import { create } from "zustand";
+import type { VersePayload } from "./api";
 
-/**
- * Root application store (Zustand).
- *
- * This is an intentionally minimal placeholder scaffolded in Task 1.
- * Later tasks will extend `AppState` with real slices (current reference,
- * search results, projection state, etc.) as those features are built.
- */
-export interface AppState {
-  /** Human-readable app version, useful as a smoke-test field for the store wiring. */
-  version: string;
+interface LookupState {
+  query: string;
+  result: VersePayload | null;
+  error: string | null;
+  setQuery: (q: string) => void;
+  setResult: (r: VersePayload | null) => void;
+  setError: (e: string | null) => void;
 }
 
-export const useAppStore = create<AppState>(() => ({
-  version: "0.1.0",
+export const useLookupStore = create<LookupState>((set) => ({
+  query: "",
+  result: null,
+  error: null,
+  setQuery: (query) => set({ query }),
+  setResult: (result) => set({ result, error: null }),
+  setError: (error) => set({ error, result: null }),
 }));
