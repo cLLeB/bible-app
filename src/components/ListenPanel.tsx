@@ -10,6 +10,7 @@ import {
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
+  const [model, setModel] = useState<"base" | "tiny">("base");
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<VersePayload[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export function ListenPanel() {
         setListening(false);
       } else {
         setError(null);
-        await startListening();
+        await startListening(model);
         setListening(true);
       }
     } catch (err: unknown) {
@@ -59,6 +60,16 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop" : "● Start listening"}
         </button>
+        <select
+          value={model}
+          onChange={(e) => setModel(e.target.value as "base" | "tiny")}
+          disabled={listening}
+          className="rounded border px-2 py-2 text-sm"
+          title="Base = normal accuracy; Tiny = faster on low-end PCs"
+        >
+          <option value="base">Base (normal)</option>
+          <option value="tiny">Tiny (low-end PCs)</option>
+        </select>
         {listening && <span className="text-sm text-green-700">listening…</span>}
       </div>
 

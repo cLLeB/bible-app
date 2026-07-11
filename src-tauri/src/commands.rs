@@ -199,17 +199,24 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
 }
 
 /// Locate the whisper model + binary. Dev: project `models/` and `bin/` dirs.
-fn resolve_model_and_binary() -> Result<(PathBuf, PathBuf), String> {
+/// `kind` selects the flavor: "base" (normal) or "tiny" (low-end PCs).
+fn resolve_model_and_binary(kind: &str) -> Result<(PathBuf, PathBuf), String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or("bad project root")?
         .to_path_buf();
+    let models = root.join("models");
 
-    let model = first_existing(
-        &root.join("models"),
-        &["ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin", "ggml-medium.en.bin"],
-    )
-    .ok_or("No whisper model found. Put e.g. ggml-base.en.bin in the project 'models' folder.")?;
+    let requested = models.join(format!("ggml-{kind}.en.bin"));
+    let model = if requested.exists() {
+        requested
+    } else {
+        first_existing(
+            &models,
+            &["ggml-base.en.bin", "ggml-tiny.en.bin", "ggml-small.en.bin", "ggml-medium.en.bin"],
+        )
+        .ok_or("No whisper model found. Put ggml-base.en.bin in the project 'models' folder.")?
+    };
 
     let binary = first_existing(&root.join("bin"), &["whisper-cli.exe", "main.exe", "whisper.exe"])
         .unwrap_or_else(|| PathBuf::from("whisper-cli")); // else rely on PATH
@@ -218,11 +225,16 @@ fn resolve_model_and_binary() -> Result<(PathBuf, PathBuf), String> {
 }
 
 #[tauri::command]
-pub fn start_listening(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub fn start_listening(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    model: Option<String>,
+) -> Result<(), String> {
     if state.listening.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let (model, binary) = resolve_model_and_binary()?;
+    let kind = model.unwrap_or_else(|| "base".to_string());
+    let (model, binary) = resolve_model_and_binary(&kind)?;
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();

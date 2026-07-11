@@ -70,5 +70,6 @@ export const updateSong = (
 export const deleteSong = (songId: number): Promise<void> =>
   invoke<void>("delete_song", { songId });
 
-export const startListening = (): Promise<void> => invoke<void>("start_listening");
+export const startListening = (model: "base" | "tiny"): Promise<void> =>
+  invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");
