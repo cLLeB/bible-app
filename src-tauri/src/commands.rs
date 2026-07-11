@@ -86,7 +86,7 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     if app.get_webview_window("projection").is_some() {
         return Ok(());
     }
-    let win = WebviewWindowBuilder::new(app, "projection", WebviewUrl::App("projection.html".into()))
+    let win = WebviewWindowBuilder::new(app, "projection", WebviewUrl::App("index.html".into()))
         .title("Projection")
         .decorations(false)
         .build()
