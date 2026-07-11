@@ -12,9 +12,18 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "bible-app",
         "width": 800,
         "height": 600
+      },
+      {
+        "label": "projection",
+        "title": "Projection",
+        "width": 960,
+        "height": 540,
+        "visible": false,
+        "decorations": false
       }
     ],
     "security": {

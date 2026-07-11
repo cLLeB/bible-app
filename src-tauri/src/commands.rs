@@ -3,7 +3,7 @@ use crate::db::{Db, SongSummary};
 use crate::events::{ProjectionState, VersePayload};
 use crate::reference::parse_reference;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager};
 
 pub struct AppState {
     pub db: Mutex<Db>,
@@ -82,15 +82,13 @@ pub fn get_projection(state: tauri::State<'_, AppState>) -> ProjectionState {
         .unwrap_or(ProjectionState::Blank)
 }
 
+/// The projection window is declared (hidden) in tauri.conf.json, so it loads
+/// index.html at startup exactly like the main window. Here we just position,
+/// size, and reveal it.
 fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
-    if app.get_webview_window("projection").is_some() {
-        return Ok(());
-    }
-    let win = WebviewWindowBuilder::new(app, "projection", WebviewUrl::App("index.html".into()))
-        .title("Projection")
-        .decorations(false)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let win = app
+        .get_webview_window("projection")
+        .ok_or_else(|| "projection window not found".to_string())?;
 
     // Move to the second monitor if present, else stay on primary.
     if let Ok(monitors) = win.available_monitors() {
@@ -101,6 +99,8 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
         }
     }
     win.set_fullscreen(true).map_err(|e| e.to_string())?;
+    win.show().map_err(|e| e.to_string())?;
+    win.set_focus().ok();
 
     // Dev diagnostics: open devtools so console/network errors are visible.
     #[cfg(debug_assertions)]

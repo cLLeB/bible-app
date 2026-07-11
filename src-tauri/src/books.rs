@@ -2,6 +2,7 @@
 pub struct CanonicalBook {
     pub osis: &'static str,
     pub name: &'static str,
+    #[allow(dead_code)] // used for canonical ordering in later phases
     pub order: u8,
 }
 

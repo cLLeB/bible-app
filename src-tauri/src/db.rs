@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS song_slides (
 CREATE INDEX IF NOT EXISTS idx_slides_song ON song_slides (song_id, order_index);
 "#;
 
+#[cfg_attr(not(test), allow(dead_code))] // used by unit tests
 pub fn open_in_memory() -> rusqlite::Result<Db> {
     Ok(Db { conn: Connection::open_in_memory()? })
 }
