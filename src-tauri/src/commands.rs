@@ -101,6 +101,11 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
         }
     }
     win.set_fullscreen(true).map_err(|e| e.to_string())?;
+
+    // Dev diagnostics: open devtools so console/network errors are visible.
+    #[cfg(debug_assertions)]
+    win.open_devtools();
+
     Ok(())
 }
 
