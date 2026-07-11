@@ -8,6 +8,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 pub struct AppState {
     pub db: Mutex<Db>,
     pub translation: String, // active translation code, e.g. "WEB"
+    pub current: Mutex<Option<VersePayload>>, // what the projection should show
 }
 
 fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -39,6 +40,13 @@ pub fn lookup_reference(
     Ok(build_payload(rec))
 }
 
+/// Called by the projection window on mount to get the current state,
+/// avoiding the race where the window opens after an emit has fired.
+#[tauri::command]
+pub fn get_projection(state: tauri::State<'_, AppState>) -> Option<VersePayload> {
+    state.current.lock().ok().and_then(|c| c.clone())
+}
+
 fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     if app.get_webview_window("projection").is_some() {
         return Ok(());
@@ -61,15 +69,30 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn set_current(state: &tauri::State<'_, AppState>, value: Option<VersePayload>) {
+    if let Ok(mut cur) = state.current.lock() {
+        *cur = value;
+    }
+}
+
 #[tauri::command]
-pub fn project_verse(app: tauri::AppHandle, payload: VersePayload) -> Result<(), String> {
+pub fn project_verse(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    payload: VersePayload,
+) -> Result<(), String> {
+    set_current(&state, Some(payload.clone()));
     ensure_projection_window(&app)?;
     app.emit_to("projection", "set-projection", Some(payload))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn blank_projection(app: tauri::AppHandle) -> Result<(), String> {
+pub fn blank_projection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    set_current(&state, None);
     ensure_projection_window(&app)?;
     app.emit_to("projection", "set-projection", Option::<VersePayload>::None)
         .map_err(|e| e.to_string())

@@ -16,3 +16,6 @@ export const projectVerse = (payload: VersePayload): Promise<void> =>
   invoke<void>("project_verse", { payload });
 
 export const blankProjection = (): Promise<void> => invoke<void>("blank_projection");
+
+export const getProjection = (): Promise<VersePayload | null> =>
+  invoke<VersePayload | null>("get_projection");

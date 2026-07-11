@@ -37,11 +37,16 @@ pub fn run() {
                 db.seed_from_json(&json).expect("seed");
             }
 
-            app.manage(AppState { db: Mutex::new(db), translation: "WEB".into() });
+            app.manage(AppState {
+                db: Mutex::new(db),
+                translation: "WEB".into(),
+                current: Mutex::new(None),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::lookup_reference,
+            commands::get_projection,
             commands::project_verse,
             commands::blank_projection,
         ])
