@@ -36,6 +36,11 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
     let wav_path = base.with_extension("wav");
     write_wav_16k_mono(&wav_path, samples16k)?;
 
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .to_string();
+
     let out = Command::new(binary)
         .args([
             "-m",
@@ -44,6 +49,8 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
             wav_path.to_str().ok_or("bad wav path")?,
             "-l",
             "en",
+            "-t",
+            &threads,
             "-nt",
             "-otxt",
             "-of",

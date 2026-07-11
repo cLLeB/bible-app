@@ -1,5 +1,6 @@
 use crate::commands::{build_payload, AppState};
 use crate::events::VersePayload;
+use crate::reference::ParsedRef;
 use crate::{detect, stt};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
@@ -9,9 +10,12 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_RATE: u32 = 16_000;
-const SILENCE_RMS: f32 = 0.012; // below this = silence
-const SILENCE_FLUSH_MS: f32 = 800.0; // pause that ends an utterance
-const MIN_UTTER_SAMPLES: usize = (TARGET_RATE as usize) / 2; // ignore < 0.5s blips
+const SILENCE_RMS: f32 = 0.010; // below this = silence
+const SILENCE_FLUSH_MS: f32 = 1500.0; // real sentence pause ends an utterance
+const MAX_UTTER_MS: f32 = 12_000.0; // force a flush on long speech
+const MIN_SPEECH_MS: f32 = 600.0; // discard clips with too little actual speech
+
+type RefKey = (String, u16, Option<u16>);
 
 fn rms(frame: &[f32]) -> f32 {
     if frame.is_empty() {
@@ -19,6 +23,10 @@ fn rms(frame: &[f32]) -> f32 {
     }
     let sum: f32 = frame.iter().map(|s| s * s).sum();
     (sum / frame.len() as f32).sqrt()
+}
+
+fn ms_of(samples: usize) -> f32 {
+    samples as f32 / TARGET_RATE as f32 * 1000.0
 }
 
 fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
@@ -44,12 +52,31 @@ fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
     out
 }
 
-fn process_utterance(app: &AppHandle, model: &Path, binary: &Path, audio: Vec<f32>) {
-    if audio.len() < MIN_UTTER_SAMPLES {
-        return;
-    }
+/// Collapse whisper output to a single clean line, dropping bracketed markers
+/// like [BLANK_AUDIO] and (music).
+fn clean_transcript(raw: &str) -> String {
+    let joined = raw
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .filter(|l| !(l.starts_with('[') && l.ends_with(']')))
+        .filter(|l| !(l.starts_with('(') && l.ends_with(')')))
+        .collect::<Vec<_>>()
+        .join(" ");
+    joined.replace("[BLANK_AUDIO]", "").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Transcribe one utterance, run detection, and emit transcript + new
+/// candidates. `last` dedupes a reference repeated across adjacent utterances.
+fn handle_utterance(
+    app: &AppHandle,
+    model: &Path,
+    binary: &Path,
+    audio: Vec<f32>,
+    last: &mut Option<RefKey>,
+) {
     let text = match stt::transcribe(&audio, model, binary) {
-        Ok(t) => t,
+        Ok(t) => clean_transcript(&t),
         Err(e) => {
             let _ = app.emit("listen-error", e);
             return;
@@ -70,10 +97,18 @@ fn process_utterance(app: &AppHandle, model: &Path, binary: &Path, audio: Vec<f3
             Ok(d) => d,
             Err(_) => return,
         };
-        refs.iter()
-            .filter_map(|r| db.find_verse(&state.translation, r).ok().flatten())
-            .map(build_payload)
-            .collect()
+        let mut out = Vec::new();
+        for r in refs {
+            let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
+            if last.as_ref() == Some(&key) {
+                continue; // skip immediate repeat
+            }
+            if let Ok(Some(rec)) = db.find_verse(&state.translation, &ParsedRef { ..r }) {
+                out.push(build_payload(rec));
+                *last = Some(key);
+            }
+        }
+        out
     };
     for p in payloads {
         let _ = app.emit("verse-candidate", p);
@@ -124,30 +159,43 @@ fn run_inner(
     let _ = app.emit("listen-started", ());
 
     let mut utter: Vec<f32> = Vec::new();
+    let mut speech_ms = 0f32;
     let mut silence_ms = 0f32;
+    let mut last_ref: Option<RefKey> = None;
+
+    let mut flush = |utter: &mut Vec<f32>, speech_ms: &mut f32, silence_ms: &mut f32| {
+        let audio = std::mem::take(utter);
+        let had_speech = *speech_ms;
+        *speech_ms = 0.0;
+        *silence_ms = 0.0;
+        if had_speech >= MIN_SPEECH_MS {
+            handle_utterance(app, model, binary, audio, &mut last_ref);
+        }
+    };
 
     while flag.load(Ordering::SeqCst) {
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
-                let dur_ms = frame.len() as f32 / TARGET_RATE as f32 * 1000.0;
+                let dur = ms_of(frame.len());
                 if rms(&frame) > SILENCE_RMS {
                     utter.extend_from_slice(&frame);
+                    speech_ms += dur;
                     silence_ms = 0.0;
                 } else if !utter.is_empty() {
                     utter.extend_from_slice(&frame);
-                    silence_ms += dur_ms;
+                    silence_ms += dur;
                 }
-                if !utter.is_empty() && silence_ms >= SILENCE_FLUSH_MS {
-                    process_utterance(app, model, binary, std::mem::take(&mut utter));
-                    silence_ms = 0.0;
+                let ended = !utter.is_empty() && silence_ms >= SILENCE_FLUSH_MS;
+                let too_long = ms_of(utter.len()) >= MAX_UTTER_MS;
+                if ended || too_long {
+                    flush(&mut utter, &mut speech_ms, &mut silence_ms);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !utter.is_empty() {
                     silence_ms += 150.0;
                     if silence_ms >= SILENCE_FLUSH_MS {
-                        process_utterance(app, model, binary, std::mem::take(&mut utter));
-                        silence_ms = 0.0;
+                        flush(&mut utter, &mut speech_ms, &mut silence_ms);
                     }
                 }
             }
