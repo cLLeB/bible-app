@@ -1,6 +1,6 @@
 use crate::books::book_by_osis;
-use crate::db::Db;
-use crate::events::VersePayload;
+use crate::db::{Db, SongSummary};
+use crate::events::{ProjectionState, VersePayload};
 use crate::reference::parse_reference;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -8,7 +8,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 pub struct AppState {
     pub db: Mutex<Db>,
     pub translation: String, // active translation code, e.g. "WEB"
-    pub current: Mutex<Option<VersePayload>>, // what the projection should show
+    pub current: Mutex<ProjectionState>, // what the projection should show
 }
 
 fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -40,11 +40,46 @@ pub fn lookup_reference(
     Ok(build_payload(rec))
 }
 
+// ---- Songs ----
+
+#[tauri::command]
+pub fn add_song(
+    title: String,
+    author: Option<String>,
+    lyrics: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.add_song(&title, author.as_deref(), &lyrics)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_songs(state: tauri::State<'_, AppState>) -> Result<Vec<SongSummary>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.list_songs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_song_slides(
+    song_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::db::SlideRecord>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_song_slides(song_id).map_err(|e| e.to_string())
+}
+
+// ---- Projection ----
+
 /// Called by the projection window on mount to get the current state,
 /// avoiding the race where the window opens after an emit has fired.
 #[tauri::command]
-pub fn get_projection(state: tauri::State<'_, AppState>) -> Option<VersePayload> {
-    state.current.lock().ok().and_then(|c| c.clone())
+pub fn get_projection(state: tauri::State<'_, AppState>) -> ProjectionState {
+    state
+        .current
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or(ProjectionState::Blank)
 }
 
 fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
@@ -69,10 +104,17 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn set_current(state: &tauri::State<'_, AppState>, value: Option<VersePayload>) {
+fn project(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, AppState>,
+    next: ProjectionState,
+) -> Result<(), String> {
     if let Ok(mut cur) = state.current.lock() {
-        *cur = value;
+        *cur = next.clone();
     }
+    ensure_projection_window(app)?;
+    app.emit_to("projection", "set-projection", next)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -81,10 +123,31 @@ pub fn project_verse(
     state: tauri::State<'_, AppState>,
     payload: VersePayload,
 ) -> Result<(), String> {
-    set_current(&state, Some(payload.clone()));
-    ensure_projection_window(&app)?;
-    app.emit_to("projection", "set-projection", Some(payload))
-        .map_err(|e| e.to_string())
+    let caption = format!("{} · {}", payload.reference, payload.translation);
+    project(&app, &state, ProjectionState::Verse { text: payload.text, caption })
+}
+
+#[tauri::command]
+pub fn project_slide(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    song_id: i64,
+    index: usize,
+) -> Result<(), String> {
+    let (text, caption) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let slides = db.get_song_slides(song_id).map_err(|e| e.to_string())?;
+        let slide = slides.get(index).ok_or_else(|| "slide index out of range".to_string())?;
+        let title = db
+            .get_song_title(song_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "Song".to_string());
+        (
+            slide.text.clone(),
+            format!("{} ({}/{})", title, index + 1, slides.len()),
+        )
+    };
+    project(&app, &state, ProjectionState::Song { text, caption })
 }
 
 #[tauri::command]
@@ -92,8 +155,5 @@ pub fn blank_projection(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    set_current(&state, None);
-    ensure_projection_window(&app)?;
-    app.emit_to("projection", "set-projection", Option::<VersePayload>::None)
-        .map_err(|e| e.to_string())
+    project(&app, &state, ProjectionState::Blank)
 }

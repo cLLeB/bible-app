@@ -11,9 +11,29 @@ pub struct VersePayload {
     pub translation: String,
 }
 
+/// What the projection window should currently display. Unified across
+/// content types (spec §5.1 ProjectionState machine, Phase 1 subset).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ProjectionState {
+    Blank,
+    Verse { text: String, caption: String },
+    Song { text: String, caption: String },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projection_state_tags_kind() {
+        let s = ProjectionState::Verse { text: "t".into(), caption: "c".into() };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"kind\":\"verse\""));
+        let blank = serde_json::to_string(&ProjectionState::Blank).unwrap();
+        assert_eq!(blank, "{\"kind\":\"blank\"}");
+    }
+
     #[test]
     fn serializes_camel_case() {
         let p = VersePayload {

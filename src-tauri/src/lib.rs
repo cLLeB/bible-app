@@ -3,8 +3,10 @@ mod commands;
 mod db;
 mod events;
 mod reference;
+mod slides;
 
 use commands::AppState;
+use events::ProjectionState;
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -40,7 +42,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(db),
                 translation: "WEB".into(),
-                current: Mutex::new(None),
+                current: Mutex::new(ProjectionState::Blank),
             });
             Ok(())
         })
@@ -48,7 +50,11 @@ pub fn run() {
             commands::lookup_reference,
             commands::get_projection,
             commands::project_verse,
+            commands::project_slide,
             commands::blank_projection,
+            commands::add_song,
+            commands::list_songs,
+            commands::get_song_slides,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

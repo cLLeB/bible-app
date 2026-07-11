@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS verses (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_verse_lookup
     ON verses (translation_id, book_osis, chapter, verse);
+CREATE TABLE IF NOT EXISTS songs (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT,
+    lyrics TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS song_slides (
+    id INTEGER PRIMARY KEY,
+    song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    order_index INTEGER NOT NULL,
+    text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_slides_song ON song_slides (song_id, order_index);
 "#;
 
 pub fn open_in_memory() -> rusqlite::Result<Db> {
@@ -65,6 +78,21 @@ pub struct VerseRecord {
     pub verse: u16,
     pub text: String,
     pub translation: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SongSummary {
+    pub id: i64,
+    pub title: String,
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlideRecord {
+    pub order_index: u16,
+    pub text: String,
 }
 
 impl Db {
@@ -124,6 +152,57 @@ impl Db {
             Ok(None)
         }
     }
+
+    /// Insert a song and its auto-split slides. Returns the new song id.
+    pub fn add_song(&self, title: &str, author: Option<&str>, lyrics: &str) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO songs (title, author, lyrics) VALUES (?1, ?2, ?3)",
+            (title, author, lyrics),
+        )?;
+        let song_id = self.conn.last_insert_rowid();
+
+        let slides = crate::slides::split_lyrics(lyrics);
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO song_slides (song_id, order_index, text) VALUES (?1, ?2, ?3)",
+            )?;
+            for (i, text) in slides.iter().enumerate() {
+                stmt.execute((song_id, i as i64, text))?;
+            }
+        }
+        tx.commit()?;
+        Ok(song_id)
+    }
+
+    pub fn list_songs(&self) -> rusqlite::Result<Vec<SongSummary>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, title, author FROM songs ORDER BY title COLLATE NOCASE")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SongSummary { id: r.get(0)?, title: r.get(1)?, author: r.get(2)? })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_song_title(&self, song_id: i64) -> rusqlite::Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT title FROM songs WHERE id = ?1")?;
+        let mut rows = stmt.query([song_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_song_slides(&self, song_id: i64) -> rusqlite::Result<Vec<SlideRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT order_index, text FROM song_slides WHERE song_id = ?1 ORDER BY order_index",
+        )?;
+        let rows = stmt.query_map([song_id], |r| {
+            Ok(SlideRecord { order_index: r.get(0)?, text: r.get(1)? })
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -174,5 +253,22 @@ mod tests {
 
         let missing = db.find_verse("WEB", &ParsedRef { book_osis: "John".into(), chapter: 99, verse: Some(1) }).unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn add_song_splits_and_lists() {
+        let db = open_in_memory().unwrap();
+        db.migrate().unwrap();
+        let id = db.add_song("Amazing Grace", Some("John Newton"), "Verse 1 line\n\nVerse 2 line").unwrap();
+
+        let slides = db.get_song_slides(id).unwrap();
+        assert_eq!(slides.len(), 2);
+        assert_eq!(slides[0].order_index, 0);
+        assert_eq!(slides[1].text, "Verse 2 line");
+
+        let songs = db.list_songs().unwrap();
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].title, "Amazing Grace");
+        assert_eq!(db.get_song_title(id).unwrap().as_deref(), Some("Amazing Grace"));
     }
 }

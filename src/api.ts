@@ -9,6 +9,22 @@ export interface VersePayload {
   translation: string;
 }
 
+export type ProjectionState =
+  | { kind: "blank" }
+  | { kind: "verse"; text: string; caption: string }
+  | { kind: "song"; text: string; caption: string };
+
+export interface SongSummary {
+  id: number;
+  title: string;
+  author: string | null;
+}
+
+export interface Slide {
+  orderIndex: number;
+  text: string;
+}
+
 export const lookupReference = (query: string): Promise<VersePayload> =>
   invoke<VersePayload>("lookup_reference", { query });
 
@@ -17,5 +33,19 @@ export const projectVerse = (payload: VersePayload): Promise<void> =>
 
 export const blankProjection = (): Promise<void> => invoke<void>("blank_projection");
 
-export const getProjection = (): Promise<VersePayload | null> =>
-  invoke<VersePayload | null>("get_projection");
+export const getProjection = (): Promise<ProjectionState> =>
+  invoke<ProjectionState>("get_projection");
+
+export const addSong = (
+  title: string,
+  author: string | null,
+  lyrics: string,
+): Promise<number> => invoke<number>("add_song", { title, author, lyrics });
+
+export const listSongs = (): Promise<SongSummary[]> => invoke<SongSummary[]>("list_songs");
+
+export const getSongSlides = (songId: number): Promise<Slide[]> =>
+  invoke<Slide[]>("get_song_slides", { songId });
+
+export const projectSlide = (songId: number, index: number): Promise<void> =>
+  invoke<void>("project_slide", { songId, index });
