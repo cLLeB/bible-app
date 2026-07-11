@@ -44,6 +44,18 @@ pub fn run() {
                 translation: "WEB".into(),
                 current: Mutex::new(ProjectionState::Blank),
             });
+
+            // Closing the projection window should hide it, not destroy it,
+            // so `Project` can always reveal it again.
+            if let Some(proj) = app.get_webview_window("projection") {
+                let hide_target = proj.clone();
+                proj.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = hide_target.hide();
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
