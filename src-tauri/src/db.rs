@@ -96,6 +96,15 @@ pub struct SlideRecord {
     pub text: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SongDetail {
+    pub id: i64,
+    pub title: String,
+    pub author: Option<String>,
+    pub lyrics: String,
+}
+
 impl Db {
     pub fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(MIGRATION)
@@ -154,17 +163,12 @@ impl Db {
         }
     }
 
-    /// Insert a song and its auto-split slides. Returns the new song id.
-    pub fn add_song(&self, title: &str, author: Option<&str>, lyrics: &str) -> rusqlite::Result<i64> {
-        self.conn.execute(
-            "INSERT INTO songs (title, author, lyrics) VALUES (?1, ?2, ?3)",
-            (title, author, lyrics),
-        )?;
-        let song_id = self.conn.last_insert_rowid();
-
+    /// (Re)build the slide rows for a song from its lyrics.
+    fn rebuild_slides(&self, song_id: i64, lyrics: &str) -> rusqlite::Result<()> {
         let slides = crate::slides::split_lyrics(lyrics);
         let tx = self.conn.unchecked_transaction()?;
         {
+            tx.execute("DELETE FROM song_slides WHERE song_id = ?1", [song_id])?;
             let mut stmt = tx.prepare(
                 "INSERT INTO song_slides (song_id, order_index, text) VALUES (?1, ?2, ?3)",
             )?;
@@ -172,8 +176,55 @@ impl Db {
                 stmt.execute((song_id, i as i64, text))?;
             }
         }
-        tx.commit()?;
+        tx.commit()
+    }
+
+    /// Insert a song and its auto-split slides. Returns the new song id.
+    pub fn add_song(&self, title: &str, author: Option<&str>, lyrics: &str) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO songs (title, author, lyrics) VALUES (?1, ?2, ?3)",
+            (title, author, lyrics),
+        )?;
+        let song_id = self.conn.last_insert_rowid();
+        self.rebuild_slides(song_id, lyrics)?;
         Ok(song_id)
+    }
+
+    /// Update a song's fields and re-split its slides.
+    pub fn update_song(
+        &self,
+        id: i64,
+        title: &str,
+        author: Option<&str>,
+        lyrics: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE songs SET title = ?2, author = ?3, lyrics = ?4 WHERE id = ?1",
+            (id, title, author, lyrics),
+        )?;
+        self.rebuild_slides(id, lyrics)
+    }
+
+    pub fn delete_song(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM song_slides WHERE song_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM songs WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn get_song(&self, id: i64) -> rusqlite::Result<Option<SongDetail>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, title, author, lyrics FROM songs WHERE id = ?1")?;
+        let mut rows = stmt.query([id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(SongDetail {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                author: row.get(2)?,
+                lyrics: row.get(3)?,
+            })),
+            None => Ok(None),
+        }
     }
 
     pub fn list_songs(&self) -> rusqlite::Result<Vec<SongSummary>> {
@@ -271,5 +322,23 @@ mod tests {
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].title, "Amazing Grace");
         assert_eq!(db.get_song_title(id).unwrap().as_deref(), Some("Amazing Grace"));
+    }
+
+    #[test]
+    fn update_and_delete_song() {
+        let db = open_in_memory().unwrap();
+        db.migrate().unwrap();
+        let id = db.add_song("Old", None, "one block").unwrap();
+        assert_eq!(db.get_song_slides(id).unwrap().len(), 1);
+
+        db.update_song(id, "New Title", Some("Writer"), "A\n\nB\n\nC").unwrap();
+        let detail = db.get_song(id).unwrap().unwrap();
+        assert_eq!(detail.title, "New Title");
+        assert_eq!(detail.author.as_deref(), Some("Writer"));
+        assert_eq!(db.get_song_slides(id).unwrap().len(), 3);
+
+        db.delete_song(id).unwrap();
+        assert!(db.get_song(id).unwrap().is_none());
+        assert_eq!(db.get_song_slides(id).unwrap().len(), 0);
     }
 }

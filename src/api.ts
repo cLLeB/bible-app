@@ -49,3 +49,23 @@ export const getSongSlides = (songId: number): Promise<Slide[]> =>
 
 export const projectSlide = (songId: number, index: number): Promise<void> =>
   invoke<void>("project_slide", { songId, index });
+
+export interface SongDetail {
+  id: number;
+  title: string;
+  author: string | null;
+  lyrics: string;
+}
+
+export const getSong = (songId: number): Promise<SongDetail | null> =>
+  invoke<SongDetail | null>("get_song", { songId });
+
+export const updateSong = (
+  songId: number,
+  title: string,
+  author: string | null,
+  lyrics: string,
+): Promise<void> => invoke<void>("update_song", { songId, title, author, lyrics });
+
+export const deleteSong = (songId: number): Promise<void> =>
+  invoke<void>("delete_song", { songId });

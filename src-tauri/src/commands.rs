@@ -69,6 +69,34 @@ pub fn get_song_slides(
     db.get_song_slides(song_id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn get_song(
+    song_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<crate::db::SongDetail>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_song(song_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_song(
+    song_id: i64,
+    title: String,
+    author: Option<String>,
+    lyrics: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.update_song(song_id, &title, author.as_deref(), &lyrics)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_song(song_id: i64, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.delete_song(song_id).map_err(|e| e.to_string())
+}
+
 // ---- Projection ----
 
 /// Called by the projection window on mount to get the current state,
