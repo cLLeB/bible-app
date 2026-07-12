@@ -103,37 +103,73 @@ export function SongsPanel() {
             className="w-full rounded border px-2 py-1 text-sm"
           />
           <ul className="space-y-1">
-            {shown.map((s) => (
-            <li key={s.id} className="flex items-center gap-1">
-              <button
-                onClick={() => setSelected(s)}
-                className={`flex-1 rounded px-2 py-1 text-left ${
-                  selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
-                }`}
-              >
-                {s.title}
-                {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
-              </button>
-              <button
-                onClick={() => addSongCue(s.id, s.title)}
-                className="rounded border px-2 py-1 text-xs"
-                title="Add to service order"
-              >
-                ＋
-              </button>
-              <button onClick={() => onEdit(s)} className="rounded border px-2 py-1 text-xs">
-                Edit
-              </button>
-              <button
-                onClick={() => onDelete(s)}
-                className="rounded border px-2 py-1 text-xs text-red-600"
-              >
-                Del
-              </button>
-            </li>
-          ))}
-            {shown.length === 0 && <li className="text-sm text-gray-500">No songs.</li>}
+            {shown
+              .filter((s) => !s.builtIn)
+              .map((s) => (
+                <li key={s.id} className="flex items-center gap-1">
+                  <button
+                    onClick={() => setSelected(s)}
+                    className={`flex-1 rounded px-2 py-1 text-left ${
+                      selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
+                    }`}
+                  >
+                    {s.title}
+                    {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
+                  </button>
+                  <button
+                    onClick={() => addSongCue(s.id, s.title)}
+                    className="rounded border px-2 py-1 text-xs"
+                    title="Add to service order"
+                  >
+                    ＋
+                  </button>
+                  <button onClick={() => onEdit(s)} className="rounded border px-2 py-1 text-xs">
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => onDelete(s)}
+                    className="rounded border px-2 py-1 text-xs text-red-600"
+                  >
+                    Del
+                  </button>
+                </li>
+              ))}
+            {shown.filter((s) => !s.builtIn).length === 0 && (
+              <li className="text-sm text-gray-500">No songs of yours yet.</li>
+            )}
           </ul>
+
+          {shown.some((s) => s.builtIn) && (
+            <details className="rounded border p-2 text-sm">
+              <summary className="cursor-pointer text-gray-600">
+                Bundled hymns ({shown.filter((s) => s.builtIn).length}) — read-only
+              </summary>
+              <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto pr-1">
+                {shown
+                  .filter((s) => s.builtIn)
+                  .map((s) => (
+                    <li key={s.id} className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSelected(s)}
+                        className={`flex-1 rounded px-2 py-1 text-left ${
+                          selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
+                        }`}
+                      >
+                        {s.title}
+                        {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
+                      </button>
+                      <button
+                        onClick={() => addSongCue(s.id, s.title)}
+                        className="rounded border px-2 py-1 text-xs"
+                        title="Add to service order"
+                      >
+                        ＋
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </details>
+          )}
         </div>
 
         <div>{selected && <SongLive song={selected} />}</div>

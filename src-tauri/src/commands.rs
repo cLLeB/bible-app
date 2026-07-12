@@ -394,6 +394,9 @@ pub fn update_song(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    if db.is_built_in(song_id).map_err(|e| e.to_string())? {
+        return Err("Bundled hymns can't be edited".into());
+    }
     db.update_song(song_id, &title, author.as_deref(), &lyrics)
         .map_err(|e| e.to_string())
 }
@@ -401,6 +404,9 @@ pub fn update_song(
 #[tauri::command]
 pub fn delete_song(song_id: i64, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    if db.is_built_in(song_id).map_err(|e| e.to_string())? {
+        return Err("Bundled hymns can't be deleted".into());
+    }
     db.delete_song(song_id).map_err(|e| e.to_string())
 }
 

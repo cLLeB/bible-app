@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS songs (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     author TEXT,
-    lyrics TEXT NOT NULL
+    lyrics TEXT NOT NULL,
+    built_in INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS song_slides (
     id INTEGER PRIMARY KEY,
@@ -93,6 +94,7 @@ pub struct SongSummary {
     pub id: i64,
     pub title: String,
     pub author: Option<String>,
+    pub built_in: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -120,7 +122,12 @@ struct DefaultSong {
 
 impl Db {
     pub fn migrate(&self) -> rusqlite::Result<()> {
-        self.conn.execute_batch(MIGRATION)
+        self.conn.execute_batch(MIGRATION)?;
+        // Add built_in to pre-existing songs tables (ignore if already present).
+        let _ = self
+            .conn
+            .execute("ALTER TABLE songs ADD COLUMN built_in INTEGER NOT NULL DEFAULT 0", []);
+        Ok(())
     }
 
     pub fn seed_from_json(&self, json: &str) -> rusqlite::Result<usize> {
@@ -333,15 +340,33 @@ impl Db {
         tx.commit()
     }
 
-    /// Insert a song and its auto-split slides. Returns the new song id.
-    pub fn add_song(&self, title: &str, author: Option<&str>, lyrics: &str) -> rusqlite::Result<i64> {
+    fn insert_song(
+        &self,
+        title: &str,
+        author: Option<&str>,
+        lyrics: &str,
+        built_in: bool,
+    ) -> rusqlite::Result<i64> {
         self.conn.execute(
-            "INSERT INTO songs (title, author, lyrics) VALUES (?1, ?2, ?3)",
-            (title, author, lyrics),
+            "INSERT INTO songs (title, author, lyrics, built_in) VALUES (?1, ?2, ?3, ?4)",
+            (title, author, lyrics, built_in as i64),
         )?;
         let song_id = self.conn.last_insert_rowid();
         self.rebuild_slides(song_id, lyrics)?;
         Ok(song_id)
+    }
+
+    /// Insert a user song and its auto-split slides. Returns the new song id.
+    pub fn add_song(&self, title: &str, author: Option<&str>, lyrics: &str) -> rusqlite::Result<i64> {
+        self.insert_song(title, author, lyrics, false)
+    }
+
+    pub fn is_built_in(&self, id: i64) -> rusqlite::Result<bool> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT built_in FROM songs WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or(0);
+        Ok(n != 0)
     }
 
     /// Update a song's fields and re-split its slides.
@@ -392,11 +417,16 @@ impl Db {
     }
 
     pub fn list_songs(&self) -> rusqlite::Result<Vec<SongSummary>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, title, author FROM songs ORDER BY title COLLATE NOCASE")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, author, built_in FROM songs ORDER BY title COLLATE NOCASE",
+        )?;
         let rows = stmt.query_map([], |r| {
-            Ok(SongSummary { id: r.get(0)?, title: r.get(1)?, author: r.get(2)? })
+            Ok(SongSummary {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                author: r.get(2)?,
+                built_in: r.get::<_, i64>(3)? != 0,
+            })
         })?;
         rows.collect()
     }
@@ -452,7 +482,7 @@ impl Db {
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         for s in &songs {
             if !self.song_exists(&s.title)? {
-                self.add_song(&s.title, s.author.as_deref(), &s.lyrics)?;
+                self.insert_song(&s.title, s.author.as_deref(), &s.lyrics, true)?;
             }
         }
         self.conn.execute("DELETE FROM settings WHERE key = 'bundled_songs_v'", [])?;

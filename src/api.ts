@@ -53,6 +53,7 @@ export interface SongSummary {
   id: number;
   title: string;
   author: string | null;
+  builtIn: boolean;
 }
 
 export interface Slide {
