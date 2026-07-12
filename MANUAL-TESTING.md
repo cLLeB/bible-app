@@ -20,7 +20,7 @@ Tick things off and jot notes; when you're back, give me the rundown.
 - A **Translation** dropdown (next to "Scripture") lets you switch between the 6 versions.
 - **Speech models:** you can pick **Tiny** (fastest, low-end), **Base** (normal), or **Small**
   (most accurate, needs a stronger PC).
-- **Songs:** 5 classic hymns come pre-loaded the first time.
+- **Songs:** ~32 classic public-domain hymns come pre-loaded (Amazing Grace, It Is Well, Blessed Assurance, and many more).
 - If something looks frozen, that's usually the speech engine thinking for a second or two.
 
 ## 0.5. THE BIG NEW THING — Presentation-mode navigation (test this hard)
@@ -68,10 +68,9 @@ Speak clearly, then pause for about a second and a half. Try:
 - **Quoting without a reference:** Say "For God so loved the world that he gave his only
   son." → It should suggest **John 3:16** with a `quote` badge. (This only works well when
   you quote close to the actual wording, and only for verses that are loaded.)
-- **Model dropdown:** switch between **Base (normal)** and **Tiny (low-end PCs)** and feel
+- **Model dropdown:** switch between **Tiny**, **Base**, and **Small** and feel
   the difference in speed and accuracy. Tiny is faster but less accurate.
-- **Auto-project ≥90%:** tick this box, then speak a clear reference. High-confidence hits
-  should project **automatically** without you clicking.
+- **Auto-project ≥82%:** tick this box (threshold adjustable). Solid detections project **automatically**. On the Small model this should fire reliably.
 
 **What you should NOT see / limits:**
 - It won't be perfect on the first try every single time, especially in a noisy room or with
@@ -87,12 +86,11 @@ Speak clearly, then pause for about a second and a half. Try:
 - Type `John 3:16` in the Scripture box → **Look up** → the verse shows in a card →
   **Project** puts it on screen, **Blank** clears the screen.
 - **＋ Service** adds it to your run order (see section 4).
-- Try a **range**: `John 3:16-18` (only works fully once the whole Bible is loaded).
+- Try a **range**: `John 3:16-18`, and a spoken/typed translation: `John 3:16 in ASV`.
 - **Search box** ("Search scripture by word"): type a word like `shepherd` → matching verses
-  list; each can be projected or added to the service. (With only 3 verses loaded, results
-  are limited.)
+  list; each can be projected or added to the service.
 
-**Limits:** anything outside the 3 loaded verses says "not found" until you load the full Bible.
+**Limits:** essentially everything resolves now that the whole Bible is loaded.
 
 **Translation picker:** a **Translation** dropdown appears next to the "Scripture" heading **only
 if you have more than one translation loaded**. With just WEB it stays hidden (that's expected).
@@ -105,7 +103,7 @@ remembered.
 ## 3. Songs
 
 **What to do / see:**
-- You should already see **5 hymns** (Amazing Grace, etc.).
+- You should already see ~32 hymns (Amazing Grace, To God Be the Glory, etc.).
 - **Add a song:** type a title and paste lyrics. Leave a blank line between verses/choruses,
   or paste plain lyrics and click **Auto-format · every N lines** to split them for you.
   A **live preview** on the right shows exactly the slides you'll get.
