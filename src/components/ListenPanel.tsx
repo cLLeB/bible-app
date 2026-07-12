@@ -1,19 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { blankProjection, startListening, stopListening, type Candidate } from "../api";
+import {
+  blankProjection,
+  startListening,
+  stopListening,
+  type Candidate,
+  type SttModel,
+} from "../api";
 import { present } from "../present";
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
-  const [model, setModel] = useState<"base" | "tiny">(
-    () => (localStorage.getItem("stt-model") as "base" | "tiny") || "base",
+  const [model, setModel] = useState<SttModel>(
+    () => (localStorage.getItem("stt-model") as SttModel) || "base",
   );
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [autoProject, setAutoProject] = useState(() => localStorage.getItem("auto-project") === "1");
 
-  function changeModel(m: "base" | "tiny"): void {
+  function changeModel(m: SttModel): void {
     setModel(m);
     localStorage.setItem("stt-model", m);
   }
@@ -76,13 +82,14 @@ export function ListenPanel() {
         </button>
         <select
           value={model}
-          onChange={(e) => changeModel(e.target.value as "base" | "tiny")}
+          onChange={(e) => changeModel(e.target.value as SttModel)}
           disabled={listening}
           className="rounded border px-2 py-2 text-sm"
-          title="Base = normal accuracy; Tiny = faster on low-end PCs"
+          title="Tiny = fastest/low-end; Base = normal; Small = most accurate, needs a stronger PC"
         >
-          <option value="base">Base (normal)</option>
           <option value="tiny">Tiny (low-end PCs)</option>
+          <option value="base">Base (normal)</option>
+          <option value="small">Small (best, stronger PC)</option>
         </select>
         {listening && <span className="text-sm text-green-700">listening…</span>}
         <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at 90%+ confidence">
