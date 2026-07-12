@@ -131,7 +131,7 @@ export interface Candidate {
   source: string; // "explicit" | "fuzzy" | "context"
 }
 
-export type SttModel = "tiny" | "base" | "small";
+export type SttModel = "tiny" | "base" | "small" | "medium";
 
 export const startListening = (model: SttModel): Promise<void> =>
   invoke<void>("start_listening", { model });

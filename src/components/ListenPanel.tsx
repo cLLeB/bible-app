@@ -85,11 +85,12 @@ export function ListenPanel() {
           onChange={(e) => changeModel(e.target.value as SttModel)}
           disabled={listening}
           className="rounded border px-2 py-2 text-sm"
-          title="Tiny = fastest/low-end; Base = normal; Small = most accurate, needs a stronger PC"
+          title="Tiny = fastest/low-end · Base = normal · Small = accurate, stronger PC · Medium = most accurate, GPU (CUDA) recommended"
         >
           <option value="tiny">Tiny (low-end PCs)</option>
           <option value="base">Base (normal)</option>
-          <option value="small">Small (best, stronger PC)</option>
+          <option value="small">Small (accurate, stronger PC)</option>
+          <option value="medium">Medium (best · GPU recommended)</option>
         </select>
         {listening && <span className="text-sm text-green-700">listening…</span>}
         <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at 90%+ confidence">
