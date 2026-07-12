@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  appFlavor,
   blankProjection,
   recordChoice,
   startListening,
@@ -11,11 +12,19 @@ import {
 } from "../api";
 import { present } from "../present";
 
+const MODEL_LABELS: Record<SttModel, string> = {
+  tiny: "Tiny (low-end PCs)",
+  base: "Base (normal)",
+  small: "Small (accurate, stronger PC)",
+  medium: "Medium (best · GPU recommended)",
+};
+
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
   const [model, setModel] = useState<SttModel>(
     () => (localStorage.getItem("stt-model") as SttModel) || "base",
   );
+  const [availableModels, setAvailableModels] = useState<SttModel[]>(["tiny", "base", "small", "medium"]);
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +49,14 @@ export function ListenPanel() {
     setThreshold(v / 100);
     localStorage.setItem("auto-threshold", String(v));
   }
+
+  // This build's flavor decides which whisper models are available.
+  useEffect(() => {
+    void appFlavor().then((f) => {
+      setAvailableModels(f.models);
+      setModel((m) => (f.models.includes(m) ? m : f.defaultModel));
+    });
+  }, []);
 
   // Refs so the once-registered event listener sees current values.
   const autoRef = useRef(false);
@@ -106,33 +123,18 @@ export function ListenPanel() {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-3">
-        <h2 className="text-xl font-semibold">Live listening</h2>
-        <button
-          onClick={toggle}
-          className={`rounded px-4 py-2 text-white ${listening ? "bg-red-600" : "bg-green-600"}`}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 className="panel-title">Live listening</h2>
+        {listening && (
+          <span className="chip" style={{ color: "var(--live)" }}>
+            ● listening…
+          </span>
+        )}
+        <label
+          className="ml-auto flex items-center gap-1.5 text-sm text-[var(--muted)]"
+          title="Automatically project detections at or above this confidence"
         >
-          {listening ? "■ Stop" : "● Start listening"}
-        </button>
-        <select
-          value={model}
-          onChange={(e) => changeModel(e.target.value as SttModel)}
-          disabled={listening}
-          className="rounded border px-2 py-2 text-sm"
-          title="Tiny = fastest/low-end · Base = normal · Small = accurate, stronger PC · Medium = most accurate, GPU (CUDA) recommended"
-        >
-          <option value="tiny">Tiny (low-end PCs)</option>
-          <option value="base">Base (normal)</option>
-          <option value="small">Small (accurate, stronger PC)</option>
-          <option value="medium">Medium (best · GPU recommended)</option>
-        </select>
-        {listening && <span className="text-sm text-green-700">listening…</span>}
-        <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at or above this confidence">
-          <input
-            type="checkbox"
-            checked={autoProject}
-            onChange={(e) => changeAuto(e.target.checked)}
-          />
+          <input type="checkbox" checked={autoProject} onChange={(e) => changeAuto(e.target.checked)} />
           Auto-project ≥
           <input
             type="number"
@@ -141,18 +143,42 @@ export function ListenPanel() {
             value={Math.round(threshold * 100)}
             onChange={(e) => changeThreshold(Number(e.target.value))}
             disabled={!autoProject}
-            className="w-14 rounded border px-1 py-0.5"
+            className="input w-16 px-2 text-center"
           />
           %
         </label>
       </div>
 
-      {error && <p className="rounded bg-red-50 p-2 text-red-700">{error}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={toggle}
+          className={`btn btn-lg ${listening ? "" : "btn-primary"}`}
+          style={listening ? { background: "var(--danger)", borderColor: "transparent", color: "#fff" } : undefined}
+        >
+          {listening ? "■ Stop listening" : "● Start listening"}
+        </button>
+        <select
+          value={model}
+          onChange={(e) => changeModel(e.target.value as SttModel)}
+          disabled={listening}
+          className="select"
+          style={{ width: "auto", minWidth: "12rem" }}
+          title="Tiny = fastest/low-end · Base = normal · Small = accurate, stronger PC · Medium = most accurate, GPU (CUDA) recommended"
+        >
+          {availableModels.map((m) => (
+            <option key={m} value={m}>
+              {MODEL_LABELS[m]}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <div className="mb-1 text-xs uppercase text-gray-500">Transcript</div>
-          <div className="min-h-24 space-y-1 rounded border p-2 text-sm">
+          <div className="panel-title mb-1.5">Transcript</div>
+          <div className="min-h-24 space-y-1 rounded-lg border p-2.5 text-sm" style={{ background: "var(--surface-2)" }}>
             {lines.length === 0 ? (
               <span className="text-gray-400">Speak a reference, e.g. “John chapter 3 verse 16”.</span>
             ) : (
@@ -166,9 +192,9 @@ export function ListenPanel() {
         </div>
 
         <div>
-          <div className="mb-1 flex items-center justify-between text-xs uppercase text-gray-500">
-            <span>Detected verses</span>
-            <button onClick={() => blankProjection()} className="rounded border px-2 py-0.5 normal-case">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="panel-title">Detected verses</span>
+            <button onClick={() => blankProjection()} className="btn btn-sm">
               Blank
             </button>
           </div>

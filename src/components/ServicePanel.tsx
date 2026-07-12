@@ -82,12 +82,12 @@ export function ServicePanel() {
 
   return (
     <section className="space-y-2">
-      <div className="flex items-center gap-3">
-        <h2 className="text-xl font-semibold">Service order</h2>
-        <span className="text-xs text-gray-500">arrow keys step through · songs advance slide by slide</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 className="panel-title">Service order</h2>
+        <span className="text-xs text-[var(--faint)]">arrow keys step · songs advance slide by slide</span>
         {cues.length > 0 && (
-          <button onClick={() => { clear(); setItem(-1); }} className="ml-auto text-sm text-red-600 underline">
-            clear
+          <button onClick={() => { clear(); setItem(-1); }} className="btn btn-sm btn-danger ml-auto">
+            Clear
           </button>
         )}
       </div>
@@ -122,9 +122,9 @@ export function ServicePanel() {
                   </span>
                 )}
               </button>
-              <button onClick={() => move(cue.id, -1)} className="rounded border px-2 text-xs">↑</button>
-              <button onClick={() => move(cue.id, 1)} className="rounded border px-2 text-xs">↓</button>
-              <button onClick={() => remove(cue.id)} className="rounded border px-2 text-xs text-red-600">✕</button>
+              <button onClick={() => move(cue.id, -1)} className="icon-btn" title="Move up">↑</button>
+              <button onClick={() => move(cue.id, 1)} className="icon-btn" title="Move down">↓</button>
+              <button onClick={() => remove(cue.id)} className="icon-btn" style={{ color: "var(--danger)" }} title="Remove">✕</button>
             </li>
           ))}
         </ol>

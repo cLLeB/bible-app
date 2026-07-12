@@ -38,9 +38,10 @@ export function LookupBar() {
           }
         }}
         placeholder="e.g. John 3:16  (Enter projects · Shift+Enter previews)"
-        className="flex-1 rounded border px-3 py-2 text-lg"
+        className="input flex-1"
+        style={{ height: "2.75rem", fontSize: "1.05rem" }}
       />
-      <button type="submit" className="rounded bg-green-600 px-4 py-2 text-white">
+      <button type="submit" className="btn btn-lg btn-primary">
         Project
       </button>
     </form>

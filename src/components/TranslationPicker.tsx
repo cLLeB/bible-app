@@ -22,8 +22,13 @@ export function TranslationPicker() {
       setActive(e.payload);
       localStorage.setItem("translation", e.payload);
     });
+    // A newly downloaded translation should appear in the picker immediately.
+    const installed = listen<string>("translation-installed", () => {
+      void listTranslations().then(setTranslations);
+    });
     return () => {
       sub.then((f) => f());
+      installed.then((f) => f());
     };
   }, []);
 
@@ -36,19 +41,18 @@ export function TranslationPicker() {
   if (translations.length <= 1) return null; // nothing to switch
 
   return (
-    <label className="flex items-center gap-2 text-sm">
-      Translation
-      <select
-        value={active}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded border px-2 py-1"
-      >
-        {translations.map((t) => (
-          <option key={t.code} value={t.code}>
-            {t.code} — {t.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <select
+      value={active}
+      onChange={(e) => onChange(e.target.value)}
+      className="select h-9 text-sm"
+      style={{ width: "auto", maxWidth: "16rem" }}
+      title="Active translation"
+    >
+      {translations.map((t) => (
+        <option key={t.code} value={t.code}>
+          {t.code} — {t.name}
+        </option>
+      ))}
+    </select>
   );
 }

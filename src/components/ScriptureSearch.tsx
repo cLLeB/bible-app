@@ -23,9 +23,9 @@ export function ScriptureSearch() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search scripture by word, e.g. shepherd"
-          className="flex-1 rounded border px-3 py-2"
+          className="input flex-1"
         />
-        <button type="submit" className="rounded border px-4 py-2">
+        <button type="submit" className="btn">
           Search
         </button>
       </form>
@@ -35,17 +35,14 @@ export function ScriptureSearch() {
       {results.length > 0 && (
         <div className="max-h-64 space-y-1 overflow-y-auto">
           {results.map((v, i) => (
-            <div key={`${v.reference}-${i}`} className="rounded border p-2">
+            <div key={`${v.reference}-${i}`} className="rounded-lg border p-2.5">
               <div className="mb-1 text-sm font-semibold">{v.reference}</div>
               <p className="mb-2 text-xs text-gray-600">{v.text}</p>
               <div className="flex gap-2">
-                <button
-                  onClick={() => present(v)}
-                  className="rounded bg-green-600 px-2 py-1 text-xs text-white"
-                >
+                <button onClick={() => present(v)} className="btn btn-sm btn-primary">
                   Project
                 </button>
-                <button onClick={() => addVerse(v)} className="rounded border px-2 py-1 text-xs">
+                <button onClick={() => addVerse(v)} className="btn btn-sm">
                   ＋ Service
                 </button>
               </div>

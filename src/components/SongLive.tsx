@@ -90,10 +90,10 @@ export function SongLive({ song }: SongLiveProps) {
         </span>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => projectAt(index <= 0 ? 0 : index - 1)} className="rounded border px-3 py-1">
+        <button onClick={() => projectAt(index <= 0 ? 0 : index - 1)} className="btn btn-sm">
           ◀ Prev
         </button>
-        <button onClick={() => projectAt(index < 0 ? 0 : index + 1)} className="rounded border px-3 py-1">
+        <button onClick={() => projectAt(index < 0 ? 0 : index + 1)} className="btn btn-sm">
           Next ▶
         </button>
         <button
@@ -101,7 +101,7 @@ export function SongLive({ song }: SongLiveProps) {
             setIndex(-1);
             void blankProjection();
           }}
-          className="rounded border px-3 py-1"
+          className="btn btn-sm"
         >
           Blank
         </button>

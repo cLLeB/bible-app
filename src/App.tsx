@@ -11,34 +11,55 @@ import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
 import { TranslationPicker } from "./components/TranslationPicker";
+import { TranslationManager } from "./components/TranslationManager";
 
 export default function App() {
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Bible — Operator Console</h1>
-        <ThemeToggle />
-      </div>
-      <LiveNow />
-      <ScripturePresenter />
-      <ListenPanel />
-      <hr />
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Scripture</h2>
-          <TranslationPicker />
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ background: "color-mix(in srgb, var(--bg) 85%, transparent)", borderColor: "var(--border)" }}>
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 lg:px-6">
+          <h1 className="text-lg font-bold tracking-tight">Bible <span className="text-[var(--muted)] font-medium">· Operator Console</span></h1>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <TranslationPicker />
+            <TranslationManager />
+            <ThemeToggle />
+          </div>
         </div>
-        <LookupBar />
-        <RecentVerses />
-        <ResultCard />
-        <ScriptureSearch />
-      </section>
-      <hr />
-      <ServicePanel />
-      <hr />
-      <SongsPanel />
-      <hr />
-      <DisplayPanel />
-    </main>
+      </header>
+
+      <main className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 lg:px-6">
+        <LiveNow />
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
+          {/* Left column — what's going out + finding scripture */}
+          <div className="space-y-4">
+            <ScripturePresenter />
+            <div className="card">
+              <ListenPanel />
+            </div>
+            <div className="card space-y-3">
+              <h2 className="panel-title">Scripture</h2>
+              <LookupBar />
+              <RecentVerses />
+              <ResultCard />
+              <ScriptureSearch />
+            </div>
+          </div>
+
+          {/* Right column — building the service + display control */}
+          <div className="space-y-4">
+            <div className="card">
+              <ServicePanel />
+            </div>
+            <div className="card">
+              <SongsPanel />
+            </div>
+            <div className="card">
+              <DisplayPanel />
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
   );
 }

@@ -34,13 +34,13 @@ export function LiveNow() {
   const live = state.kind !== "blank" && state.kind !== "blackout";
 
   return (
-    <div className="flex items-center gap-3 rounded border bg-neutral-50 px-3 py-2">
+    <div className="card flex items-center gap-3 py-2.5">
       <span
-        className={`inline-block h-2.5 w-2.5 rounded-full ${live ? "bg-red-600" : "bg-gray-300"}`}
+        className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${live ? "animate-pulse bg-red-600" : "bg-gray-300"}`}
       />
-      <span className="text-xs uppercase tracking-wide text-gray-500">On screen</span>
-      <span className="flex-1 truncate text-sm">{describe(state)}</span>
-      <button onClick={() => blankProjection()} className="rounded border px-2 py-0.5 text-xs">
+      <span className="panel-title shrink-0">On screen</span>
+      <span className="flex-1 truncate text-sm font-medium">{describe(state)}</span>
+      <button onClick={() => blankProjection()} className="btn btn-sm shrink-0">
         Blank
       </button>
     </div>

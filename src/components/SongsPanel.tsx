@@ -16,6 +16,7 @@ export function SongsPanel() {
   const [songs, setSongs] = useState<SongSummary[]>([]);
   const [selected, setSelected] = useState<SongSummary | null>(null);
   const [editing, setEditing] = useState<SongDetail | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [backup, setBackup] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export function SongsPanel() {
   async function onEdit(song: SongSummary): Promise<void> {
     try {
       setEditing(await getSong(song.id));
+      setShowEditor(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -80,93 +82,84 @@ export function SongsPanel() {
     }
   }
 
+  const userSongs = shown.filter((s) => !s.builtIn);
+  const bundled = shown.filter((s) => s.builtIn);
+
+  const songRow = (s: SongSummary, readOnly: boolean) => (
+    <li key={s.id} className="flex items-center gap-1">
+      <button
+        onClick={() => setSelected(s)}
+        className={`flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm ${
+          selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
+        }`}
+      >
+        {s.title}
+        {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
+      </button>
+      <button onClick={() => addSongCue(s.id, s.title)} className="icon-btn" title="Add to service order">
+        ＋
+      </button>
+      {!readOnly && (
+        <>
+          <button onClick={() => onEdit(s)} className="btn btn-sm">Edit</button>
+          <button onClick={() => onDelete(s)} className="btn btn-sm btn-danger">Del</button>
+        </>
+      )}
+    </li>
+  );
+
   return (
-    <section className="space-y-4">
-      <h2 className="text-xl font-semibold">Songs</h2>
-      {error && <p className="text-red-600">{error}</p>}
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="panel-title">Songs</h2>
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter…"
+          className="input ml-auto h-8 w-40 text-sm"
+        />
+        <button
+          onClick={() => {
+            setEditing(null);
+            setShowEditor((v) => !v);
+          }}
+          className="btn btn-sm btn-primary"
+        >
+          {showEditor ? "Close" : "＋ New song"}
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <SongEditor
-        editing={editing}
-        onSaved={() => {
-          setEditing(null);
-          void refresh();
-        }}
-        onCancel={() => setEditing(null)}
-      />
+      {(showEditor || editing) && (
+        <SongEditor
+          editing={editing}
+          onSaved={() => {
+            setEditing(null);
+            setShowEditor(false);
+            void refresh();
+          }}
+          onCancel={() => {
+            setEditing(null);
+            setShowEditor(false);
+          }}
+        />
+      )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-2">
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter songs…"
-            className="w-full rounded border px-2 py-1 text-sm"
-          />
-          <ul className="space-y-1">
-            {shown
-              .filter((s) => !s.builtIn)
-              .map((s) => (
-                <li key={s.id} className="flex items-center gap-1">
-                  <button
-                    onClick={() => setSelected(s)}
-                    className={`flex-1 rounded px-2 py-1 text-left ${
-                      selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
-                    }`}
-                  >
-                    {s.title}
-                    {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
-                  </button>
-                  <button
-                    onClick={() => addSongCue(s.id, s.title)}
-                    className="rounded border px-2 py-1 text-xs"
-                    title="Add to service order"
-                  >
-                    ＋
-                  </button>
-                  <button onClick={() => onEdit(s)} className="rounded border px-2 py-1 text-xs">
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(s)}
-                    className="rounded border px-2 py-1 text-xs text-red-600"
-                  >
-                    Del
-                  </button>
-                </li>
-              ))}
-            {shown.filter((s) => !s.builtIn).length === 0 && (
-              <li className="text-sm text-gray-500">No songs of yours yet.</li>
-            )}
-          </ul>
+          {userSongs.length > 0 ? (
+            <ul className="space-y-0.5">{userSongs.map((s) => songRow(s, false))}</ul>
+          ) : (
+            <p className="text-sm text-gray-400">No songs of yours yet — add one with “＋ New song”.</p>
+          )}
 
-          {shown.some((s) => s.builtIn) && (
-            <details className="rounded border p-2 text-sm">
-              <summary className="cursor-pointer text-gray-600">
-                Bundled hymns ({shown.filter((s) => s.builtIn).length}) — read-only
+          {bundled.length > 0 && (
+            <details className="rounded-lg border p-2">
+              <summary className="cursor-pointer text-sm text-[var(--muted)]">
+                Bundled hymns ({bundled.length}) · read-only
               </summary>
-              <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto pr-1">
-                {shown
-                  .filter((s) => s.builtIn)
-                  .map((s) => (
-                    <li key={s.id} className="flex items-center gap-1">
-                      <button
-                        onClick={() => setSelected(s)}
-                        className={`flex-1 rounded px-2 py-1 text-left ${
-                          selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
-                        }`}
-                      >
-                        {s.title}
-                        {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
-                      </button>
-                      <button
-                        onClick={() => addSongCue(s.id, s.title)}
-                        className="rounded border px-2 py-1 text-xs"
-                        title="Add to service order"
-                      >
-                        ＋
-                      </button>
-                    </li>
-                  ))}
+              <ul className="mt-2 max-h-80 space-y-0.5 overflow-y-auto pr-1">
+                {bundled.map((s) => songRow(s, true))}
               </ul>
             </details>
           )}
@@ -175,33 +168,22 @@ export function SongsPanel() {
         <div>{selected && <SongLive song={selected} />}</div>
       </div>
 
-      <details className="rounded border p-2 text-sm">
-        <summary className="cursor-pointer text-gray-600">Backup / share songs</summary>
+      <details className="rounded-lg border p-2">
+        <summary className="cursor-pointer text-sm text-[var(--muted)]">Backup / share songs</summary>
         <div className="mt-2 space-y-2">
-          {notice && <p className="text-green-700">{notice}</p>}
-          <button onClick={onExport} className="rounded border px-3 py-1">
-            Export all songs (copy)
-          </button>
+          {notice && <p className="text-sm text-green-700">{notice}</p>}
+          <button onClick={onExport} className="btn btn-sm">Export all songs (copy)</button>
           {backup && (
-            <textarea
-              readOnly
-              value={backup}
-              rows={4}
-              className="w-full rounded border px-2 py-1 font-mono text-xs"
-            />
+            <textarea readOnly value={backup} rows={4} className="textarea w-full font-mono text-xs" />
           )}
           <textarea
             value={importText}
             onChange={(e) => setImportText(e.target.value)}
             placeholder="Paste exported songs JSON here to import…"
             rows={3}
-            className="w-full rounded border px-2 py-1 font-mono text-xs"
+            className="textarea w-full font-mono text-xs"
           />
-          <button
-            onClick={onImport}
-            disabled={!importText.trim()}
-            className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
-          >
+          <button onClick={onImport} disabled={!importText.trim()} className="btn btn-sm btn-primary">
             Import songs
           </button>
         </div>

@@ -17,10 +17,10 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="rounded border px-2 py-1 text-sm"
+      className="btn btn-sm"
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
-      {dark ? "☀️ Light" : "🌙 Dark"}
+      {dark ? "☀ Light" : "☾ Dark"}
     </button>
   );
 }

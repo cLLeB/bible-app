@@ -2,21 +2,276 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- Operator console dark mode (toggled via .dark on <html>) ---- */
-html.dark body {
-  background: #0f1115;
-  color: #e6e6e6;
+/* ============================================================
+   Operator console design tokens (semantic, theme-aware)
+   ============================================================ */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --surface-3: #e9ebef;
+  --border: #dfe2e8;
+  --text: #1b1f27;
+  --muted: #667085;
+  --faint: #9aa1ad;
+  --primary: #16a34a;
+  --primary-hover: #15803d;
+  --primary-fg: #ffffff;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --ring: #16a34a55;
+  --live: #16a34a;
 }
-html.dark .bg-white,
-html.dark .bg-gray-50,
-html.dark .bg-neutral-50 {
-  background-color: #171a20;
+html.dark {
+  --bg: #0e1014;
+  --surface: #171a20;
+  --surface-2: #20242c;
+  --surface-3: #2a2f38;
+  --border: #333a44;
+  --text: #e6e8ec;
+  --muted: #9aa3b2;
+  --faint: #6b7280;
+  --primary: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-fg: #0b0f0c;
+  --danger: #f0616d;
+  --danger-hover: #ef4444;
+  --ring: #22c55e55;
+  --live: #22c55e;
 }
-html.dark .bg-gray-100 {
-  background-color: #20242c;
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
 }
-html.dark .bg-gray-200 {
-  background-color: #2a2f38;
+body {
+  font-feature-settings: "tnum" 0;
+}
+::selection {
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+/* Slim, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* ============================================================
+   Component classes
+   ============================================================ */
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  html.dark .card {
+    box-shadow: none;
+  }
+
+  .panel-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Buttons — one shape, semantic variants */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.25rem;
+    padding: 0 0.85rem;
+    border-radius: 0.6rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.05s ease;
+  }
+  .btn:hover {
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: translateY(0.5px);
+  }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--primary);
+    border-color: transparent;
+    color: var(--primary-fg);
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+  }
+  .btn-danger {
+    background: transparent;
+    border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+    color: var(--danger);
+  }
+  .btn-danger:hover {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color: var(--danger);
+  }
+  .btn-dark {
+    background: #000;
+    border-color: #000;
+    color: #fff;
+  }
+  .btn-dark:hover {
+    background: #1a1a1a;
+  }
+  .btn-sm {
+    height: 1.85rem;
+    padding: 0 0.6rem;
+    font-size: 0.8rem;
+    border-radius: 0.5rem;
+  }
+  .btn-lg {
+    height: 2.75rem;
+    padding: 0 1.4rem;
+    font-size: 0.95rem;
+    border-radius: 0.7rem;
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.25rem;
+    width: 2.25rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .icon-btn:hover {
+    background: var(--surface-3);
+  }
+
+  /* Inputs */
+  .input,
+  .select,
+  .textarea {
+    width: 100%;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0 0.75rem;
+    height: 2.25rem;
+    font-size: 0.9rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .textarea {
+    height: auto;
+    padding: 0.6rem 0.75rem;
+    line-height: 1.5;
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: var(--faint);
+  }
+  .input:focus,
+  .select:focus,
+  .textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: var(--surface-3);
+    color: var(--muted);
+  }
+}
+
+/* ============================================================
+   Legacy utility remaps so any not-yet-migrated markup themes
+   ============================================================ */
+.bg-white,
+.bg-gray-50,
+.bg-neutral-50 {
+  background-color: var(--surface);
+}
+.bg-gray-100 {
+  background-color: var(--surface-2);
+}
+.bg-gray-200 {
+  background-color: var(--surface-3);
+}
+.hover\:bg-gray-50:hover {
+  background-color: var(--surface-2);
+}
+.hover\:bg-gray-100:hover {
+  background-color: var(--surface-3);
+}
+.border {
+  border-color: var(--border);
+}
+hr {
+  border-color: var(--border);
+}
+input,
+textarea,
+select {
+  background-color: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+}
+.text-black {
+  color: var(--text);
+}
+.text-gray-400 {
+  color: var(--faint);
+}
+.text-gray-500,
+.text-gray-600 {
+  color: var(--muted);
+}
+.text-gray-700 {
+  color: var(--text);
 }
 html.dark .bg-green-50 {
   background-color: #122a1b;
@@ -24,49 +279,6 @@ html.dark .bg-green-50 {
 html.dark .bg-red-50 {
   background-color: #341617;
 }
-html.dark .hover\:bg-gray-50:hover {
-  background-color: #20242c;
-}
-html.dark .hover\:bg-gray-100:hover {
-  background-color: #262b34;
-}
-html.dark .hover\:bg-green-50:hover {
-  background-color: #14311f;
-}
-html.dark .border,
-html.dark .border-green-600 {
-  border-color: #333a44;
-}
-html.dark hr {
-  border-color: #333a44;
-}
-html.dark input,
-html.dark textarea,
-html.dark select {
-  background-color: #171a20;
-  color: #e6e6e6;
-  border-color: #333a44;
-}
-html.dark input::placeholder,
-html.dark textarea::placeholder {
-  color: #6b7280;
-}
-html.dark .text-black {
-  color: #e6e6e6;
-}
-html.dark .text-gray-400 {
-  color: #8b93a1;
-}
-html.dark .text-gray-500 {
-  color: #9aa3b2;
-}
-html.dark .text-gray-600 {
-  color: #b0b8c4;
-}
-html.dark .text-gray-700 {
-  color: #c7cdd7;
-}
-/* confidence badges */
 html.dark .bg-yellow-100 {
   background-color: #3a3212;
 }

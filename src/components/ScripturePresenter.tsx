@@ -82,21 +82,21 @@ export function ScripturePresenter() {
   if (!current) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded border border-green-600 bg-green-50 p-2">
-      <span className="text-xs uppercase tracking-wide text-green-700">Presenting</span>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-green-600 bg-green-50 p-2.5">
+      <span className="chip" style={{ color: "var(--live)" }}>Presenting</span>
       <span className="font-semibold">{current.reference}</span>
-      <span className="hidden truncate text-xs text-gray-500 sm:inline">— {current.text}</span>
+      <span className="hidden flex-1 truncate text-xs text-gray-500 lg:inline">— {current.text}</span>
       <div className="ml-auto flex items-center gap-1">
-        <button onClick={() => go("prev-chapter")} className="rounded border px-2 py-1 text-xs" title="Previous chapter (PageUp)">⏮ ch</button>
-        <button onClick={() => go("prev-verse")} className="rounded border px-2 py-1 text-sm" title="Previous verse (←)">◀</button>
-        <button onClick={() => go("next-verse")} className="rounded border px-2 py-1 text-sm" title="Next verse (→)">▶</button>
-        <button onClick={() => go("next-chapter")} className="rounded border px-2 py-1 text-xs" title="Next chapter (PageDown)">ch ⏭</button>
+        <button onClick={() => go("prev-chapter")} className="btn btn-sm" title="Previous chapter (PageUp)">⏮ ch</button>
+        <button onClick={() => go("prev-verse")} className="icon-btn" title="Previous verse (←)">◀</button>
+        <button onClick={() => go("next-verse")} className="icon-btn" title="Next verse (→)">▶</button>
+        <button onClick={() => go("next-chapter")} className="btn btn-sm" title="Next chapter (PageDown)">ch ⏭</button>
         <form onSubmit={onJump}>
           <input
             value={jump}
             onChange={(e) => setJump(e.target.value)}
             placeholder="15 or 4:5"
-            className="w-20 rounded border px-2 py-1 text-sm"
+            className="input h-9 w-20 text-sm"
             title="Jump to verse, or chapter:verse, in this book"
           />
         </form>

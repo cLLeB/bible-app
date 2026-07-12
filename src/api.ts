@@ -93,6 +93,27 @@ export interface TranslationInfo {
 export const listTranslations = (): Promise<TranslationInfo[]> =>
   invoke<TranslationInfo[]>("list_translations");
 
+export interface CatalogEntry {
+  code: string;
+  name: string;
+  installed: boolean;
+  licensed: boolean;
+}
+
+export interface FlavorInfo {
+  tier: "personal" | "distribution";
+  models: SttModel[];
+  defaultModel: SttModel;
+}
+
+export const appFlavor = (): Promise<FlavorInfo> => invoke<FlavorInfo>("app_flavor");
+
+export const translationCatalog = (): Promise<CatalogEntry[]> =>
+  invoke<CatalogEntry[]>("translation_catalog");
+
+export const downloadTranslation = (code: string): Promise<number> =>
+  invoke<number>("download_translation", { code });
+
 export const getTranslation = (): Promise<string> => invoke<string>("get_translation");
 
 export const setTranslation = (code: string): Promise<void> =>
