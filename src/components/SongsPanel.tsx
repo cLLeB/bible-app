@@ -9,7 +9,12 @@ export function SongsPanel() {
   const [selected, setSelected] = useState<SongSummary | null>(null);
   const [editing, setEditing] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   const addSongCue = useServiceStore((s) => s.addSong);
+
+  const shown = songs.filter((s) =>
+    `${s.title} ${s.author ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
+  );
 
   async function refresh(): Promise<void> {
     try {
@@ -57,8 +62,15 @@ export function SongsPanel() {
       />
 
       <div className="grid grid-cols-2 gap-4">
-        <ul className="space-y-1">
-          {songs.map((s) => (
+        <div className="space-y-2">
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter songs…"
+            className="w-full rounded border px-2 py-1 text-sm"
+          />
+          <ul className="space-y-1">
+            {shown.map((s) => (
             <li key={s.id} className="flex items-center gap-1">
               <button
                 onClick={() => setSelected(s)}
@@ -87,8 +99,9 @@ export function SongsPanel() {
               </button>
             </li>
           ))}
-          {songs.length === 0 && <li className="text-sm text-gray-500">No songs yet.</li>}
-        </ul>
+            {shown.length === 0 && <li className="text-sm text-gray-500">No songs.</li>}
+          </ul>
+        </div>
 
         <div>{selected && <SongLive song={selected} />}</div>
       </div>

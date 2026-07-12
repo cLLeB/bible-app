@@ -83,6 +83,26 @@ pub fn lookup_reference(
     Ok(build_payload(rec))
 }
 
+#[tauri::command]
+pub fn search_scripture(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<VersePayload>, String> {
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .map(|w| w.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase())
+        .filter(|w| w.len() >= 2)
+        .map(|w| format!("\"{w}\""))
+        .collect();
+    if terms.is_empty() {
+        return Ok(vec![]);
+    }
+    let fts = terms.join(" OR ");
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let hits = db.search_fts(&state.translation, &fts, 25).map_err(|e| e.to_string())?;
+    Ok(hits.into_iter().map(|(rec, _)| build_payload(rec)).collect())
+}
+
 // ---- Songs ----
 
 #[tauri::command]

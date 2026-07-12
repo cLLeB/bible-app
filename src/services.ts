@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { VersePayload } from "./api";
 
 export type Cue =
@@ -30,21 +31,26 @@ export const useLiveStore = create<LiveState>((set) => ({
   setOwner: (owner) => set({ owner }),
 }));
 
-export const useServiceStore = create<ServiceState>((set) => ({
-  cues: [],
-  addVerse: (verse) =>
-    set((s) => ({ cues: [...s.cues, { id: uid(), type: "verse", verse }] })),
-  addSong: (songId, title) =>
-    set((s) => ({ cues: [...s.cues, { id: uid(), type: "song", songId, title }] })),
-  remove: (id) => set((s) => ({ cues: s.cues.filter((c) => c.id !== id) })),
-  move: (id, dir) =>
-    set((s) => {
-      const i = s.cues.findIndex((c) => c.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= s.cues.length) return s;
-      const cues = [...s.cues];
-      [cues[i], cues[j]] = [cues[j], cues[i]];
-      return { cues };
+export const useServiceStore = create<ServiceState>()(
+  persist(
+    (set) => ({
+      cues: [],
+      addVerse: (verse) =>
+        set((s) => ({ cues: [...s.cues, { id: uid(), type: "verse", verse }] })),
+      addSong: (songId, title) =>
+        set((s) => ({ cues: [...s.cues, { id: uid(), type: "song", songId, title }] })),
+      remove: (id) => set((s) => ({ cues: s.cues.filter((c) => c.id !== id) })),
+      move: (id, dir) =>
+        set((s) => {
+          const i = s.cues.findIndex((c) => c.id === id);
+          const j = i + dir;
+          if (i < 0 || j < 0 || j >= s.cues.length) return s;
+          const cues = [...s.cues];
+          [cues[i], cues[j]] = [cues[j], cues[i]];
+          return { cues };
+        }),
+      clear: () => set({ cues: [] }),
     }),
-  clear: () => set({ cues: [] }),
-}));
+    { name: "service-order", partialize: (s) => ({ cues: s.cues }) },
+  ),
+);

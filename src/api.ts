@@ -46,6 +46,9 @@ export interface Slide {
 export const lookupReference = (query: string): Promise<VersePayload> =>
   invoke<VersePayload>("lookup_reference", { query });
 
+export const searchScripture = (query: string): Promise<VersePayload[]> =>
+  invoke<VersePayload[]>("search_scripture", { query });
+
 export const projectVerse = (payload: VersePayload): Promise<void> =>
   invoke<void>("project_verse", { payload });
 

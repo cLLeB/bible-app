@@ -3,6 +3,7 @@ import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LookupBar } from "./components/LookupBar";
 import { ResultCard } from "./components/ResultCard";
+import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
 
@@ -16,6 +17,7 @@ export default function App() {
         <h2 className="text-xl font-semibold">Scripture</h2>
         <LookupBar />
         <ResultCard />
+        <ScriptureSearch />
       </section>
       <hr />
       <ServicePanel />

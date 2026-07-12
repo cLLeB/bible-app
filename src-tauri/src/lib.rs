@@ -68,6 +68,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::lookup_reference,
+            commands::search_scripture,
             commands::get_projection,
             commands::project_verse,
             commands::project_slide,
