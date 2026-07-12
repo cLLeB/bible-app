@@ -6,14 +6,14 @@
    Operator console design tokens (semantic, theme-aware)
    ============================================================ */
 :root {
-  --bg: #eef0f3;
+  --bg: #dfe3ea;
   --surface: #ffffff;
-  --surface-2: #f3f4f6;
-  --surface-3: #e9ebef;
-  --border: #dfe2e8;
-  --text: #1b1f27;
-  --muted: #667085;
-  --faint: #9aa1ad;
+  --surface-2: #eef1f6;
+  --surface-3: #e0e5ec;
+  --border: #c4ccd8;
+  --text: #172230;
+  --muted: #566072;
+  --faint: #838d9c;
   --primary: #16a34a;
   --primary-hover: #15803d;
   --primary-fg: #ffffff;
@@ -21,6 +21,7 @@
   --danger-hover: #b91c1c;
   --ring: #16a34a55;
   --live: #16a34a;
+  --card-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 2px 5px rgb(16 24 40 / 0.08);
 }
 html.dark {
   --bg: #0e1014;
@@ -38,6 +39,7 @@ html.dark {
   --danger-hover: #ef4444;
   --ring: #22c55e55;
   --live: #22c55e;
+  --card-shadow: none;
 }
 
 html,
@@ -78,10 +80,7 @@ body {
     border: 1px solid var(--border);
     border-radius: 0.9rem;
     padding: 1rem 1.1rem;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
-  }
-  html.dark .card {
-    box-shadow: none;
+    box-shadow: var(--card-shadow);
   }
 
   .panel-title {

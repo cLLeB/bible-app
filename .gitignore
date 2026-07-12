@@ -36,3 +36,7 @@ data/*.canonical.json
 # Python cache
 scripts/__pycache__/
 __pycache__/
+
+# Screenshots
+Screenshot*.png
+*.screenshot.png
