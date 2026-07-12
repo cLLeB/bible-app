@@ -11,6 +11,15 @@ pub struct VersePayload {
     pub translation: String,
 }
 
+/// A detected verse suggestion for the operator, with a confidence score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Candidate {
+    pub verse: VersePayload,
+    pub confidence: f32,
+    pub source: String, // "explicit" | "fuzzy" | "context"
+}
+
 /// What the projection window should currently display. Unified across
 /// content types (spec §5.1 ProjectionState machine, Phase 1 subset).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

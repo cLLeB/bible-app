@@ -1,19 +1,21 @@
 use crate::commands::{build_payload, AppState};
-use crate::events::VersePayload;
-use crate::reference::ParsedRef;
-use crate::{detect, stt};
+use crate::detect::{self, DetectSource, Detection, RefContext};
+use crate::events::Candidate;
+use crate::stt;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_RATE: u32 = 16_000;
-const SILENCE_RMS: f32 = 0.010; // below this = silence
-const SILENCE_FLUSH_MS: f32 = 1500.0; // real sentence pause ends an utterance
-const MAX_UTTER_MS: f32 = 12_000.0; // force a flush on long speech
-const MIN_SPEECH_MS: f32 = 600.0; // discard clips with too little actual speech
+const SILENCE_RMS: f32 = 0.010;
+const SILENCE_FLUSH_MS: f32 = 1300.0;
+const MAX_UTTER_MS: f32 = 12_000.0;
+const MIN_SPEECH_MS: f32 = 600.0;
+const PREROLL_SAMPLES: usize = (TARGET_RATE as usize) * 3 / 10; // 0.3s pre-speech
+const CTX_STALE_SECS: u64 = 300; // clear remembered book after 5min of no speech
 
 type RefKey = (String, u16, Option<u16>);
 
@@ -52,8 +54,6 @@ fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
     out
 }
 
-/// Collapse whisper output to a single clean line, dropping bracketed markers
-/// like [BLANK_AUDIO] and (music).
 fn clean_transcript(raw: &str) -> String {
     let joined = raw
         .lines()
@@ -63,16 +63,39 @@ fn clean_transcript(raw: &str) -> String {
         .filter(|l| !(l.starts_with('(') && l.ends_with(')')))
         .collect::<Vec<_>>()
         .join(" ");
-    joined.replace("[BLANK_AUDIO]", "").split_whitespace().collect::<Vec<_>>().join(" ")
+    joined
+        .replace("[BLANK_AUDIO]", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
-/// Transcribe one utterance, run detection, and emit transcript + new
-/// candidates. `last` dedupes a reference repeated across adjacent utterances.
+fn confidence_of(d: &Detection) -> (f32, &'static str) {
+    match d.source {
+        DetectSource::Explicit => {
+            if d.reference.verse.is_some() {
+                (0.95, "explicit")
+            } else {
+                (0.85, "explicit")
+            }
+        }
+        DetectSource::Fuzzy => {
+            if d.reference.verse.is_some() {
+                (0.82, "fuzzy")
+            } else {
+                (0.72, "fuzzy")
+            }
+        }
+        DetectSource::Context => (0.80, "context"),
+    }
+}
+
 fn handle_utterance(
     app: &AppHandle,
     model: &Path,
     binary: &Path,
     audio: Vec<f32>,
+    ctx: &mut RefContext,
     last: &mut Option<RefKey>,
 ) {
     let text = match stt::transcribe(&audio, model, binary) {
@@ -87,31 +110,37 @@ fn handle_utterance(
     }
     let _ = app.emit("transcript", text.clone());
 
-    let refs = detect::detect_references(&text);
-    if refs.is_empty() {
+    let detections = detect::detect_with_context(&text, ctx);
+    if detections.is_empty() {
         return;
     }
     let state = app.state::<AppState>();
-    let payloads: Vec<VersePayload> = {
+    let candidates: Vec<Candidate> = {
         let db = match state.db.lock() {
             Ok(d) => d,
             Err(_) => return,
         };
         let mut out = Vec::new();
-        for r in refs {
+        for d in &detections {
+            let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
             if last.as_ref() == Some(&key) {
-                continue; // skip immediate repeat
+                continue;
             }
-            if let Ok(Some(rec)) = db.find_verse(&state.translation, &ParsedRef { ..r }) {
-                out.push(build_payload(rec));
+            if let Ok(Some(rec)) = db.find_verse(&state.translation, r) {
+                let (confidence, source) = confidence_of(d);
+                out.push(Candidate {
+                    verse: build_payload(rec),
+                    confidence,
+                    source: source.to_string(),
+                });
                 *last = Some(key);
             }
         }
         out
     };
-    for p in payloads {
-        let _ = app.emit("verse-candidate", p);
+    for c in candidates {
+        let _ = app.emit("verse-candidate", c);
     }
 }
 
@@ -159,25 +188,43 @@ fn run_inner(
     let _ = app.emit("listen-started", ());
 
     let mut utter: Vec<f32> = Vec::new();
+    let mut recent: Vec<f32> = Vec::new(); // rolling pre-roll buffer
     let mut speech_ms = 0f32;
     let mut silence_ms = 0f32;
+    let mut ctx = RefContext::default();
     let mut last_ref: Option<RefKey> = None;
+    let mut last_activity = Instant::now();
 
     let mut flush = |utter: &mut Vec<f32>, speech_ms: &mut f32, silence_ms: &mut f32| {
         let audio = std::mem::take(utter);
         let had_speech = *speech_ms;
         *speech_ms = 0.0;
         *silence_ms = 0.0;
-        if had_speech >= MIN_SPEECH_MS {
-            handle_utterance(app, model, binary, audio, &mut last_ref);
+        if had_speech < MIN_SPEECH_MS {
+            return;
         }
+        if last_activity.elapsed().as_secs() > CTX_STALE_SECS {
+            ctx.clear();
+        }
+        last_activity = Instant::now();
+        handle_utterance(app, model, binary, audio, &mut ctx, &mut last_ref);
     };
 
     while flag.load(Ordering::SeqCst) {
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
+                // maintain pre-roll ring
+                recent.extend_from_slice(&frame);
+                if recent.len() > PREROLL_SAMPLES {
+                    let drop = recent.len() - PREROLL_SAMPLES;
+                    recent.drain(0..drop);
+                }
+
                 let dur = ms_of(frame.len());
                 if rms(&frame) > SILENCE_RMS {
+                    if utter.is_empty() {
+                        utter.extend_from_slice(&recent); // seed with pre-speech audio
+                    }
                     utter.extend_from_slice(&frame);
                     speech_ms += dur;
                     silence_ms = 0.0;
@@ -185,6 +232,7 @@ fn run_inner(
                     utter.extend_from_slice(&frame);
                     silence_ms += dur;
                 }
+
                 let ended = !utter.is_empty() && silence_ms >= SILENCE_FLUSH_MS;
                 let too_long = ms_of(utter.len()) >= MAX_UTTER_MS;
                 if ended || too_long {

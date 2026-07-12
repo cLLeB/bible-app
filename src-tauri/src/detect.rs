@@ -1,7 +1,34 @@
 use crate::books::{resolve_book, resolve_book_fuzzy};
 use crate::reference::ParsedRef;
 
-/// Parse a number token like "3", "16", or "3:16" → (chapter-or-number, optional verse).
+/// How a reference was recognized — drives confidence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DetectSource {
+    Explicit, // exact book name + numbers
+    Fuzzy,    // book name recovered by fuzzy match
+    Context,  // bare "verse N" / "chapter N" resolved via remembered book
+}
+
+#[derive(Debug, Clone)]
+pub struct Detection {
+    pub reference: ParsedRef,
+    pub source: DetectSource,
+}
+
+/// Remembered book/chapter so later bare mentions ("verse 28") resolve.
+#[derive(Debug, Clone, Default)]
+pub struct RefContext {
+    pub book_osis: Option<String>,
+    pub chapter: Option<u16>,
+}
+
+impl RefContext {
+    pub fn clear(&mut self) {
+        self.book_osis = None;
+        self.chapter = None;
+    }
+}
+
 fn parse_num_token(tok: &str) -> Option<(u16, Option<u16>)> {
     if tok.contains(':') {
         let mut parts = tok.split(':');
@@ -27,14 +54,11 @@ fn word_value(word: &str) -> Option<u16> {
     Some(v)
 }
 
-/// Convert spoken number words into digit tokens so "chapter three sixteen"
-/// becomes "chapter 3 16" and "twenty eight" becomes "28".
 fn fold_number_words(tokens: Vec<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(tokens.len());
     let mut i = 0;
     while i < tokens.len() {
         if let Some(v) = word_value(&tokens[i]) {
-            // tens (20,30,…,90) + ones (1..9) → combined, e.g. "twenty eight" = 28
             if v >= 20 && v % 10 == 0 {
                 if let Some(ones) = tokens.get(i + 1).and_then(|t| word_value(t)) {
                     if (1..=9).contains(&ones) {
@@ -57,10 +81,7 @@ fn eq_ci(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
-/// Scan free-form transcript text for Bible references. Handles digit forms
-/// ("John 3:16", "1 Corinthians 13"), spoken forms ("Romans chapter 8 verse
-/// 28"), and spelled-out numbers ("John chapter three sixteen").
-pub fn detect_references(text: &str) -> Vec<ParsedRef> {
+fn tokenize(text: &str) -> Vec<String> {
     let cleaned: Vec<String> = text
         .split_whitespace()
         .map(|t| {
@@ -69,61 +90,129 @@ pub fn detect_references(text: &str) -> Vec<ParsedRef> {
         })
         .filter(|t| !t.is_empty())
         .collect();
-    let tokens = fold_number_words(cleaned);
+    fold_number_words(cleaned)
+}
 
-    let mut out: Vec<ParsedRef> = Vec::new();
+/// Read an optional "verse N" after a chapter has been consumed at index `j`.
+fn read_trailing_verse(tokens: &[String], mut j: usize) -> (Option<u16>, usize) {
+    if j < tokens.len() && (eq_ci(&tokens[j], "verse") || eq_ci(&tokens[j], "verses")) {
+        j += 1;
+    }
+    if let Some((v, _)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
+        (Some(v), j + 1)
+    } else {
+        (None, j)
+    }
+}
+
+/// Detect references in a transcript, using and updating `ctx` so bare
+/// continuations ("look at verse 28") resolve against a remembered book/chapter.
+pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
+    let tokens = tokenize(text);
+    let mut out: Vec<Detection> = Vec::new();
     let mut i = 0;
+
     while i < tokens.len() {
-        // Try to exact-match a book name spanning 3, 2, then 1 tokens.
-        let mut book: Option<(String, usize)> = None;
+        // 1) Full reference: <book> [chapter] N [verse] M
+        let mut book: Option<(String, usize, DetectSource)> = None;
         for len in (1..=3).rev() {
             if i + len <= tokens.len() {
                 let joined = tokens[i..i + len].join(" ");
                 if let Some(b) = resolve_book(&joined) {
-                    book = Some((b.osis.to_string(), len));
+                    book = Some((b.osis.to_string(), len, DetectSource::Explicit));
                     break;
                 }
             }
         }
-        // Fall back to fuzzy single/two-token match (STT near-misses). A trailing
-        // number is still required below to emit, which gates false positives.
         if book.is_none() {
             for len in 1..=2 {
                 if i + len <= tokens.len() {
                     let joined = tokens[i..i + len].join(" ");
                     if let Some(b) = resolve_book_fuzzy(&joined) {
-                        book = Some((b.osis.to_string(), len));
+                        book = Some((b.osis.to_string(), len, DetectSource::Fuzzy));
                         break;
                     }
                 }
             }
         }
 
-        if let Some((osis, len)) = book {
+        if let Some((osis, len, source)) = book {
             let mut j = i + len;
             if j < tokens.len() && eq_ci(&tokens[j], "chapter") {
                 j += 1;
             }
             if let Some((chapter, verse_in_tok)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
                 j += 1;
-                let mut verse = verse_in_tok;
-                if verse.is_none() {
-                    if j < tokens.len() && (eq_ci(&tokens[j], "verse") || eq_ci(&tokens[j], "verses")) {
-                        j += 1;
-                    }
-                    if let Some((v, _)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
-                        verse = Some(v);
-                        j += 1;
-                    }
-                }
-                out.push(ParsedRef { book_osis: osis, chapter, verse });
+                let verse = if verse_in_tok.is_some() {
+                    verse_in_tok
+                } else {
+                    let (v, nj) = read_trailing_verse(&tokens, j);
+                    j = nj;
+                    v
+                };
+                ctx.book_osis = Some(osis.clone());
+                ctx.chapter = Some(chapter);
+                out.push(Detection {
+                    reference: ParsedRef { book_osis: osis, chapter, verse },
+                    source,
+                });
                 i = j;
                 continue;
             }
         }
+
+        // 2) Continuation "chapter N [verse M]" against remembered book.
+        if eq_ci(&tokens[i], "chapter") {
+            if let (Some(book_osis), Some((chapter, verse_in_tok))) = (
+                ctx.book_osis.clone(),
+                tokens.get(i + 1).and_then(|t| parse_num_token(t)),
+            ) {
+                let mut j = i + 2;
+                let verse = if verse_in_tok.is_some() {
+                    verse_in_tok
+                } else {
+                    let (v, nj) = read_trailing_verse(&tokens, j);
+                    j = nj;
+                    v
+                };
+                ctx.chapter = Some(chapter);
+                out.push(Detection {
+                    reference: ParsedRef { book_osis, chapter, verse },
+                    source: DetectSource::Context,
+                });
+                i = j;
+                continue;
+            }
+        }
+
+        // 3) Continuation "verse M" against remembered book + chapter.
+        if eq_ci(&tokens[i], "verse") || eq_ci(&tokens[i], "verses") {
+            if let (Some(book_osis), Some(chapter), Some((verse, _))) = (
+                ctx.book_osis.clone(),
+                ctx.chapter,
+                tokens.get(i + 1).and_then(|t| parse_num_token(t)),
+            ) {
+                out.push(Detection {
+                    reference: ParsedRef { book_osis, chapter, verse: Some(verse) },
+                    source: DetectSource::Context,
+                });
+                i += 2;
+                continue;
+            }
+        }
+
         i += 1;
     }
     out
+}
+
+/// Stateless convenience: detect full references with no carried context.
+pub fn detect_references(text: &str) -> Vec<ParsedRef> {
+    let mut ctx = RefContext::default();
+    detect_with_context(text, &mut ctx)
+        .into_iter()
+        .map(|d| d.reference)
+        .collect()
 }
 
 #[cfg(test)]
@@ -140,29 +229,39 @@ mod tests {
     fn digits_and_spoken_numbers() {
         let a = one("please turn to John 3:16 with me");
         assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("John", 3, Some(16)));
-
         let b = one("reading from Romans chapter eight verse twenty eight");
         assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("Rom", 8, Some(28)));
-
         let c = one("open your bible to John chapter three sixteen");
         assert_eq!((c.book_osis.as_str(), c.chapter, c.verse), ("John", 3, Some(16)));
-
         let d = one("first corinthians thirteen");
         assert_eq!((d.book_osis.as_str(), d.chapter, d.verse), ("1Cor", 13, None));
     }
 
     #[test]
-    fn ignores_non_references() {
-        assert!(detect_references("and so the lord spoke to the people").is_empty());
+    fn recovers_fuzzy_book_names() {
+        let a = one("roman chapter 8 verse 28");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Rom", 8, Some(28)));
+        let b = one("revelations chapter 22 verse 20");
+        assert_eq!(b.book_osis, "Rev");
     }
 
     #[test]
-    fn recovers_fuzzy_book_names() {
-        // whisper commonly drops the trailing 's' or mishears book names
-        let a = one("roman chapter 8 verse 28");
-        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Rom", 8, Some(28)));
+    fn context_carryover_across_utterances() {
+        let mut ctx = RefContext::default();
+        let first = detect_with_context("turn with me to Romans chapter 8", &mut ctx);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].reference.chapter, 8);
 
-        let b = one("revelations chapter 22 verse 20");
-        assert_eq!(b.book_osis, "Rev");
+        // later, no book spoken:
+        let later = detect_with_context("now look at verse 28", &mut ctx);
+        assert_eq!(later.len(), 1);
+        let r = &later[0].reference;
+        assert_eq!((r.book_osis.as_str(), r.chapter, r.verse), ("Rom", 8, Some(28)));
+        assert_eq!(later[0].source, DetectSource::Context);
+    }
+
+    #[test]
+    fn ignores_non_references() {
+        assert!(detect_references("and so the lord spoke to the people").is_empty());
     }
 }

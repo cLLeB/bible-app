@@ -70,6 +70,12 @@ export const updateSong = (
 export const deleteSong = (songId: number): Promise<void> =>
   invoke<void>("delete_song", { songId });
 
+export interface Candidate {
+  verse: VersePayload;
+  confidence: number;
+  source: string; // "explicit" | "fuzzy" | "context"
+}
+
 export const startListening = (model: "base" | "tiny"): Promise<void> =>
   invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");

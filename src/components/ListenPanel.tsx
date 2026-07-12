@@ -5,14 +5,14 @@ import {
   projectVerse,
   startListening,
   stopListening,
-  type VersePayload,
+  type Candidate,
 } from "../api";
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
   const [model, setModel] = useState<"base" | "tiny">("base");
   const [lines, setLines] = useState<string[]>([]);
-  const [candidates, setCandidates] = useState<VersePayload[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -20,7 +20,7 @@ export function ListenPanel() {
       listen<string>("transcript", (e) => {
         setLines((prev) => [e.payload, ...prev].slice(0, 6));
       }),
-      listen<VersePayload>("verse-candidate", (e) => {
+      listen<Candidate>("verse-candidate", (e) => {
         setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
       }),
       listen("listen-started", () => {
@@ -104,12 +104,26 @@ export function ListenPanel() {
             ) : (
               candidates.map((c, i) => (
                 <button
-                  key={`${c.reference}-${i}`}
-                  onClick={() => projectVerse(c)}
+                  key={`${c.verse.reference}-${i}`}
+                  onClick={() => projectVerse(c.verse)}
                   className="block w-full rounded border p-2 text-left hover:bg-green-50"
                 >
-                  <div className="text-sm font-semibold">{c.reference}</div>
-                  <div className="line-clamp-2 text-xs text-gray-600">{c.text}</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">{c.verse.reference}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        c.confidence >= 0.9
+                          ? "bg-green-100 text-green-700"
+                          : c.confidence >= 0.8
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-gray-100 text-gray-600"
+                      }`}
+                      title={`${c.source} match`}
+                    >
+                      {Math.round(c.confidence * 100)}% · {c.source}
+                    </span>
+                  </div>
+                  <div className="line-clamp-2 text-xs text-gray-600">{c.verse.text}</div>
                 </button>
               ))
             )}
