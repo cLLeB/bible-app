@@ -9,5 +9,6 @@ import { useLiveStore, useScriptureStore } from "./services";
 export async function present(verse: VersePayload): Promise<void> {
   useLiveStore.getState().setOwner("scripture");
   useScriptureStore.getState().setCurrent(verse);
+  useScriptureStore.getState().pushRecent(verse);
   await projectVerse(verse);
 }

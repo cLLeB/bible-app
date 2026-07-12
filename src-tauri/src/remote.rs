@@ -55,9 +55,11 @@ const PROJECTION_PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8
 function fmt(ms){let t=Math.max(0,Math.floor(ms/1000));let m=Math.floor(t/60),s=t%60;return m+':'+String(s).padStart(2,'0');}
 let cur=null;
 async function poll(){try{let r=await fetch('/api/projection');cur=await r.json();}catch(e){}render();}
+function fitvw(n){return n<120?5:n<220?4:n<340?3.2:n<500?2.6:2.1;}
 function render(){let b=document.getElementById('body'),c=document.getElementById('cap');if(!cur){b.textContent='';c.textContent='';return;}
- switch(cur.kind){case 'verse':case 'song':b.textContent=cur.text;c.textContent=cur.caption;break;
- case 'message':b.textContent=cur.text;c.textContent='';break;
+ b.style.fontSize='5vw';
+ switch(cur.kind){case 'verse':case 'song':b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent=cur.caption;break;
+ case 'message':b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent='';break;
  case 'countdown':b.textContent=fmt(cur.targetMs-Date.now());c.textContent=cur.label||'';break;
  case 'logo':b.textContent='✝';c.textContent='';break;
  default:b.textContent='';c.textContent='';}}

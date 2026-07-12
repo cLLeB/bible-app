@@ -50,7 +50,14 @@ export function ProjectionView() {
   const scale = settings.fontScale || 1;
   const now = useNow(state.kind === "countdown");
 
-  const bodyStyle = { fontSize: `${3 * scale}rem`, lineHeight: 1.1 };
+  // Auto-fit: shrink the text as the verse gets longer so it never overflows.
+  function fitRem(text: string): number {
+    const n = text.length;
+    const base = n < 120 ? 3.2 : n < 220 ? 2.6 : n < 340 ? 2.1 : n < 500 ? 1.7 : 1.4;
+    return base * scale;
+  }
+  const bodyText = state.kind === "verse" || state.kind === "song" || state.kind === "message" ? state.text : "";
+  const bodyStyle = { fontSize: `${fitRem(bodyText)}rem`, lineHeight: 1.15 };
   const capStyle = { fontSize: `${1.4 * scale}rem`, color: theme.sub };
 
   function body() {

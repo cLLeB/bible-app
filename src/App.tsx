@@ -3,6 +3,7 @@ import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
+import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
 import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
@@ -24,6 +25,7 @@ export default function App() {
           <TranslationPicker />
         </div>
         <LookupBar />
+        <RecentVerses />
         <ResultCard />
         <ScriptureSearch />
       </section>

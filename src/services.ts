@@ -31,14 +31,22 @@ export const useLiveStore = create<LiveState>((set) => ({
   setOwner: (owner) => set({ owner }),
 }));
 
-// The scripture verse currently being presented (for the nav controller).
+// The scripture verse currently being presented (for the nav controller),
+// plus a short list of recently-shown verses for instant re-projection.
 interface ScriptureState {
   current: VersePayload | null;
+  recents: VersePayload[];
   setCurrent: (v: VersePayload | null) => void;
+  pushRecent: (v: VersePayload) => void;
 }
 export const useScriptureStore = create<ScriptureState>((set) => ({
   current: null,
+  recents: [],
   setCurrent: (current) => set({ current }),
+  pushRecent: (v) =>
+    set((s) => ({
+      recents: [v, ...s.recents.filter((r) => r.reference !== v.reference || r.translation !== v.translation)].slice(0, 8),
+    })),
 }));
 
 export const useServiceStore = create<ServiceState>()(
