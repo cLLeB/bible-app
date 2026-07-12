@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   blankProjection,
+  recordChoice,
   startListening,
   stopListening,
   type Candidate,
   type SttModel,
+  type VersePayload,
 } from "../api";
 import { present } from "../present";
 
@@ -17,6 +19,8 @@ export function ListenPanel() {
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [alternatives, setAlternatives] = useState<VersePayload[]>([]);
   const [autoProject, setAutoProject] = useState(() => localStorage.getItem("auto-project") === "1");
   const [threshold, setThreshold] = useState(() => {
     const s = Number(localStorage.getItem("auto-threshold"));
@@ -54,6 +58,16 @@ export function ListenPanel() {
           void present(e.payload.verse);
         }
       }),
+      // The speaker confirmed a suggested verse (said "yes"/"amen" or read it
+      // aloud) — project it and mark it confirmed.
+      listen<VersePayload>("verse-confirmed", (e) => {
+        setConfirmed(e.payload.reference);
+        void present(e.payload);
+      }),
+      // Standby alternatives for the current best guess — operator can pick one.
+      listen<VersePayload[]>("verse-alternatives", (e) => {
+        setAlternatives(e.payload);
+      }),
       listen("listen-started", () => {
         setListening(true);
         setError(null);
@@ -65,6 +79,15 @@ export function ListenPanel() {
       unlisteners.forEach((u) => u.then((f) => f()));
     };
   }, []);
+
+  // Present a verse and teach the ranker which one the operator chose for the
+  // current spoken description.
+  function pick(v: VersePayload): void {
+    void present(v);
+    if (lines[0]) {
+      void recordChoice(lines[0], v.bookOsis, v.chapter, v.verse);
+    }
+  }
 
   async function toggle(): Promise<void> {
     try {
@@ -149,6 +172,28 @@ export function ListenPanel() {
               Blank
             </button>
           </div>
+          {confirmed && (
+            <p className="mb-1 rounded bg-green-50 px-2 py-1 text-xs text-green-700">
+              ✓ Confirmed by speaker: {confirmed}
+            </p>
+          )}
+          {alternatives.length > 0 && (
+            <div className="mb-1 rounded border border-dashed border-gray-300 p-1.5">
+              <div className="mb-1 text-[10px] uppercase text-gray-400">Or did you mean…</div>
+              <div className="flex flex-wrap gap-1">
+                {alternatives.map((alt, i) => (
+                  <button
+                    key={`${alt.reference}-${i}`}
+                    onClick={() => pick(alt)}
+                    className="rounded bg-gray-100 px-2 py-0.5 text-xs hover:bg-green-100"
+                    title={alt.text}
+                  >
+                    {alt.reference}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="min-h-24 space-y-1">
             {candidates.length === 0 ? (
               <span className="text-sm text-gray-400">Detected references appear here.</span>
@@ -156,7 +201,7 @@ export function ListenPanel() {
               candidates.map((c, i) => (
                 <button
                   key={`${c.verse.reference}-${i}`}
-                  onClick={() => present(c.verse)}
+                  onClick={() => pick(c.verse)}
                   className="block w-full rounded border p-2 text-left hover:bg-green-50"
                 >
                   <div className="flex items-center justify-between">

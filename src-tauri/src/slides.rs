@@ -10,9 +10,44 @@ pub fn split_lyrics(lyrics: &str) -> Vec<String> {
         .collect()
 }
 
+/// Split a long passage into readable slides, each at most `max_chars`,
+/// breaking only at word boundaries. A short passage stays a single slide.
+pub fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
+    let trimmed = text.trim();
+    if max_chars == 0 || trimmed.chars().count() <= max_chars {
+        return vec![trimmed.to_string()];
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in trimmed.split_whitespace() {
+        if !cur.is_empty() && cur.chars().count() + 1 + word.chars().count() > max_chars {
+            chunks.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+    chunks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_keeps_short_text_single_and_splits_long() {
+        assert_eq!(chunk_text("short verse", 220).len(), 1);
+        let long = "word ".repeat(100);
+        let chunks = chunk_text(long.trim(), 50);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|c| c.chars().count() <= 50));
+        // no words lost
+        assert_eq!(chunks.join(" ").split_whitespace().count(), 100);
+    }
 
     #[test]
     fn splits_on_blank_lines() {

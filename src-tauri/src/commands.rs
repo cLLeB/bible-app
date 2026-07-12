@@ -15,6 +15,9 @@ pub struct AppState {
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
+    // Operator corrections: description signature -> chosen verse, so a repeated
+    // paraphrase is ranked toward what the operator picked last time.
+    pub learned: Mutex<std::collections::HashMap<String, (String, u16, u16)>>,
 }
 
 /// The scripture currently on screen, for fast verse/chapter navigation.
@@ -160,6 +163,31 @@ pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
     }
 }
 
+/// Build a payload for a verse range ("John 3:16-18"): the combined text with a
+/// range caption. `verse` holds the start. Returns None if the range is empty.
+pub(crate) fn build_range_payload(
+    db: &crate::db::Db,
+    translation: &str,
+    book_osis: &str,
+    chapter: u16,
+    start: u16,
+    end: u16,
+) -> Option<VersePayload> {
+    let text = db.find_verse_range(translation, book_osis, chapter, start, end).ok()??;
+    let book_name = book_by_osis(book_osis)
+        .map(|b| b.name.to_string())
+        .unwrap_or_else(|| book_osis.to_string());
+    Some(VersePayload {
+        reference: format!("{book_name} {chapter}:{start}-{end}"),
+        book: book_name,
+        book_osis: book_osis.to_string(),
+        chapter,
+        verse: start,
+        text,
+        translation: translation.to_string(),
+    })
+}
+
 /// Detect a translation named in text ("in ASV", "the King James", "world english").
 /// Returns the CODE if a known name/abbrev appears (regardless of install state).
 fn parse_translation_code(text: &str) -> Option<&'static str> {
@@ -256,7 +284,16 @@ pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, S
     let tr = resolve_translation(state, query);
     let cleaned = strip_translation_phrase(query);
     let (base_query, end) = extract_range(&cleaned);
-    let parsed = parse_reference(&base_query).ok_or_else(|| format!("Could not parse '{query}'"))?;
+    // Plain reference first; then fall back to deep knowledge (descriptive book
+    // names, famous stories) so "the prodigal son" or "last book of the OT" work.
+    let parsed = match parse_reference(&base_query) {
+        Some(p) => p,
+        None => crate::detect::detect_with_context(&base_query, &mut crate::detect::RefContext::default())
+            .into_iter()
+            .next()
+            .map(|d| d.reference)
+            .ok_or_else(|| format!("Could not find '{query}'"))?,
+    };
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     if let (Some(start), Some(end)) = (parsed.verse, end) {
@@ -319,6 +356,52 @@ pub fn search_scripture(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let hits = db.search_fts(&tr, &fts, 25).map_err(|e| e.to_string())?;
     Ok(hits.into_iter().map(|(rec, _)| build_payload(rec)).collect())
+}
+
+/// Split a passage into readable projection-sized slides at word boundaries.
+#[tauri::command]
+pub fn chunk_passage(text: String, max_chars: usize) -> Vec<String> {
+    let cap = if max_chars == 0 { 220 } else { max_chars };
+    crate::slides::chunk_text(&text, cap)
+}
+
+/// Remember that, for the paraphrase in `transcript`, the operator chose this
+/// verse — so the next matching description ranks it first.
+#[tauri::command]
+pub fn record_choice(
+    transcript: String,
+    book_osis: String,
+    chapter: u16,
+    verse: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let sig = crate::resolution::signature(&transcript);
+    if sig.is_empty() {
+        return Ok(());
+    }
+    let mut learned = state.learned.lock().map_err(|e| e.to_string())?;
+    learned.insert(sig, (book_osis, chapter, verse));
+    Ok(())
+}
+
+/// Cross-references for a verse ("related verses"), resolved in the active
+/// translation. Skips any that aren't present in the installed text.
+#[tauri::command]
+pub fn related_verses(
+    book_osis: String,
+    chapter: u16,
+    verse: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<VersePayload>, String> {
+    let tr = state.active_translation();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (osis, ch, v) in crate::knowledge::related_verses(&book_osis, chapter, verse) {
+        if let Ok(Some(rec)) = db.verse_at(&tr, &osis, ch, v) {
+            out.push(build_payload(rec));
+        }
+    }
+    Ok(out)
 }
 
 #[derive(serde::Serialize)]

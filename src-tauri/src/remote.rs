@@ -69,11 +69,11 @@ setInterval(poll,400);setInterval(render,250);poll();
 fn projection_json(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     let guard = state.current.lock();
-    let json = match guard {
+    
+    match guard {
         Ok(ref g) => serde_json::to_string(&**g).unwrap_or_else(|_| "{\"kind\":\"blank\"}".into()),
         Err(_) => "{\"kind\":\"blank\"}".into(),
-    };
-    json
+    }
 }
 
 fn state_summary(app: &AppHandle) -> String {

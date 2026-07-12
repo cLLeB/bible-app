@@ -67,6 +67,24 @@ export const lookupReference = (query: string): Promise<VersePayload> =>
 export const searchScripture = (query: string): Promise<VersePayload[]> =>
   invoke<VersePayload[]>("search_scripture", { query });
 
+export const relatedVerses = (
+  bookOsis: string,
+  chapter: number,
+  verse: number,
+): Promise<VersePayload[]> =>
+  invoke<VersePayload[]>("related_verses", { bookOsis, chapter, verse });
+
+export const chunkPassage = (text: string, maxChars: number): Promise<string[]> =>
+  invoke<string[]>("chunk_passage", { text, maxChars });
+
+export const recordChoice = (
+  transcript: string,
+  bookOsis: string,
+  chapter: number,
+  verse: number,
+): Promise<void> =>
+  invoke<void>("record_choice", { transcript, bookOsis, chapter, verse });
+
 export interface TranslationInfo {
   code: string;
   name: string;

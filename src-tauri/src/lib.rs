@@ -1,12 +1,14 @@
 mod audio;
 mod books;
 mod commands;
+mod corrections;
 mod db;
 mod detect;
 mod events;
 mod knowledge;
 mod reference;
 mod remote;
+mod resolution;
 mod semantic;
 mod slides;
 mod stt;
@@ -73,6 +75,7 @@ pub fn run() {
                 listening: Arc::new(AtomicBool::new(false)),
                 remote_running: Arc::new(AtomicBool::new(false)),
                 cursor: Mutex::new(None),
+                learned: Mutex::new(std::collections::HashMap::new()),
             });
 
             // Closing the projection/stage windows should hide them, not
@@ -93,6 +96,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::lookup_reference,
             commands::search_scripture,
+            commands::related_verses,
+            commands::chunk_passage,
+            commands::record_choice,
             commands::list_translations,
             commands::get_translation,
             commands::set_translation,
