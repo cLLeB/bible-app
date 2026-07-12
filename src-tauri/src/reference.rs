@@ -37,7 +37,7 @@ pub fn parse_reference(input: &str) -> Option<ParsedRef> {
     // Flatten tail into numbers. Accept "3:16", "3", "16" tokens or "3 16".
     let mut nums: Vec<u16> = Vec::new();
     for tok in tail {
-        for piece in tok.split(|c| c == ':' || c == '.') {
+        for piece in tok.split([':', '.']) {
             if piece.is_empty() {
                 continue;
             }

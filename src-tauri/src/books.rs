@@ -201,7 +201,7 @@ pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
     let mut best: Option<(&'static CanonicalBook, f64)> = None;
     for b in BOOKS {
         let score = strsim::jaro_winkler(&norm, &b.name.to_lowercase());
-        if best.map_or(true, |(_, s)| score > s) {
+        if best.is_none_or(|(_, s)| score > s) {
             best = Some((b, score));
         }
     }
