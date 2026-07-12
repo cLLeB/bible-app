@@ -26,8 +26,26 @@ pub struct Candidate {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ProjectionState {
     Blank,
+    Blackout,
+    Logo,
     Verse { text: String, caption: String },
     Song { text: String, caption: String },
+    Message { text: String },
+    Countdown { target_ms: i64, label: String },
+}
+
+/// Display appearance applied over any ProjectionState.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectionSettings {
+    pub font_scale: f32,   // 1.0 = default
+    pub theme: String,     // "dark" | "light" | "sepia"
+}
+
+impl Default for ProjectionSettings {
+    fn default() -> Self {
+        Self { font_scale: 1.0, theme: "dark".into() }
+    }
 }
 
 #[cfg(test)]

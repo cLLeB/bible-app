@@ -11,8 +11,26 @@ export interface VersePayload {
 
 export type ProjectionState =
   | { kind: "blank" }
+  | { kind: "blackout" }
+  | { kind: "logo" }
   | { kind: "verse"; text: string; caption: string }
-  | { kind: "song"; text: string; caption: string };
+  | { kind: "song"; text: string; caption: string }
+  | { kind: "message"; text: string }
+  | { kind: "countdown"; targetMs: number; label: string };
+
+export interface ProjectionSettings {
+  fontScale: number;
+  theme: "dark" | "light" | "sepia";
+}
+
+export const setProjection = (next: ProjectionState): Promise<void> =>
+  invoke<void>("set_projection", { next });
+
+export const getProjectionSettings = (): Promise<ProjectionSettings> =>
+  invoke<ProjectionSettings>("get_projection_settings");
+
+export const setProjectionSettings = (settings: ProjectionSettings): Promise<void> =>
+  invoke<void>("set_projection_settings", { settings });
 
 export interface SongSummary {
   id: number;

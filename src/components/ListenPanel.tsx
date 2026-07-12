@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   blankProjection,
@@ -14,6 +14,11 @@ export function ListenPanel() {
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [autoProject, setAutoProject] = useState(false);
+
+  // Ref so the once-registered event listener sees the current toggle value.
+  const autoRef = useRef(false);
+  autoRef.current = autoProject;
 
   useEffect(() => {
     const unlisteners = [
@@ -22,6 +27,9 @@ export function ListenPanel() {
       }),
       listen<Candidate>("verse-candidate", (e) => {
         setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
+        if (autoRef.current && e.payload.confidence >= 0.9) {
+          void projectVerse(e.payload.verse);
+        }
       }),
       listen("listen-started", () => {
         setListening(true);
@@ -71,6 +79,14 @@ export function ListenPanel() {
           <option value="tiny">Tiny (low-end PCs)</option>
         </select>
         {listening && <span className="text-sm text-green-700">listening…</span>}
+        <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at 90%+ confidence">
+          <input
+            type="checkbox"
+            checked={autoProject}
+            onChange={(e) => setAutoProject(e.target.checked)}
+          />
+          Auto-project ≥90%
+        </label>
       </div>
 
       {error && <p className="rounded bg-red-50 p-2 text-red-700">{error}</p>}

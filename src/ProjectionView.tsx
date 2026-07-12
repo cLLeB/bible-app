@@ -1,31 +1,101 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getProjection, type ProjectionState } from "./api";
+import {
+  getProjection,
+  getProjectionSettings,
+  type ProjectionSettings,
+  type ProjectionState,
+} from "./api";
+
+const THEMES: Record<string, { bg: string; fg: string; sub: string }> = {
+  dark: { bg: "#000000", fg: "#ffffff", sub: "#c9c9c9" },
+  light: { bg: "#ffffff", fg: "#101010", sub: "#555555" },
+  sepia: { bg: "#f4ecd8", fg: "#5b4636", sub: "#8a725a" },
+};
+
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function formatRemaining(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export function ProjectionView() {
   const [state, setState] = useState<ProjectionState>({ kind: "blank" });
+  const [settings, setSettings] = useState<ProjectionSettings>({ fontScale: 1, theme: "dark" });
 
   useEffect(() => {
-    // Pull the current state on mount (covers the case where this window
-    // opened after a project command already emitted its event).
     getProjection().then(setState).catch(() => setState({ kind: "blank" }));
-
-    const un = listen<ProjectionState>("set-projection", (e) => setState(e.payload));
+    getProjectionSettings().then(setSettings).catch(() => {});
+    const subs = [
+      listen<ProjectionState>("set-projection", (e) => setState(e.payload)),
+      listen<ProjectionSettings>("set-settings", (e) => setSettings(e.payload)),
+    ];
     return () => {
-      un.then((f) => f());
+      subs.forEach((u) => u.then((f) => f()));
     };
   }, []);
 
+  const theme = THEMES[settings.theme] ?? THEMES.dark;
+  const scale = settings.fontScale || 1;
+  const now = useNow(state.kind === "countdown");
+
+  const bodyStyle = { fontSize: `${3 * scale}rem`, lineHeight: 1.1 };
+  const capStyle = { fontSize: `${1.4 * scale}rem`, color: theme.sub };
+
+  function body() {
+    switch (state.kind) {
+      case "verse":
+      case "song":
+        return (
+          <>
+            <p className="mb-8 max-w-6xl whitespace-pre-line" style={bodyStyle}>
+              {state.text}
+            </p>
+            <p style={capStyle}>{state.caption}</p>
+          </>
+        );
+      case "message":
+        return (
+          <p className="max-w-6xl whitespace-pre-line" style={bodyStyle}>
+            {state.text}
+          </p>
+        );
+      case "countdown":
+        return (
+          <>
+            <p style={{ fontSize: `${5 * scale}rem`, fontVariantNumeric: "tabular-nums" }}>
+              {formatRemaining(state.targetMs - now)}
+            </p>
+            {state.label && <p style={capStyle}>{state.label}</p>}
+          </>
+        );
+      case "logo":
+        return <p style={{ fontSize: `${2.5 * scale}rem`, opacity: 0.85 }}>✝ Bible</p>;
+      case "blackout":
+        return null;
+      case "blank":
+      default:
+        return <p style={{ fontSize: "0.9rem", color: theme.sub }}>Projection ready</p>;
+    }
+  }
+
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-black px-16 text-center text-white">
-      {state.kind === "blank" ? (
-        <p className="text-sm text-gray-700">Projection ready</p>
-      ) : (
-        <>
-          <p className="mb-8 max-w-5xl whitespace-pre-line text-5xl leading-tight">{state.text}</p>
-          <p className="text-2xl text-gray-300">{state.caption}</p>
-        </>
-      )}
+    <div
+      className="flex h-screen w-screen flex-col items-center justify-center px-16 text-center"
+      style={{ backgroundColor: state.kind === "blackout" ? "#000000" : theme.bg, color: theme.fg }}
+    >
+      {body()}
     </div>
   );
 }

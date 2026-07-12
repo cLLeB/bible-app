@@ -9,7 +9,7 @@ mod slides;
 mod stt;
 
 use commands::AppState;
-use events::ProjectionState;
+use events::{ProjectionSettings, ProjectionState};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -47,6 +47,7 @@ pub fn run() {
                 db: Mutex::new(db),
                 translation: "WEB".into(),
                 current: Mutex::new(ProjectionState::Blank),
+                settings: Mutex::new(ProjectionSettings::default()),
                 listening: Arc::new(AtomicBool::new(false)),
             });
 
@@ -69,6 +70,9 @@ pub fn run() {
             commands::project_verse,
             commands::project_slide,
             commands::blank_projection,
+            commands::set_projection,
+            commands::get_projection_settings,
+            commands::set_projection_settings,
             commands::add_song,
             commands::list_songs,
             commands::get_song_slides,

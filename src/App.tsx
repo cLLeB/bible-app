@@ -1,4 +1,5 @@
 import "./App.css";
+import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LookupBar } from "./components/LookupBar";
 import { ResultCard } from "./components/ResultCard";
@@ -17,6 +18,8 @@ export default function App() {
       </section>
       <hr />
       <SongsPanel />
+      <hr />
+      <DisplayPanel />
     </main>
   );
 }

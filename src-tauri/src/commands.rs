@@ -1,6 +1,6 @@
 use crate::books::book_by_osis;
 use crate::db::{Db, SongSummary};
-use crate::events::{ProjectionState, VersePayload};
+use crate::events::{ProjectionSettings, ProjectionState, VersePayload};
 use crate::reference::parse_reference;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +11,7 @@ pub struct AppState {
     pub db: Mutex<Db>,
     pub translation: String, // active translation code, e.g. "WEB"
     pub current: Mutex<ProjectionState>, // what the projection should show
+    pub settings: Mutex<ProjectionSettings>, // display appearance
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
 }
 
@@ -187,6 +188,34 @@ pub fn blank_projection(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     project(&app, &state, ProjectionState::Blank)
+}
+
+/// Generic projection setter for Blackout / Logo / Message / Countdown, etc.
+#[tauri::command]
+pub fn set_projection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    next: ProjectionState,
+) -> Result<(), String> {
+    project(&app, &state, next)
+}
+
+#[tauri::command]
+pub fn get_projection_settings(state: tauri::State<'_, AppState>) -> ProjectionSettings {
+    state.settings.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn set_projection_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    settings: ProjectionSettings,
+) -> Result<(), String> {
+    if let Ok(mut s) = state.settings.lock() {
+        *s = settings.clone();
+    }
+    app.emit_to("projection", "set-settings", settings)
+        .map_err(|e| e.to_string())
 }
 
 // ---- Live listening (STT) ----
