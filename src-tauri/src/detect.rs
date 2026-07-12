@@ -223,6 +223,7 @@ pub fn detect_nav_command(text: &str) -> Option<&'static str> {
 }
 
 /// Stateless convenience: detect full references with no carried context.
+#[cfg_attr(not(test), allow(dead_code))] // used by unit tests
 pub fn detect_references(text: &str) -> Vec<ParsedRef> {
     let mut ctx = RefContext::default();
     detect_with_context(text, &mut ctx)

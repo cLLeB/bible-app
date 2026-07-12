@@ -18,9 +18,10 @@ pub struct AppState {
 }
 
 /// The scripture currently on screen, for fast verse/chapter navigation.
+/// Navigation always resolves against the *active* translation, so switching
+/// versions mid-presentation carries the position across.
 #[derive(Clone)]
 pub struct Cursor {
-    pub translation: String,
     pub book_osis: String,
     pub chapter: u16,
     pub verse: u16,
@@ -32,14 +33,9 @@ impl AppState {
     }
 }
 
-fn set_cursor(state: &AppState, translation: &str, book_osis: &str, chapter: u16, verse: u16) {
+fn set_cursor(state: &AppState, book_osis: &str, chapter: u16, verse: u16) {
     if let Ok(mut c) = state.cursor.lock() {
-        *c = Some(Cursor {
-            translation: translation.to_string(),
-            book_osis: book_osis.to_string(),
-            chapter,
-            verse,
-        });
+        *c = Some(Cursor { book_osis: book_osis.to_string(), chapter, verse });
     }
 }
 
@@ -112,7 +108,7 @@ pub(crate) fn present_coords_handle(
         db.verse_at(&tr, book_osis, chapter, verse).ok().flatten()
     }?;
     let payload = build_payload(rec);
-    set_cursor(&state, &payload.translation, &payload.book_osis, payload.chapter, payload.verse);
+    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
     let caption = format!("{} · {}", payload.reference, payload.translation);
     let _ = project_via_handle(app, ProjectionState::Verse { text: payload.text.clone(), caption });
     Some(payload)
@@ -424,7 +420,7 @@ pub fn project_verse(
     state: tauri::State<'_, AppState>,
     payload: VersePayload,
 ) -> Result<(), String> {
-    set_cursor(&state, &payload.translation, &payload.book_osis, payload.chapter, payload.verse);
+    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
     let caption = format!("{} · {}", payload.reference, payload.translation);
     project(&app, &state, ProjectionState::Verse { text: payload.text, caption })
 }
