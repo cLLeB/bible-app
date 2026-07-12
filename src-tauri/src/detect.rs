@@ -29,15 +29,20 @@ impl RefContext {
     }
 }
 
+/// Pull number(s) out of a token, treating ANY non-digit as a separator, so
+/// whatever symbol whisper inserts between chapter and verse works:
+/// "3:16", "3.16", "7-7", "7/7" all yield (chapter, Some(verse)); "7" yields
+/// (7, None). This is the robust "a book is followed by numbers" heuristic.
 fn parse_num_token(tok: &str) -> Option<(u16, Option<u16>)> {
-    // Accept "3:16", "3.16" (whisper often renders "3 16" as "3.16"), or "3".
-    if tok.contains(':') || tok.contains('.') {
-        let mut parts = tok.split(|c| c == ':' || c == '.');
-        let a = parts.next()?.parse::<u16>().ok()?;
-        let b = parts.next().and_then(|p| p.parse::<u16>().ok());
-        Some((a, b))
-    } else {
-        tok.parse::<u16>().ok().map(|n| (n, None))
+    let nums: Vec<u16> = tok
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u16>().ok())
+        .collect();
+    match nums.as_slice() {
+        [] => None,
+        [a] => Some((*a, None)),
+        [a, b, ..] => Some((*a, Some(*b))),
     }
 }
 
@@ -287,6 +292,14 @@ mod tests {
         // implied "John 2 5" (two bare numbers, no "chapter/verse" words)
         let b = one("turn to John 2 5");
         assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("John", 2, Some(5)));
+
+        // hyphen glue: "Matthew 7-7" (spoken "Matthew seven seven")
+        let c = one("let's open our bibles to Matthew 7-7 King James Version");
+        assert_eq!((c.book_osis.as_str(), c.chapter, c.verse), ("Matt", 7, Some(7)));
+
+        // slash glue
+        let d = one("turn to Romans 8/28");
+        assert_eq!((d.book_osis.as_str(), d.chapter, d.verse), ("Rom", 8, Some(28)));
     }
 
     #[test]
