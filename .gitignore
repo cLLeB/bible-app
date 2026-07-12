@@ -29,3 +29,6 @@ data/web.canonical.json
 # Whisper model + binary (user-provided, large)
 /models/
 /bin/
+
+# All generated Bible data (downloaded, large, public-domain)
+data/*.canonical.json

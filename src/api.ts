@@ -3,11 +3,24 @@ import { invoke } from "@tauri-apps/api/core";
 export interface VersePayload {
   reference: string;
   book: string;
+  bookOsis: string;
   chapter: number;
   verse: number;
   text: string;
   translation: string;
 }
+
+export type NavDir = "next-verse" | "prev-verse" | "next-chapter" | "prev-chapter";
+
+export const navigate = (dir: NavDir): Promise<VersePayload | null> =>
+  invoke<VersePayload | null>("navigate", { dir });
+
+export const presentCoords = (
+  bookOsis: string,
+  chapter: number,
+  verse: number,
+): Promise<VersePayload> =>
+  invoke<VersePayload>("present_coords", { bookOsis, chapter, verse });
 
 export type ProjectionState =
   | { kind: "blank" }

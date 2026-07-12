@@ -109,6 +109,21 @@ fn transcribe_detect(
     }
 
     let detections = detect::detect_with_context(&text, ctx);
+
+    // Relative voice navigation ("next verse", "next chapter") against the
+    // currently-presented scripture — the fast hands-free flow.
+    if detections.is_empty() {
+        if let Some(dir) = detect::detect_nav_command(&text) {
+            if let Some(payload) = crate::commands::navigate_handle(app, dir) {
+                let _ = app.emit(
+                    "verse-candidate",
+                    Candidate { verse: payload, confidence: 0.9, source: "voice-nav".into() },
+                );
+                return;
+            }
+        }
+    }
+
     let state = app.state::<AppState>();
     let tr = state.active_translation();
     let candidates: Vec<Candidate> = {

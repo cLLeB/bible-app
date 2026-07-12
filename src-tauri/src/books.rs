@@ -168,6 +168,21 @@ pub fn book_by_osis(osis: &str) -> Option<&'static CanonicalBook> {
     BOOKS.iter().find(|b| b.osis == osis)
 }
 
+/// The next book in canonical order (None past Revelation).
+pub fn book_after(osis: &str) -> Option<&'static CanonicalBook> {
+    let b = book_by_osis(osis)?;
+    BOOKS.iter().find(|x| x.order == b.order + 1)
+}
+
+/// The previous book in canonical order (None before Genesis).
+pub fn book_before(osis: &str) -> Option<&'static CanonicalBook> {
+    let b = book_by_osis(osis)?;
+    if b.order <= 1 {
+        return None;
+    }
+    BOOKS.iter().find(|x| x.order == b.order - 1)
+}
+
 /// Exact match first, then fuzzy recovery for near-misses from speech-to-text
 /// (e.g. "roman" → Romans, "mathew" → Matthew, "revelations" → Revelation).
 pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {

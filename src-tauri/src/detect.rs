@@ -206,6 +206,22 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
     out
 }
 
+/// Detect a spoken relative-navigation command (against the presented verse).
+pub fn detect_nav_command(text: &str) -> Option<&'static str> {
+    let t = text.to_lowercase();
+    if t.contains("next chapter") {
+        Some("next-chapter")
+    } else if t.contains("previous chapter") || t.contains("last chapter") {
+        Some("prev-chapter")
+    } else if t.contains("next verse") || t.contains("following verse") {
+        Some("next-verse")
+    } else if t.contains("previous verse") || t.contains("verse before") || t.contains("go back") {
+        Some("prev-verse")
+    } else {
+        None
+    }
+}
+
 /// Stateless convenience: detect full references with no carried context.
 pub fn detect_references(text: &str) -> Vec<ParsedRef> {
     let mut ctx = RefContext::default();

@@ -19,9 +19,9 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// Which surface currently owns keyboard slide navigation, so SongLive and
-// ServicePanel don't both react to the same arrow-key press.
-type LiveOwner = "service" | "song" | null;
+// Which surface currently owns keyboard slide navigation, so SongLive,
+// ServicePanel and the scripture presenter don't all react to one key press.
+type LiveOwner = "service" | "song" | "scripture" | null;
 interface LiveState {
   owner: LiveOwner;
   setOwner: (owner: LiveOwner) => void;
@@ -29,6 +29,16 @@ interface LiveState {
 export const useLiveStore = create<LiveState>((set) => ({
   owner: null,
   setOwner: (owner) => set({ owner }),
+}));
+
+// The scripture verse currently being presented (for the nav controller).
+interface ScriptureState {
+  current: VersePayload | null;
+  setCurrent: (v: VersePayload | null) => void;
+}
+export const useScriptureStore = create<ScriptureState>((set) => ({
+  current: null,
+  setCurrent: (current) => set({ current }),
 }));
 
 export const useServiceStore = create<ServiceState>()(

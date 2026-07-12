@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import {
-  blankProjection,
-  projectVerse,
-  startListening,
-  stopListening,
-  type Candidate,
-} from "../api";
+import { blankProjection, startListening, stopListening, type Candidate } from "../api";
+import { present } from "../present";
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
@@ -38,8 +33,8 @@ export function ListenPanel() {
       }),
       listen<Candidate>("verse-candidate", (e) => {
         setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
-        if (autoRef.current && e.payload.confidence >= 0.9) {
-          void projectVerse(e.payload.verse);
+        if (autoRef.current && e.payload.confidence >= 0.9 && e.payload.source !== "voice-nav") {
+          void present(e.payload.verse);
         }
       }),
       listen("listen-started", () => {
@@ -132,7 +127,7 @@ export function ListenPanel() {
               candidates.map((c, i) => (
                 <button
                   key={`${c.verse.reference}-${i}`}
-                  onClick={() => projectVerse(c.verse)}
+                  onClick={() => present(c.verse)}
                   className="block w-full rounded border p-2 text-left hover:bg-green-50"
                 >
                   <div className="flex items-center justify-between">

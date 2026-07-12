@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS song_slides (
     text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_slides_song ON song_slides (song_id, order_index);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 "#;
 
 #[cfg_attr(not(test), allow(dead_code))] // used by unit tests
@@ -137,10 +141,31 @@ impl Db {
             }
         }
         tx.commit()?;
-        // keep the FTS index in sync with the content table
-        self.conn
-            .execute("INSERT INTO verses_fts(verses_fts) VALUES('rebuild')", [])?;
         Ok(parsed.verses.len())
+    }
+
+    /// Rebuild the FTS index only when the verse count has changed since the
+    /// last build (tracked in `settings`), so later launches are instant.
+    pub fn sync_fts(&self) -> rusqlite::Result<()> {
+        let verses: i64 = self.conn.query_row("SELECT count(*) FROM verses", [], |r| r.get(0))?;
+        let stored: i64 = self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = 'fts_count'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(-1);
+        if stored != verses {
+            self.conn
+                .execute("INSERT INTO verses_fts(verses_fts) VALUES('rebuild')", [])?;
+            self.conn.execute("DELETE FROM settings WHERE key = 'fts_count'", [])?;
+            self.conn.execute(
+                "INSERT INTO settings(key, value) VALUES('fts_count', ?1)",
+                [verses.to_string()],
+            )?;
+        }
+        Ok(())
     }
 
     /// Full-text search verses (BM25). Returns records best-first with their
@@ -201,6 +226,63 @@ impl Db {
         } else {
             Ok(Some(texts.join(" ")))
         }
+    }
+
+    /// Fetch one verse by exact coordinates.
+    pub fn verse_at(
+        &self,
+        translation_code: &str,
+        book_osis: &str,
+        chapter: u16,
+        verse: u16,
+    ) -> rusqlite::Result<Option<VerseRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.book_osis, v.chapter, v.verse, v.text, t.code
+             FROM verses v JOIN translations t ON t.id = v.translation_id
+             WHERE t.code = ?1 AND v.book_osis = ?2 AND v.chapter = ?3 AND v.verse = ?4",
+        )?;
+        let mut rows = stmt.query((translation_code, book_osis, chapter, verse))?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(VerseRecord {
+                book_osis: row.get(0)?,
+                chapter: row.get(1)?,
+                verse: row.get(2)?,
+                text: row.get(3)?,
+                translation: row.get(4)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Highest verse number present in a chapter (None if chapter absent).
+    pub fn chapter_last_verse(
+        &self,
+        translation_code: &str,
+        book_osis: &str,
+        chapter: u16,
+    ) -> rusqlite::Result<Option<u16>> {
+        self.conn
+            .query_row(
+                "SELECT MAX(v.verse) FROM verses v JOIN translations t ON t.id = v.translation_id
+                 WHERE t.code = ?1 AND v.book_osis = ?2 AND v.chapter = ?3",
+                (translation_code, book_osis, chapter),
+                |r| r.get::<_, Option<u16>>(0),
+            )
+    }
+
+    /// Highest chapter number present in a book (None if book absent).
+    pub fn book_last_chapter(
+        &self,
+        translation_code: &str,
+        book_osis: &str,
+    ) -> rusqlite::Result<Option<u16>> {
+        self.conn.query_row(
+            "SELECT MAX(v.chapter) FROM verses v JOIN translations t ON t.id = v.translation_id
+             WHERE t.code = ?1 AND v.book_osis = ?2",
+            (translation_code, book_osis),
+            |r| r.get::<_, Option<u16>>(0),
+        )
     }
 
     pub fn find_verse(
@@ -451,6 +533,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         db.migrate().unwrap();
         db.seed_from_json(SAMPLE).unwrap();
+        db.sync_fts().unwrap();
         let hits = db
             .search_fts("WEB", "\"loved\" OR \"world\" OR \"gave\" OR \"perish\"", 3)
             .unwrap();

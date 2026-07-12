@@ -1,4 +1,5 @@
-import { blankProjection, projectVerse } from "../api";
+import { blankProjection } from "../api";
+import { present } from "../present";
 import { useServiceStore } from "../services";
 import { useLookupStore } from "../store";
 
@@ -15,7 +16,7 @@ export function ResultCard() {
       <p className="mb-3 text-lg">{result.text}</p>
       <div className="flex gap-2">
         <button
-          onClick={() => projectVerse(result)}
+          onClick={() => present(result)}
           className="rounded bg-green-600 px-4 py-2 text-white"
         >
           Project

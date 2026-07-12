@@ -61,6 +61,7 @@ pub fn run() {
                 }
             }
             db.seed_hymns_if_empty().expect("seed hymns");
+            db.sync_fts().expect("sync fts");
 
             app.manage(AppState {
                 db: Mutex::new(db),
@@ -69,6 +70,7 @@ pub fn run() {
                 settings: Mutex::new(ProjectionSettings::default()),
                 listening: Arc::new(AtomicBool::new(false)),
                 remote_running: Arc::new(AtomicBool::new(false)),
+                cursor: Mutex::new(None),
             });
 
             // Closing the projection/stage windows should hide them, not
@@ -95,6 +97,8 @@ pub fn run() {
             commands::get_projection,
             commands::project_verse,
             commands::project_slide,
+            commands::present_coords,
+            commands::navigate,
             commands::blank_projection,
             commands::set_projection,
             commands::show_stage,

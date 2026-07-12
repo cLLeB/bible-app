@@ -1,4 +1,4 @@
-use crate::books::book_by_osis;
+use crate::books::{book_after, book_before, book_by_osis};
 use crate::db::{Db, SongSummary};
 use crate::events::{ProjectionSettings, ProjectionState, VersePayload};
 use crate::reference::parse_reference;
@@ -14,12 +14,138 @@ pub struct AppState {
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
+    pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
+}
+
+/// The scripture currently on screen, for fast verse/chapter navigation.
+#[derive(Clone)]
+pub struct Cursor {
+    pub translation: String,
+    pub book_osis: String,
+    pub chapter: u16,
+    pub verse: u16,
 }
 
 impl AppState {
     pub fn active_translation(&self) -> String {
         self.translation.lock().map(|t| t.clone()).unwrap_or_else(|_| "WEB".into())
     }
+}
+
+fn set_cursor(state: &AppState, translation: &str, book_osis: &str, chapter: u16, verse: u16) {
+    if let Ok(mut c) = state.cursor.lock() {
+        *c = Some(Cursor {
+            translation: translation.to_string(),
+            book_osis: book_osis.to_string(),
+            chapter,
+            verse,
+        });
+    }
+}
+
+/// Compute the target coordinates for a navigation step, crossing chapter and
+/// book boundaries. Returns None at the ends of the canon.
+fn compute_nav(
+    db: &Db,
+    tr: &str,
+    cur: &Cursor,
+    dir: &str,
+) -> rusqlite::Result<Option<(String, u16, u16)>> {
+    let res = match dir {
+        "next-verse" => {
+            let last = db.chapter_last_verse(tr, &cur.book_osis, cur.chapter)?.unwrap_or(0);
+            if cur.verse < last {
+                Some((cur.book_osis.clone(), cur.chapter, cur.verse + 1))
+            } else if db.chapter_last_verse(tr, &cur.book_osis, cur.chapter + 1)?.is_some() {
+                Some((cur.book_osis.clone(), cur.chapter + 1, 1))
+            } else {
+                book_after(&cur.book_osis).map(|b| (b.osis.to_string(), 1, 1))
+            }
+        }
+        "prev-verse" => {
+            if cur.verse > 1 {
+                Some((cur.book_osis.clone(), cur.chapter, cur.verse - 1))
+            } else if cur.chapter > 1 {
+                let lv = db.chapter_last_verse(tr, &cur.book_osis, cur.chapter - 1)?.unwrap_or(1);
+                Some((cur.book_osis.clone(), cur.chapter - 1, lv))
+            } else if let Some(b) = book_before(&cur.book_osis) {
+                let lc = db.book_last_chapter(tr, b.osis)?.unwrap_or(1);
+                let lv = db.chapter_last_verse(tr, b.osis, lc)?.unwrap_or(1);
+                Some((b.osis.to_string(), lc, lv))
+            } else {
+                None
+            }
+        }
+        "next-chapter" => {
+            if db.chapter_last_verse(tr, &cur.book_osis, cur.chapter + 1)?.is_some() {
+                Some((cur.book_osis.clone(), cur.chapter + 1, 1))
+            } else {
+                book_after(&cur.book_osis).map(|b| (b.osis.to_string(), 1, 1))
+            }
+        }
+        "prev-chapter" => {
+            if cur.chapter > 1 {
+                Some((cur.book_osis.clone(), cur.chapter - 1, 1))
+            } else if let Some(b) = book_before(&cur.book_osis) {
+                let lc = db.book_last_chapter(tr, b.osis)?.unwrap_or(1);
+                Some((b.osis.to_string(), lc, 1))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    Ok(res)
+}
+
+/// Present a verse by exact coordinates: project it and set the cursor.
+pub(crate) fn present_coords_handle(
+    app: &tauri::AppHandle,
+    book_osis: &str,
+    chapter: u16,
+    verse: u16,
+) -> Option<VersePayload> {
+    let state = app.state::<AppState>();
+    let tr = state.active_translation();
+    let rec = {
+        let db = state.db.lock().ok()?;
+        db.verse_at(&tr, book_osis, chapter, verse).ok().flatten()
+    }?;
+    let payload = build_payload(rec);
+    set_cursor(&state, &payload.translation, &payload.book_osis, payload.chapter, payload.verse);
+    let caption = format!("{} · {}", payload.reference, payload.translation);
+    let _ = project_via_handle(app, ProjectionState::Verse { text: payload.text.clone(), caption });
+    Some(payload)
+}
+
+/// Move the presented scripture in a direction; returns the new verse (or None
+/// at a boundary / when nothing is presented yet).
+pub(crate) fn navigate_handle(app: &tauri::AppHandle, dir: &str) -> Option<VersePayload> {
+    let state = app.state::<AppState>();
+    let cur = state.cursor.lock().ok().and_then(|c| c.clone())?;
+    let tr = state.active_translation();
+    let target = {
+        let db = state.db.lock().ok()?;
+        compute_nav(&db, &tr, &cur, dir).ok().flatten()
+    };
+    let (osis, ch, v) = target?;
+    present_coords_handle(app, &osis, ch, v)
+}
+
+#[tauri::command]
+pub fn present_coords(
+    app: tauri::AppHandle,
+    book_osis: String,
+    chapter: u16,
+    verse: u16,
+) -> Result<VersePayload, String> {
+    present_coords_handle(&app, &book_osis, chapter, verse)
+        .ok_or_else(|| "Verse not found".to_string())
+}
+
+#[tauri::command]
+pub fn navigate(app: tauri::AppHandle, dir: String) -> Option<VersePayload> {
+    navigate_handle(&app, &dir)
 }
 
 pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -30,6 +156,7 @@ pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
     VersePayload {
         reference,
         book: book_name,
+        book_osis: rec.book_osis,
         chapter: rec.chapter,
         verse: rec.verse,
         text: rec.text,
@@ -72,6 +199,7 @@ pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, S
                 return Ok(VersePayload {
                     reference: format!("{} {}:{}-{}", book, parsed.chapter, start, end),
                     book,
+                    book_osis: parsed.book_osis.clone(),
                     chapter: parsed.chapter,
                     verse: start,
                     text,
@@ -296,6 +424,7 @@ pub fn project_verse(
     state: tauri::State<'_, AppState>,
     payload: VersePayload,
 ) -> Result<(), String> {
+    set_cursor(&state, &payload.translation, &payload.book_osis, payload.chapter, payload.verse);
     let caption = format!("{} · {}", payload.reference, payload.translation);
     project(&app, &state, ProjectionState::Verse { text: payload.text, caption })
 }

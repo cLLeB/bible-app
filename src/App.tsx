@@ -4,6 +4,7 @@ import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
 import { ResultCard } from "./components/ResultCard";
+import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
@@ -14,6 +15,7 @@ export default function App() {
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <h1 className="text-2xl font-bold">Bible — Operator Console</h1>
       <LiveNow />
+      <ScripturePresenter />
       <ListenPanel />
       <hr />
       <section className="space-y-4">
