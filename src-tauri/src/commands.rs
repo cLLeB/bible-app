@@ -520,10 +520,8 @@ pub fn project_slide(
             .get_song_title(song_id)
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "Song".to_string());
-        (
-            slide.text.clone(),
-            format!("{} ({}/{})", title, index + 1, slides.len()),
-        )
+        // Projection shows just the title — no slide numbers on the wall.
+        (slide.text.clone(), title)
     };
     project(&app, &state, ProjectionState::Song { text, caption })
 }

@@ -60,7 +60,8 @@ pub fn run() {
                     }
                 }
             }
-            db.seed_hymns_if_empty().expect("seed hymns");
+            db.seed_default_songs(include_str!("../default-songs.json"), 1)
+                .expect("seed default songs");
             db.sync_fts().expect("sync fts");
 
             app.manage(AppState {

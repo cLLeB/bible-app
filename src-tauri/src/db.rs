@@ -111,6 +111,13 @@ pub struct SongDetail {
     pub lyrics: String,
 }
 
+#[derive(serde::Deserialize)]
+struct DefaultSong {
+    title: String,
+    author: Option<String>,
+    lyrics: String,
+}
+
 impl Db {
     pub fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(MIGRATION)
@@ -418,15 +425,41 @@ impl Db {
         }
     }
 
-    /// Seed a few public-domain hymns the first time (songs table empty).
-    pub fn seed_hymns_if_empty(&self) -> rusqlite::Result<()> {
-        let count: i64 = self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get(0))?;
-        if count > 0 {
+    fn song_exists(&self, title: &str) -> rusqlite::Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT count(*) FROM songs WHERE title = ?1",
+            [title],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Seed the bundled public-domain hymns once per `version`, adding only
+    /// titles not already present (so user libraries are never disturbed).
+    pub fn seed_default_songs(&self, json: &str, version: i64) -> rusqlite::Result<()> {
+        let stored: i64 = self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = 'bundled_songs_v'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if stored >= version {
             return Ok(());
         }
-        for (title, author, lyrics) in BUNDLED_HYMNS {
-            self.add_song(title, Some(author), lyrics)?;
+        let songs: Vec<DefaultSong> = serde_json::from_str(json)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        for s in &songs {
+            if !self.song_exists(&s.title)? {
+                self.add_song(&s.title, s.author.as_deref(), &s.lyrics)?;
+            }
         }
+        self.conn.execute("DELETE FROM settings WHERE key = 'bundled_songs_v'", [])?;
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES('bundled_songs_v', ?1)",
+            [version.to_string()],
+        )?;
         Ok(())
     }
 
@@ -440,35 +473,6 @@ impl Db {
         rows.collect()
     }
 }
-
-/// Public-domain hymns (all pre-1900) bundled as starter content.
-static BUNDLED_HYMNS: &[(&str, &str, &str)] = &[
-    (
-        "Amazing Grace",
-        "John Newton",
-        "Amazing grace! how sweet the sound,\nThat saved a wretch like me!\nI once was lost, but now am found,\nWas blind, but now I see.\n\n'Twas grace that taught my heart to fear,\nAnd grace my fears relieved;\nHow precious did that grace appear\nThe hour I first believed!\n\nThrough many dangers, toils and snares,\nI have already come;\n'Tis grace hath brought me safe thus far,\nAnd grace will lead me home.",
-    ),
-    (
-        "Holy, Holy, Holy",
-        "Reginald Heber",
-        "Holy, holy, holy! Lord God Almighty!\nEarly in the morning our song shall rise to Thee;\nHoly, holy, holy! merciful and mighty!\nGod in three Persons, blessed Trinity!\n\nHoly, holy, holy! all the saints adore Thee,\nCasting down their golden crowns around the glassy sea;\nCherubim and seraphim falling down before Thee,\nWhich wert, and art, and evermore shalt be.",
-    ),
-    (
-        "It Is Well with My Soul",
-        "Horatio Spafford",
-        "When peace like a river attendeth my way,\nWhen sorrows like sea billows roll;\nWhatever my lot, Thou hast taught me to say,\nIt is well, it is well with my soul.\n\nIt is well with my soul,\nIt is well, it is well with my soul.",
-    ),
-    (
-        "Blessed Assurance",
-        "Fanny Crosby",
-        "Blessed assurance, Jesus is mine!\nO what a foretaste of glory divine!\nHeir of salvation, purchase of God,\nBorn of His Spirit, washed in His blood.\n\nThis is my story, this is my song,\nPraising my Savior all the day long;\nThis is my story, this is my song,\nPraising my Savior all the day long.",
-    ),
-    (
-        "Come Thou Fount",
-        "Robert Robinson",
-        "Come, Thou Fount of every blessing,\nTune my heart to sing Thy grace;\nStreams of mercy, never ceasing,\nCall for songs of loudest praise.\n\nHere I raise mine Ebenezer;\nHither by Thy help I'm come;\nAnd I hope, by Thy good pleasure,\nSafely to arrive at home.",
-    ),
-];
 
 #[cfg(test)]
 mod tests {
