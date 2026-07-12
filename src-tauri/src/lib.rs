@@ -5,6 +5,7 @@ mod db;
 mod detect;
 mod events;
 mod reference;
+mod semantic;
 mod slides;
 mod stt;
 

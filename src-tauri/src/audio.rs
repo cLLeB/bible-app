@@ -1,7 +1,7 @@
 use crate::commands::{build_payload, AppState};
 use crate::detect::{self, DetectSource, Detection, RefContext};
 use crate::events::Candidate;
-use crate::stt;
+use crate::{semantic, stt};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -109,9 +109,6 @@ fn transcribe_detect(
     }
 
     let detections = detect::detect_with_context(&text, ctx);
-    if detections.is_empty() {
-        return;
-    }
     let state = app.state::<AppState>();
     let candidates: Vec<Candidate> = {
         let db = match state.db.lock() {
@@ -119,16 +116,32 @@ fn transcribe_detect(
             Err(_) => return,
         };
         let mut out = Vec::new();
-        for d in &detections {
-            let r = &d.reference;
-            let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
-            if last.as_ref() == Some(&key) {
-                continue;
+        if !detections.is_empty() {
+            // Explicit / fuzzy / context references.
+            for d in &detections {
+                let r = &d.reference;
+                let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
+                if last.as_ref() == Some(&key) {
+                    continue;
+                }
+                if let Ok(Some(rec)) = db.find_verse(&state.translation, r) {
+                    let (confidence, source) = confidence_of(d);
+                    out.push(Candidate { verse: build_payload(rec), confidence, source: source.to_string() });
+                    *last = Some(key);
+                }
             }
-            if let Ok(Some(rec)) = db.find_verse(&state.translation, r) {
-                let (confidence, source) = confidence_of(d);
-                out.push(Candidate { verse: build_payload(rec), confidence, source: source.to_string() });
-                *last = Some(key);
+        } else if let Some((query, words)) = semantic::fts_query(&text) {
+            // No spoken reference — look for a quoted/paraphrased verse (FTS).
+            if let Ok(hits) = db.search_fts(&state.translation, &query, 3) {
+                if let Some((rec, _rank)) = hits.into_iter().next() {
+                    let ov = semantic::overlap(&words, &rec.text);
+                    let key: RefKey = (rec.book_osis.clone(), rec.chapter, Some(rec.verse));
+                    if semantic::is_strong(ov, words.len()) && last.as_ref() != Some(&key) {
+                        let confidence = semantic::confidence(ov, words.len());
+                        out.push(Candidate { verse: build_payload(rec), confidence, source: "quote".into() });
+                        *last = Some(key);
+                    }
+                }
             }
         }
         out

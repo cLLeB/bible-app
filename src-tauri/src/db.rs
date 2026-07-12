@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS verses (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_verse_lookup
     ON verses (translation_id, book_osis, chapter, verse);
+CREATE VIRTUAL TABLE IF NOT EXISTS verses_fts
+    USING fts5(text, content='verses', content_rowid='id');
 CREATE TABLE IF NOT EXISTS songs (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -135,7 +137,44 @@ impl Db {
             }
         }
         tx.commit()?;
+        // keep the FTS index in sync with the content table
+        self.conn
+            .execute("INSERT INTO verses_fts(verses_fts) VALUES('rebuild')", [])?;
         Ok(parsed.verses.len())
+    }
+
+    /// Full-text search verses (BM25). Returns records best-first with their
+    /// rank (lower = better match).
+    pub fn search_fts(
+        &self,
+        translation_code: &str,
+        query: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<(VerseRecord, f64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.book_osis, v.chapter, v.verse, v.text, t.code, bm25(verses_fts) AS rank
+             FROM verses_fts
+             JOIN verses v ON v.id = verses_fts.rowid
+             JOIN translations t ON t.id = v.translation_id
+             WHERE verses_fts MATCH ?1 AND t.code = ?2
+             ORDER BY rank LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            (query, translation_code, limit as i64),
+            |row| {
+                Ok((
+                    VerseRecord {
+                        book_osis: row.get(0)?,
+                        chapter: row.get(1)?,
+                        verse: row.get(2)?,
+                        text: row.get(3)?,
+                        translation: row.get(4)?,
+                    },
+                    row.get::<_, f64>(5)?,
+                ))
+            },
+        )?;
+        rows.collect()
     }
 
     /// Fetch verses start..=end of a chapter and join their text. Returns None
@@ -389,6 +428,19 @@ mod tests {
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].title, "Amazing Grace");
         assert_eq!(db.get_song_title(id).unwrap().as_deref(), Some("Amazing Grace"));
+    }
+
+    #[test]
+    fn fts_finds_quoted_verse() {
+        let db = open_in_memory().unwrap();
+        db.migrate().unwrap();
+        db.seed_from_json(SAMPLE).unwrap();
+        let hits = db
+            .search_fts("WEB", "\"loved\" OR \"world\" OR \"gave\" OR \"perish\"", 3)
+            .unwrap();
+        assert!(!hits.is_empty(), "expected an FTS hit");
+        assert_eq!(hits[0].0.book_osis, "John");
+        assert_eq!(hits[0].0.verse, 16);
     }
 
     #[test]
