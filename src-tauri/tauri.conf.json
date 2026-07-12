@@ -24,6 +24,13 @@
         "height": 540,
         "visible": false,
         "decorations": false
+      },
+      {
+        "label": "stage",
+        "title": "Stage Display",
+        "width": 800,
+        "height": 480,
+        "visible": false
       }
     ],
     "security": {

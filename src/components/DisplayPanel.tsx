@@ -4,6 +4,7 @@ import {
   getProjectionSettings,
   setProjection,
   setProjectionSettings,
+  showStage,
   type ProjectionSettings,
 } from "../api";
 
@@ -38,6 +39,9 @@ export function DisplayPanel() {
         </button>
         <button onClick={() => setProjection({ kind: "logo" })} className="rounded border px-3 py-1">
           Logo
+        </button>
+        <button onClick={() => showStage()} className="rounded border px-3 py-1">
+          Stage display
         </button>
       </div>
 

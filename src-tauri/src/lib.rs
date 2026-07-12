@@ -53,16 +53,18 @@ pub fn run() {
                 listening: Arc::new(AtomicBool::new(false)),
             });
 
-            // Closing the projection window should hide it, not destroy it,
-            // so `Project` can always reveal it again.
-            if let Some(proj) = app.get_webview_window("projection") {
-                let hide_target = proj.clone();
-                proj.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = hide_target.hide();
-                    }
-                });
+            // Closing the projection/stage windows should hide them, not
+            // destroy them, so they can always be revealed again.
+            for label in ["projection", "stage"] {
+                if let Some(win) = app.get_webview_window(label) {
+                    let hide_target = win.clone();
+                    win.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            let _ = hide_target.hide();
+                        }
+                    });
+                }
             }
             Ok(())
         })
@@ -74,6 +76,7 @@ pub fn run() {
             commands::project_slide,
             commands::blank_projection,
             commands::set_projection,
+            commands::show_stage,
             commands::get_projection_settings,
             commands::set_projection_settings,
             commands::add_song,

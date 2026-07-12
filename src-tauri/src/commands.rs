@@ -260,6 +260,16 @@ pub fn set_projection(
 }
 
 #[tauri::command]
+pub fn show_stage(app: tauri::AppHandle) -> Result<(), String> {
+    let win = app
+        .get_webview_window("stage")
+        .ok_or_else(|| "stage window not found".to_string())?;
+    win.show().map_err(|e| e.to_string())?;
+    win.set_focus().ok();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_projection_settings(state: tauri::State<'_, AppState>) -> ProjectionSettings {
     state.settings.lock().map(|s| s.clone()).unwrap_or_default()
 }

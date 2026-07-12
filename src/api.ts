@@ -32,6 +32,8 @@ export const getProjectionSettings = (): Promise<ProjectionSettings> =>
 export const setProjectionSettings = (settings: ProjectionSettings): Promise<void> =>
   invoke<void>("set_projection_settings", { settings });
 
+export const showStage = (): Promise<void> => invoke<void>("show_stage");
+
 export interface SongSummary {
   id: number;
   title: string;

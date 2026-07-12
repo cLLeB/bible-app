@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the operator and projection windows",
-  "windows": ["main", "projection"],
+  "windows": ["main", "projection", "stage"],
   "permissions": [
     "core:default",
     "opener:default"
