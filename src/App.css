@@ -1,3 +1,81 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---- Operator console dark mode (toggled via .dark on <html>) ---- */
+html.dark body {
+  background: #0f1115;
+  color: #e6e6e6;
+}
+html.dark .bg-white,
+html.dark .bg-gray-50,
+html.dark .bg-neutral-50 {
+  background-color: #171a20;
+}
+html.dark .bg-gray-100 {
+  background-color: #20242c;
+}
+html.dark .bg-gray-200 {
+  background-color: #2a2f38;
+}
+html.dark .bg-green-50 {
+  background-color: #122a1b;
+}
+html.dark .bg-red-50 {
+  background-color: #341617;
+}
+html.dark .hover\:bg-gray-50:hover {
+  background-color: #20242c;
+}
+html.dark .hover\:bg-gray-100:hover {
+  background-color: #262b34;
+}
+html.dark .hover\:bg-green-50:hover {
+  background-color: #14311f;
+}
+html.dark .border,
+html.dark .border-green-600 {
+  border-color: #333a44;
+}
+html.dark hr {
+  border-color: #333a44;
+}
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background-color: #171a20;
+  color: #e6e6e6;
+  border-color: #333a44;
+}
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #6b7280;
+}
+html.dark .text-black {
+  color: #e6e6e6;
+}
+html.dark .text-gray-400 {
+  color: #8b93a1;
+}
+html.dark .text-gray-500 {
+  color: #9aa3b2;
+}
+html.dark .text-gray-600 {
+  color: #b0b8c4;
+}
+html.dark .text-gray-700 {
+  color: #c7cdd7;
+}
+/* confidence badges */
+html.dark .bg-yellow-100 {
+  background-color: #3a3212;
+}
+html.dark .text-yellow-700 {
+  color: #d8c25a;
+}
+html.dark .bg-green-100 {
+  background-color: #12331f;
+}
+html.dark .text-green-700 {
+  color: #63c088;
+}

@@ -5,6 +5,7 @@ import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
 import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
@@ -14,7 +15,10 @@ import { TranslationPicker } from "./components/TranslationPicker";
 export default function App() {
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Bible — Operator Console</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Bible — Operator Console</h1>
+        <ThemeToggle />
+      </div>
       <LiveNow />
       <ScripturePresenter />
       <ListenPanel />

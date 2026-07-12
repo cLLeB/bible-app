@@ -6,6 +6,11 @@ import { ProjectionView } from "./ProjectionView";
 import { StageView } from "./StageView";
 import "./App.css";
 
+// Apply the saved operator-console theme before first paint (no flash).
+if (localStorage.getItem("ui-theme") === "dark") {
+  document.documentElement.classList.add("dark");
+}
+
 // All windows load this same index.html and render by their Tauri label.
 function rootFor(label: string) {
   if (label === "projection") return <ProjectionView />;
