@@ -10,11 +10,22 @@ import {
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
-  const [model, setModel] = useState<"base" | "tiny">("base");
+  const [model, setModel] = useState<"base" | "tiny">(
+    () => (localStorage.getItem("stt-model") as "base" | "tiny") || "base",
+  );
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [autoProject, setAutoProject] = useState(false);
+  const [autoProject, setAutoProject] = useState(() => localStorage.getItem("auto-project") === "1");
+
+  function changeModel(m: "base" | "tiny"): void {
+    setModel(m);
+    localStorage.setItem("stt-model", m);
+  }
+  function changeAuto(v: boolean): void {
+    setAutoProject(v);
+    localStorage.setItem("auto-project", v ? "1" : "0");
+  }
 
   // Ref so the once-registered event listener sees the current toggle value.
   const autoRef = useRef(false);
@@ -70,7 +81,7 @@ export function ListenPanel() {
         </button>
         <select
           value={model}
-          onChange={(e) => setModel(e.target.value as "base" | "tiny")}
+          onChange={(e) => changeModel(e.target.value as "base" | "tiny")}
           disabled={listening}
           className="rounded border px-2 py-2 text-sm"
           title="Base = normal accuracy; Tiny = faster on low-end PCs"
@@ -83,7 +94,7 @@ export function ListenPanel() {
           <input
             type="checkbox"
             checked={autoProject}
-            onChange={(e) => setAutoProject(e.target.checked)}
+            onChange={(e) => changeAuto(e.target.checked)}
           />
           Auto-project ≥90%
         </label>

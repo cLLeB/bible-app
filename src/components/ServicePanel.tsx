@@ -76,6 +76,10 @@ export function ServicePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const nextCue = cues[item < 0 ? 0 : item + 1];
+  const cueLabel = (c: Cue): string =>
+    c.type === "verse" ? `📖 ${c.verse.reference}` : `🎵 ${c.title}`;
+
   return (
     <section className="space-y-2">
       <div className="flex items-center gap-3">
@@ -87,6 +91,10 @@ export function ServicePanel() {
           </button>
         )}
       </div>
+
+      {cues.length > 0 && nextCue && (
+        <p className="text-xs text-gray-500">Next up: {cueLabel(nextCue)}</p>
+      )}
 
       {cues.length === 0 ? (
         <p className="text-sm text-gray-400">
