@@ -260,7 +260,16 @@ fn transcribe_detect(
 
     let state = app.state::<AppState>();
     // A spoken translation ("...in ASV") switches to it when installed.
+    let prev_tr = state.active_translation();
     let tr = crate::commands::resolve_translation(&state, &text);
+    // If the translation just changed and this utterance names no new reference
+    // (e.g. "...now give it to me in the NIV" said just after the verse),
+    // re-project the current scripture in the new translation.
+    if tr != prev_tr && detections.is_empty() {
+        if let Some((osis, ch, v)) = state.cursor.lock().ok().and_then(|c| c.as_ref().map(|c| (c.book_osis.clone(), c.chapter, c.verse))) {
+            crate::commands::present_coords_handle(app, &osis, ch, v);
+        }
+    }
 
     // --- Confirm/refine conversation loop (final utterances only) ---
     if emit_transcript {

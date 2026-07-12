@@ -188,57 +188,204 @@ pub(crate) fn build_range_payload(
     })
 }
 
-/// Detect a translation named in text ("in ASV", "the King James", "world english").
-/// Returns the CODE if a known name/abbrev appears (regardless of install state).
-fn parse_translation_code(text: &str) -> Option<&'static str> {
-    let lower = text.to_lowercase();
-    let names: &[(&str, &str)] = &[
-        ("king james", "KJV"),
-        ("american standard", "ASV"),
-        ("world english", "WEB"),
-        ("young's literal", "YLT"),
-        ("youngs literal", "YLT"),
-        ("basic english", "BBE"),
-        ("darby", "DARBY"),
-    ];
-    for (n, c) in names {
-        if lower.contains(n) {
-            return Some(c);
+/// Spoken/typed full-name phrases → translation code, covering every
+/// translation the app supports. Matched by substring with LONGEST-match
+/// precedence, so "new king james" resolves to NKJV (not KJV) and "new american
+/// standard" to NASB (not ASV). Kept in sync with `translations.rs`.
+fn translation_phrases() -> &'static [(&'static str, &'static str, bool)] {
+    // (phrase, code, word_safe). word_safe = false marks a phrase that is (or
+    // hinges on) an everyday English word ("amplified", "the message") — matched
+    // only when a scripture reference is present in the utterance, so ordinary
+    // speech ("the amplified guitar") never switches translation.
+    &[
+        // Public domain / free
+        ("king james version", "KJV", true), ("king james", "KJV", true), ("authorized version", "KJV", true),
+        ("american standard version", "ASV", true), ("american standard", "ASV", true),
+        ("world english bible", "WEB", true), ("world english", "WEB", true),
+        ("young's literal translation", "YLT", true), ("young's literal", "YLT", true), ("youngs literal", "YLT", true),
+        ("bible in basic english", "BBE", true), ("basic english", "BBE", true),
+        ("darby translation", "DARBY", true), ("darby bible", "DARBY", true), ("darby", "DARBY", true),
+        ("berean standard bible", "BSB", true), ("berean standard", "BSB", true), ("berean bible", "BSB", true), ("berean", "BSB", true),
+        ("geneva bible", "GNV", true), ("geneva", "GNV", true),
+        ("douay rheims", "DRB", true), ("douay-rheims", "DRB", true), ("douay", "DRB", true), ("rheims", "DRB", true),
+        ("webster's bible", "WBT", true), ("webster bible", "WBT", true), ("webster", "WBT", true),
+        ("brenton septuagint", "LXXE", true), ("septuagint", "LXXE", true),
+        // Copyrighted (recognized so the operator can speak/type them; only
+        // switched to when actually installed — Personal-tier builds)
+        ("new international version", "NIV", true), ("new international", "NIV", true),
+        ("new living translation", "NLT", true), ("new living", "NLT", true),
+        ("english standard version", "ESV", true), ("english standard", "ESV", true),
+        ("new king james version", "NKJV", true), ("new king james", "NKJV", true),
+        ("new american standard bible", "NASB", true), ("new american standard", "NASB", true),
+        ("christian standard bible", "CSB17", true), ("christian standard", "CSB17", true),
+        ("amplified bible", "AMP", true), ("amplified version", "AMP", false), ("amplified", "AMP", false),
+        ("the message bible", "MSG", true), ("message bible", "MSG", true),
+        ("new english translation", "NET", true), ("net bible", "NET", true),
+        // More popular translations (Personal tier)
+        ("good news bible", "GNT", true), ("good news translation", "GNTD", true), ("good news", "GNT", false),
+        ("new revised standard version", "NRSVCE", true), ("new revised standard", "NRSVCE", true),
+        ("revised standard version", "RSV", true), ("revised standard", "RSV", true),
+        ("common english bible", "CEB", true), ("common english", "CEB", true),
+        ("contemporary english version", "CEVD", true), ("contemporary english", "CEVD", true),
+        ("complete jewish bible", "CJB", true), ("complete jewish", "CJB", true),
+        ("tree of life version", "TLV", true), ("tree of life", "TLV", false),
+        ("legacy standard bible", "LSB", true), ("legacy standard", "LSB", true),
+        ("modern english version", "MEV", true), ("modern english", "MEV", true),
+        ("international standard version", "ISV", true), ("international standard", "ISV", true),
+        ("easy to read version", "ERV", true), ("easy-to-read version", "ERV", true), ("easy to read", "ERV", true),
+        ("new life version", "NLV", true), ("new life", "NLV", false),
+        ("new american bible", "NABRE", true),
+        ("literal standard version", "LSV", true), ("literal standard", "LSV", true),
+    ]
+}
+
+/// Distinctive abbreviations → (code, word_safe). `word_safe = true` may match a
+/// lone word token anywhere; `false` (net, amp, msg — everyday English words)
+/// matches ONLY when spelled letter-by-letter or when a scripture reference is
+/// present, so a sermon line like "cast the net" never switches translation.
+fn translation_abbrevs() -> &'static [(&'static str, &'static str, bool)] {
+    &[
+        ("kjv", "KJV", true), ("asv", "ASV", true), ("web", "WEB", true), ("ylt", "YLT", true),
+        ("bbe", "BBE", true), ("darby", "DARBY", true), ("bsb", "BSB", true), ("gnv", "GNV", true),
+        ("drb", "DRB", true), ("wbt", "WBT", true), ("lxxe", "LXXE", true), ("niv", "NIV", true),
+        ("nlt", "NLT", true), ("esv", "ESV", true), ("nkjv", "NKJV", true), ("nasb", "NASB", true),
+        ("csb", "CSB17", true), ("csb17", "CSB17", true),
+        ("gnt", "GNT", true), ("gnb", "GNT", true), ("gntd", "GNTD", true), ("rsv", "RSV", true),
+        ("nrsv", "NRSVCE", true), ("nrsvce", "NRSVCE", true), ("ceb", "CEB", true),
+        ("cev", "CEVD", true), ("cevd", "CEVD", true), ("cjb", "CJB", true), ("tlv", "TLV", true),
+        ("lsb", "LSB", true), ("mev", "MEV", true), ("isv", "ISV", true), ("erv", "ERV", true),
+        ("nlv", "NLV", true), ("nabre", "NABRE", true), ("lsv", "LSV", true),
+        ("net", "NET", false), ("amp", "AMP", false), ("msg", "MSG", false),
+    ]
+}
+
+fn abbrev_core(word: &str) -> String {
+    word.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_lowercase()
+}
+
+fn tokens_lower(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect()
+}
+
+/// Joined strings from runs of ≥2 consecutive single-letter tokens — a spelled
+/// abbreviation. Pastors say "N-I-V"; whisper renders it "N I V" / "N.I.V." →
+/// tokens ["n","i","v"] → "niv". Numbers break a run (so "3 16 N I V" is fine).
+fn spelled_abbrevs(tokens: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let is_letter = |t: &String| t.len() == 1 && t.chars().all(|c| c.is_ascii_alphabetic());
+        if is_letter(&tokens[i]) {
+            let mut j = i;
+            let mut s = String::new();
+            while j < tokens.len() && is_letter(&tokens[j]) {
+                s.push_str(&tokens[j]);
+                j += 1;
+            }
+            if j - i >= 2 {
+                out.push(s);
+            }
+            i = j;
+        } else {
+            i += 1;
         }
     }
-    let tokens: Vec<String> = lower
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    let abbr: &[(&str, &str)] = &[
-        ("kjv", "KJV"), ("web", "WEB"), ("asv", "ASV"), ("ylt", "YLT"), ("bbe", "BBE"),
-    ];
-    for (a, c) in abbr {
-        if tokens.iter().any(|t| t == a) {
-            return Some(c);
+    out
+}
+
+/// Detect a translation named in text ("in ASV", "the New King James", "N I V",
+/// "amplified"). Returns the CODE if a known name/abbrev appears (regardless of
+/// install state). `reference_present` relaxes the word-safety guard so a typed
+/// "John 3:16 NET" resolves while ordinary prose does not.
+fn parse_translation_code(text: &str, reference_present: bool) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+    // Full names: longest matching phrase wins (specific beats general). A
+    // word-like phrase ("amplified") only counts when a scripture is present.
+    let mut best_safe: Option<(usize, &str)> = None;
+    let mut best_word: Option<(usize, &str)> = None;
+    for (phrase, code, word_safe) in translation_phrases() {
+        if lower.contains(phrase) {
+            let slot = if *word_safe { &mut best_safe } else { &mut best_word };
+            if slot.is_none_or(|(len, _)| phrase.len() > len) {
+                *slot = Some((phrase.len(), code));
+            }
+        }
+    }
+    let word_ok = if reference_present { best_word } else { None };
+    let chosen = match (best_safe, word_ok) {
+        (Some(s), Some(w)) => Some(if w.0 > s.0 { w.1 } else { s.1 }),
+        (Some(s), None) => Some(s.1),
+        (None, Some(w)) => Some(w.1),
+        (None, None) => None,
+    };
+    if let Some(code) = chosen {
+        return Some(code);
+    }
+    // Abbreviations: spelled letter-runs match unconditionally (unambiguous);
+    // lone word tokens match if word-safe or if a scripture reference is near.
+    let tokens = tokens_lower(text);
+    let spelled = spelled_abbrevs(&tokens);
+    for (ab, code, word_safe) in translation_abbrevs() {
+        if spelled.iter().any(|s| s == ab) {
+            return Some(code);
+        }
+        if (*word_safe || reference_present) && tokens.iter().any(|t| t == ab) {
+            return Some(code);
         }
     }
     None
 }
 
-/// Remove a translation name/abbrev (and adjacent filler words) from a typed
-/// query so the reference parser gets a clean "Book chapter:verse".
+/// Remove a translation name/abbrev/spelled-abbrev (and filler words) from a
+/// typed query so the reference parser gets a clean "Book chapter:verse".
 fn strip_translation_phrase(query: &str) -> String {
     let mut q = query.to_string();
-    let pats = [
-        "king james version", "king james", "american standard version", "american standard",
-        "world english bible", "world english", "young's literal translation", "young's literal",
-        "youngs literal", "bible in basic english", "basic english", "darby translation", "darby",
-        "kjv", "web", "asv", "ylt", "bbe",
-    ];
-    for pat in pats {
+    // Full-name phrases, longest first so multi-word names strip completely.
+    let mut phrases: Vec<&str> = translation_phrases().iter().map(|(p, _, _)| *p).collect();
+    phrases.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    for pat in phrases {
         while let Some(pos) = q.to_lowercase().find(pat) {
             q.replace_range(pos..pos + pat.len(), " ");
         }
     }
-    q.split_whitespace()
-        .filter(|w| !["in", "from", "the", "version", "translation"].contains(&w.to_lowercase().as_str()))
+    let known: std::collections::HashSet<&str> =
+        translation_abbrevs().iter().map(|(a, _, _)| *a).collect();
+    let filler = ["in", "from", "the", "version", "translation", "bible"];
+    let words: Vec<&str> = q.split_whitespace().collect();
+    let cores: Vec<String> = words.iter().map(|w| abbrev_core(w)).collect();
+    let mut drop = vec![false; words.len()];
+    // Drop runs of single letters that spell a known abbreviation ("n i v").
+    let mut i = 0;
+    while i < cores.len() {
+        if cores[i].len() == 1 {
+            let mut j = i;
+            let mut s = String::new();
+            while j < cores.len() && cores[j].len() == 1 {
+                s.push_str(&cores[j]);
+                j += 1;
+            }
+            if j - i >= 2 && known.contains(s.as_str()) {
+                (i..j).for_each(|k| drop[k] = true);
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    // Drop lone abbreviations and filler words.
+    for (k, c) in cores.iter().enumerate() {
+        if known.contains(c.as_str()) || filler.contains(&c.as_str()) {
+            drop[k] = true;
+        }
+    }
+    words
+        .iter()
+        .zip(drop)
+        .filter(|(_, d)| !*d)
+        .map(|(w, _)| *w)
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -246,7 +393,10 @@ fn strip_translation_phrase(query: &str) -> String {
 /// If `text` names an installed translation, switch the active translation to it
 /// and return it; otherwise return the current active translation (fallback).
 pub(crate) fn resolve_translation(state: &AppState, text: &str) -> String {
-    if let Some(code) = parse_translation_code(text) {
+    // "Around a scripture": a reference in the same utterance lets us trust even
+    // the everyday-word abbreviations (NET/AMP/MSG) as a translation request.
+    let reference_present = !crate::detect::detect_references(text).is_empty();
+    if let Some(code) = parse_translation_code(text, reference_present) {
         let exists = state
             .db
             .lock()
@@ -356,6 +506,55 @@ pub fn search_scripture(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let hits = db.search_fts(&tr, &fts, 25).map_err(|e| e.to_string())?;
     Ok(hits.into_iter().map(|(rec, _)| build_payload(rec)).collect())
+}
+
+/// This build's flavor: license tier + which whisper models it ships.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlavorInfo {
+    pub tier: String,
+    pub models: Vec<String>,
+    pub default_model: String,
+}
+
+#[tauri::command]
+pub fn app_flavor() -> FlavorInfo {
+    FlavorInfo {
+        tier: crate::flavor::tier_name().to_string(),
+        models: crate::flavor::models().into_iter().map(String::from).collect(),
+        default_model: crate::flavor::default_model().to_string(),
+    }
+}
+
+/// The downloadable translation catalog with each entry's installed state.
+/// Includes copyrighted translations only in a Personal-tier build.
+#[tauri::command]
+pub fn translation_catalog(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::translations::CatalogEntry>, String> {
+    let installed: Vec<String> = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.list_translations().map_err(|e| e.to_string())?.into_iter().map(|(c, _)| c).collect()
+    };
+    Ok(crate::translations::catalog(crate::flavor::is_personal(), &installed))
+}
+
+/// Download a translation and store it for offline use. Returns the number of
+/// verses installed. Refuses codes not available in this build's tier.
+#[tauri::command]
+pub fn download_translation(
+    app: tauri::AppHandle,
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    // Network fetch happens without holding the DB lock.
+    let canonical = crate::translations::fetch_canonical(&code, crate::flavor::is_personal())?;
+    let n = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.seed_from_json(&canonical).map_err(|e| e.to_string())?
+    };
+    let _ = app.emit("translation-installed", &code);
+    Ok(n)
 }
 
 /// Split a passage into readable projection-sized slides at word boundaries.
@@ -731,13 +930,74 @@ mod tests {
 
     #[test]
     fn parses_and_strips_spoken_translation() {
-        assert_eq!(parse_translation_code("John 3:16 in ASV"), Some("ASV"));
-        assert_eq!(parse_translation_code("give me the King James Romans 8"), Some("KJV"));
-        assert_eq!(parse_translation_code("world english bible please"), Some("WEB"));
-        assert_eq!(parse_translation_code("John 3:16"), None);
+        assert_eq!(parse_translation_code("John 3:16 in ASV", false), Some("ASV"));
+        assert_eq!(parse_translation_code("give me the King James Romans 8", false), Some("KJV"));
+        assert_eq!(parse_translation_code("world english bible please", false), Some("WEB"));
+        assert_eq!(parse_translation_code("John 3:16", false), None);
 
         assert_eq!(strip_translation_phrase("John 3:16 in ASV").trim(), "John 3:16");
         assert_eq!(strip_translation_phrase("the King James John 3:16").trim(), "John 3:16");
         assert_eq!(strip_translation_phrase("Romans 8:28").trim(), "Romans 8:28");
+    }
+
+    #[test]
+    fn recognizes_all_translations_and_specificity() {
+        assert_eq!(parse_translation_code("John 3:16 in the NIV", false), Some("NIV"));
+        assert_eq!(parse_translation_code("read it in the New Living Translation", false), Some("NLT"));
+        assert_eq!(parse_translation_code("the Berean Standard Bible", false), Some("BSB"));
+        assert_eq!(parse_translation_code("in the amplified bible", false), Some("AMP"));
+        assert_eq!(parse_translation_code("from the ESV", false), Some("ESV"));
+        assert_eq!(parse_translation_code("the Douay Rheims", false), Some("DRB"));
+
+        // Specificity: "new king james" → NKJV, not KJV; "new american standard" → NASB.
+        assert_eq!(parse_translation_code("John 3:16 in the New King James Version", false), Some("NKJV"));
+        assert_eq!(parse_translation_code("read the New American Standard Bible", false), Some("NASB"));
+    }
+
+    #[test]
+    fn spelled_out_and_word_safe_abbreviations() {
+        // Pastor spells the letters → whisper "N I V" / "N.I.V." → still resolves.
+        assert_eq!(parse_translation_code("give it to me in the N I V", false), Some("NIV"));
+        assert_eq!(parse_translation_code("John 3:16 N.I.V.", false), Some("NIV"));
+        assert_eq!(parse_translation_code("read it in the E S V please", false), Some("ESV"));
+        assert_eq!(parse_translation_code("the N K J V", false), Some("NKJV"));
+        // Spelled everyday-word abbreviation is unambiguous when spelled out.
+        assert_eq!(parse_translation_code("give it in the N E T", false), Some("NET"));
+
+        // As a lone word, an everyday-word abbrev only counts near a scripture.
+        assert_eq!(parse_translation_code("they cast the net into the sea", false), None);
+        assert_eq!(parse_translation_code("turn up the amp", false), None);
+        assert_eq!(parse_translation_code("John 3:16 NET", true), Some("NET"));
+
+        // "amplified" / "amplified version" is a word too — a translation only
+        // when a scripture is present; "amplified bible" is always distinctive.
+        assert_eq!(parse_translation_code("Matthew 7:7 from the amplified version", true), Some("AMP"));
+        assert_eq!(parse_translation_code("in the amplified bible", false), Some("AMP"));
+        assert_eq!(parse_translation_code("the amplified guitar was loud", false), None);
+
+        // Stripping removes spelled abbreviations and names for a clean lookup.
+        assert_eq!(strip_translation_phrase("John 3:16 in the N I V").trim(), "John 3:16");
+        assert_eq!(strip_translation_phrase("Romans 8:28 New King James Version").trim(), "Romans 8:28");
+        assert_eq!(strip_translation_phrase("Genesis 1:1 berean standard bible").trim(), "Genesis 1:1");
+    }
+
+    #[test]
+    fn recognizes_added_popular_translations() {
+        assert_eq!(parse_translation_code("Matthew 7:7 in the Good News Bible", false), Some("GNT"));
+        assert_eq!(parse_translation_code("the Good News Translation", false), Some("GNTD"));
+        assert_eq!(parse_translation_code("read it in the RSV", false), Some("RSV"));
+        assert_eq!(parse_translation_code("the Complete Jewish Bible", false), Some("CJB"));
+        assert_eq!(parse_translation_code("in the Tree of Life Version", false), Some("TLV"));
+        assert_eq!(parse_translation_code("the Contemporary English Version", false), Some("CEVD"));
+        assert_eq!(parse_translation_code("give me the M E V", false), Some("MEV"));
+
+        // Specificity: "new revised standard" → NRSV(CE), not RSV.
+        assert_eq!(parse_translation_code("the New Revised Standard Version", false), Some("NRSVCE"));
+
+        // Word-like phrases only count near a scripture.
+        assert_eq!(parse_translation_code("preaching the good news of the kingdom", false), None);
+        assert_eq!(parse_translation_code("John 3:16 good news", true), Some("GNT"));
+        assert_eq!(parse_translation_code("the tree of life in the garden of eden", false), None);
+        assert_eq!(parse_translation_code("the promise of new life in christ", false), None);
     }
 }

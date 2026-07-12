@@ -168,6 +168,12 @@ pub fn book_by_osis(osis: &str) -> Option<&'static CanonicalBook> {
     BOOKS.iter().find(|b| b.osis == osis)
 }
 
+/// OSIS id for a canonical book number 1..=66 (Genesis=1 … Revelation=66),
+/// matching bolls.life's book ids. None if out of range.
+pub fn osis_by_order(order: u8) -> Option<&'static str> {
+    BOOKS.iter().find(|b| b.order == order).map(|b| b.osis)
+}
+
 /// Books with only one chapter — commonly cited by verse alone ("Jude 24").
 pub fn is_single_chapter(osis: &str) -> bool {
     matches!(osis, "Obad" | "Phlm" | "2John" | "3John" | "Jude")

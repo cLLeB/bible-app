@@ -498,6 +498,18 @@ impl Db {
     /// Seed the bundled public-domain hymns once per `version`, adding only
     /// titles not already present (so user libraries are never disturbed).
     pub fn seed_default_songs(&self, json: &str, version: i64) -> rusqlite::Result<()> {
+        let songs: Vec<DefaultSong> = serde_json::from_str(json)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+        // Always reconcile the read-only flag: any song whose title matches a
+        // bundled hymn is marked built_in (fixes DBs seeded before the flag).
+        for s in &songs {
+            self.conn.execute(
+                "UPDATE songs SET built_in = 1 WHERE title = ?1",
+                [&s.title],
+            )?;
+        }
+
         let stored: i64 = self
             .conn
             .query_row("SELECT value FROM settings WHERE key = 'bundled_songs_v'", [], |r| {
@@ -509,8 +521,6 @@ impl Db {
         if stored >= version {
             return Ok(());
         }
-        let songs: Vec<DefaultSong> = serde_json::from_str(json)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         for s in &songs {
             if !self.song_exists(&s.title)? {
                 self.insert_song(&s.title, s.author.as_deref(), &s.lyrics, true)?;

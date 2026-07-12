@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Build the app's release flavors.
+
+A FLAVOR = a whisper model + a license tier:
+  * tier 'distribution' — public-domain translations only (safe to share)
+  * tier 'personal'     — all translations incl. copyrighted, for the builder's
+                          OWN private use (never distributed)
+
+Six shippable flavors (model x tier):
+    tiny-distribution   tiny-personal
+    base-distribution   base-personal
+    small-distribution  small-personal
+Plus 'testing' — all models + personal tier — for local QA of everything at once.
+
+For each flavor this script:
+  1. populates data/ with the flavor's translations (imported from bolls.life;
+     public-domain always, copyrighted only for personal/testing),
+  2. bakes the tier + model set into the binary via env vars, and
+  3. runs `npm run tauri build` (installer lands in
+     src-tauri/target/release/bundle/).
+
+Requires internet (to import translations) and the whisper model .bin files in
+models/. Nothing here runs at app runtime — the app stays offline.
+
+Usage:
+  python scripts/build_flavors.py testing
+  python scripts/build_flavors.py base-distribution
+  python scripts/build_flavors.py --all
+"""
+import os
+import subprocess
+import sys
+import pathlib
+
+# bolls codes. Keep in sync with src-tauri/src/translations.rs.
+PUBLIC_DOMAIN = ["BSB", "WEB", "KJV", "ASV", "YLT", "DARBY", "BBE", "GNV", "DRB", "WBT", "LXXE", "LSV"]
+LICENSED = ["NIV", "NLT", "ESV", "NKJV", "NASB", "CSB17", "AMP", "MSG", "NET",
+            "GNT", "GNTD", "RSV", "NRSVCE", "CEB", "CEVD", "CJB", "TLV", "LSB",
+            "MEV", "ISV", "ERV", "NLV", "NABRE"]
+MODELS = ["tiny", "base", "small"]
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+MODELS_DIR = ROOT / "models"
+
+
+def flavors() -> dict:
+    out = {}
+    for m in MODELS:
+        out[f"{m}-distribution"] = {"tier": "distribution", "models": [m], "codes": PUBLIC_DOMAIN}
+        out[f"{m}-personal"] = {"tier": "personal", "models": [m], "codes": PUBLIC_DOMAIN + LICENSED}
+    out["testing"] = {"tier": "personal", "models": ["tiny", "base", "small", "medium"], "codes": PUBLIC_DOMAIN + LICENSED}
+    return out
+
+
+def prepare_translations(codes: list, personal: bool) -> None:
+    """Rebuild data/*.canonical.json to exactly this flavor's translation set."""
+    for f in DATA.glob("*.canonical.json"):
+        f.unlink()
+    pd = [c for c in codes if c in PUBLIC_DOMAIN]
+    lic = [c for c in codes if c not in PUBLIC_DOMAIN]
+    importer = str(ROOT / "scripts" / "import_bolls.py")
+    if pd:
+        subprocess.check_call([sys.executable, importer, *pd], cwd=ROOT)
+    if lic and personal:
+        # copyrighted: personal use only — import with --force
+        subprocess.check_call([sys.executable, importer, *lic, "--force"], cwd=ROOT)
+
+
+def check_models(models: list) -> None:
+    missing = [m for m in models if not (MODELS_DIR / f"ggml-{m}.en.bin").exists()]
+    if missing:
+        print(
+            f"WARNING: missing whisper models {missing} — place ggml-<model>.en.bin in {MODELS_DIR}",
+            file=sys.stderr,
+        )
+
+
+def build(name: str, spec: dict) -> None:
+    print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
+    check_models(spec["models"])
+    prepare_translations(spec["codes"], spec["tier"] == "personal")
+    env = dict(os.environ)
+    env["BIBLE_APP_TIER"] = spec["tier"]
+    env["BIBLE_APP_MODELS"] = ",".join(spec["models"])
+    subprocess.check_call(["npm", "run", "tauri", "build"], cwd=ROOT, env=env, shell=(os.name == "nt"))
+    print(f"=== '{name}' built. Installer under src-tauri/target/release/bundle/ ===")
+
+
+def main(argv: list) -> None:
+    fl = flavors()
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        print("Flavors:", ", ".join(fl))
+        return
+    targets = list(fl) if argv[0] == "--all" else argv
+    for t in targets:
+        if t not in fl:
+            print(f"unknown flavor '{t}'. Options: {', '.join(fl)}", file=sys.stderr)
+            continue
+        build(t, fl[t])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -2,6 +2,7 @@ mod audio;
 mod books;
 mod commands;
 mod corrections;
+mod flavor;
 mod db;
 mod detect;
 mod events;
@@ -9,6 +10,7 @@ mod knowledge;
 mod reference;
 mod remote;
 mod resolution;
+mod translations;
 mod semantic;
 mod slides;
 mod stt;
@@ -18,6 +20,30 @@ use events::{ProjectionSettings, ProjectionState};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+
+/// Seed every `*.canonical.json` under `dir` (recursively, shallow) into the DB.
+/// Idempotent, so scanning both the resource dir and the dev dir is safe.
+fn seed_canonical_translations(db: &db::Db, dir: &std::path::Path, depth: u8) {
+    if depth > 2 {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                seed_canonical_translations(db, &path, depth + 1);
+            } else if path
+                .file_name()
+                .map(|n| n.to_string_lossy().ends_with(".canonical.json"))
+                .unwrap_or(false)
+            {
+                if let Ok(json) = std::fs::read_to_string(&path) {
+                    let _ = db.seed_from_json(&json);
+                }
+            }
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,38 +57,15 @@ pub fn run() {
             let db = db::open_at(&db_path).expect("open db");
             db.migrate().expect("migrate");
 
-            // Seed WEB once (idempotent). In a bundled build the data file is a
-            // resource; in `tauri dev` the resource dir isn't populated, so fall
-            // back to the project `data/` dir (resolved at compile time).
-            let mut seed_json: Option<String> = app
-                .path()
-                .resolve("web.canonical.json", tauri::path::BaseDirectory::Resource)
-                .ok()
-                .and_then(|p| std::fs::read_to_string(&p).ok());
-            if seed_json.is_none() {
-                let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../data/web.canonical.json");
-                seed_json = std::fs::read_to_string(&dev_path).ok();
+            // Seed every bundled translation (*.canonical.json), idempotently.
+            // Packaged builds carry them as resources; `tauri dev` reads the
+            // project `data/` dir (resolved at compile time). The flavor build
+            // decides which translation files are present.
+            if let Ok(res_dir) = app.path().resource_dir() {
+                seed_canonical_translations(&db, &res_dir, 0);
             }
-            if let Some(json) = seed_json {
-                db.seed_from_json(&json).expect("seed");
-            }
-            // Seed every *.canonical.json in the project data dir (multi-translation).
-            let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
-            if let Ok(entries) = std::fs::read_dir(&data_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().ends_with(".canonical.json"))
-                        .unwrap_or(false)
-                    {
-                        if let Ok(json) = std::fs::read_to_string(&path) {
-                            let _ = db.seed_from_json(&json);
-                        }
-                    }
-                }
-            }
+            let dev_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
+            seed_canonical_translations(&db, &dev_dir, 0);
             db.seed_default_songs(include_str!("../default-songs.json"), 1)
                 .expect("seed default songs");
             db.sync_fts().expect("sync fts");
@@ -97,6 +100,9 @@ pub fn run() {
             commands::lookup_reference,
             commands::search_scripture,
             commands::related_verses,
+            commands::app_flavor,
+            commands::translation_catalog,
+            commands::download_translation,
             commands::chunk_passage,
             commands::record_choice,
             commands::list_translations,
