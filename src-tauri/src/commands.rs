@@ -981,6 +981,44 @@ mod tests {
         assert_eq!(strip_translation_phrase("Genesis 1:1 berean standard bible").trim(), "Genesis 1:1");
     }
 
+    fn state_with(translations: &[(&str, &str)], active: &str) -> AppState {
+        let db = crate::db::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        for (code, _name) in translations {
+            let json = format!(
+                r#"{{"translation":{{"code":"{code}","name":"{code} Bible"}},"verses":[{{"book_osis":"Gen","chapter":1,"verse":1,"text":"{code} Genesis 1:1"}}]}}"#
+            );
+            db.seed_from_json(&json).unwrap();
+        }
+        AppState {
+            db: Mutex::new(db),
+            translation: Mutex::new(active.to_string()),
+            current: Mutex::new(ProjectionState::Blank),
+            settings: Mutex::new(ProjectionSettings::default()),
+            listening: Arc::new(AtomicBool::new(false)),
+            remote_running: Arc::new(AtomicBool::new(false)),
+            cursor: Mutex::new(None),
+            learned: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    #[test]
+    fn resolve_translation_switches_to_installed_translation() {
+        let state = state_with(&[("KJV", "kjv"), ("GNT", "gnt")], "KJV");
+        // Spoken: reference present + "Good News Bible" → switch to GNT.
+        let tr = resolve_translation(&state, "turn to Genesis chapter 1 verse 1 from the Good News Bible");
+        assert_eq!(tr, "GNT");
+        assert_eq!(state.active_translation(), "GNT");
+    }
+
+    #[test]
+    fn resolve_translation_falls_back_when_not_installed() {
+        // GNT recognized but NOT installed → keep the active translation.
+        let state = state_with(&[("KJV", "kjv")], "KJV");
+        let tr = resolve_translation(&state, "Genesis 1:1 from the Good News Bible");
+        assert_eq!(tr, "KJV");
+    }
+
     #[test]
     fn recognizes_added_popular_translations() {
         assert_eq!(parse_translation_code("Matthew 7:7 in the Good News Bible", false), Some("GNT"));
