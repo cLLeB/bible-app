@@ -1,6 +1,7 @@
 import "./App.css";
 import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
+import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
 import { ResultCard } from "./components/ResultCard";
 import { ScriptureSearch } from "./components/ScriptureSearch";
@@ -11,6 +12,7 @@ export default function App() {
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <h1 className="text-2xl font-bold">Bible — Operator Console</h1>
+      <LiveNow />
       <ListenPanel />
       <hr />
       <section className="space-y-4">
