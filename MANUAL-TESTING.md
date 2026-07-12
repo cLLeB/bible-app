@@ -14,12 +14,36 @@ Tick things off and jot notes; when you're back, give me the rundown.
 
 ## 0. Very important context before you start
 
-- **The Bible only has 3 verses in it right now** unless you've loaded the full Bible.
-  Those three are **John 3:16**, **Psalm 23:1**, and **Romans 8:28**. Anything else will
-  say "not found." That's expected. (To load the whole Bible: run
-  `python scripts/normalize_web.py <a WEB bible json file>` once, then restart.)
+- **The whole Bible is now loaded — 6 translations** (KJV, WEB, ASV, YLT, BBE, Darby),
+  ~31,000 verses each. Every verse should resolve now. The **first launch** after this may take
+  a few extra seconds (it builds a search index once); later launches are fast.
+- A **Translation** dropdown (next to "Scripture") lets you switch between the 6 versions.
+- **Speech models:** you can pick **Tiny** (fastest, low-end), **Base** (normal), or **Small**
+  (most accurate, needs a stronger PC).
 - **Songs:** 5 classic hymns come pre-loaded the first time.
 - If something looks frozen, that's usually the speech engine thinking for a second or two.
+
+## 0.5. THE BIG NEW THING — Presentation-mode navigation (test this hard)
+
+This is the heart of the project: **getting the right scripture on screen faster than any
+operator could alone.** Once *any* verse is on screen, a green **"Presenting"** bar appears and
+you can fly around scripture:
+
+- **Arrow keys:** → (or ↓) next verse, ← (or ↑) previous verse. **PageDown** next chapter,
+  **PageUp** previous chapter. It crosses chapter and book boundaries automatically.
+- **Jump box** (in the green bar): type `15` + Enter to jump to verse 15 of the current chapter,
+  or `4:5` + Enter to jump to chapter 4 verse 5 of the current book.
+- **By voice** (while listening): say **"next verse"**, **"previous verse"**, **"next chapter"**,
+  or **"previous chapter"** and it moves — hands-free.
+- **Instant project:** in the Scripture box, type a reference and just press **Enter** — it goes
+  straight to the screen (no extra click). `John 3.16` with a dot works too. Shift+Enter previews
+  without projecting.
+- **Recent strip:** recently shown verses appear as little buttons under the Scripture box —
+  click one to re-project instantly.
+
+**Test the real scenario:** put `John 3:16` on screen (type it + Enter). Now imagine the preacher
+saying "…now look at verse 15… and verse 16… let's jump to chapter 4…". Use the **arrow keys** to
+follow along, or say **"next verse"**. This should feel *fast*.
 
 ---
 
