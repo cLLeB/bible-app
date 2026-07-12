@@ -26,4 +26,5 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 thiserror = "1"
 cpal = "0.15"
 hound = "3.5"
+strsim = "0.11"
 

@@ -1,4 +1,4 @@
-use crate::books::resolve_book;
+use crate::books::{resolve_book, resolve_book_fuzzy};
 use crate::reference::ParsedRef;
 
 /// Parse a number token like "3", "16", or "3:16" → (chapter-or-number, optional verse).
@@ -74,7 +74,7 @@ pub fn detect_references(text: &str) -> Vec<ParsedRef> {
     let mut out: Vec<ParsedRef> = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        // Try to match a book name spanning 3, 2, then 1 tokens.
+        // Try to exact-match a book name spanning 3, 2, then 1 tokens.
         let mut book: Option<(String, usize)> = None;
         for len in (1..=3).rev() {
             if i + len <= tokens.len() {
@@ -82,6 +82,19 @@ pub fn detect_references(text: &str) -> Vec<ParsedRef> {
                 if let Some(b) = resolve_book(&joined) {
                     book = Some((b.osis.to_string(), len));
                     break;
+                }
+            }
+        }
+        // Fall back to fuzzy single/two-token match (STT near-misses). A trailing
+        // number is still required below to emit, which gates false positives.
+        if book.is_none() {
+            for len in 1..=2 {
+                if i + len <= tokens.len() {
+                    let joined = tokens[i..i + len].join(" ");
+                    if let Some(b) = resolve_book_fuzzy(&joined) {
+                        book = Some((b.osis.to_string(), len));
+                        break;
+                    }
                 }
             }
         }
@@ -141,5 +154,15 @@ mod tests {
     #[test]
     fn ignores_non_references() {
         assert!(detect_references("and so the lord spoke to the people").is_empty());
+    }
+
+    #[test]
+    fn recovers_fuzzy_book_names() {
+        // whisper commonly drops the trailing 's' or mishears book names
+        let a = one("roman chapter 8 verse 28");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Rom", 8, Some(28)));
+
+        let b = one("revelations chapter 22 verse 20");
+        assert_eq!(b.book_osis, "Rev");
     }
 }

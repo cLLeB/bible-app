@@ -4,6 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// Bias whisper toward scripture vocabulary (book names + "chapter"/"verse").
+const BIBLE_PROMPT: &str = "A spoken Bible scripture reference, for example John chapter 3 verse 16 or Romans 8:28. \
+Books: Genesis, Exodus, Leviticus, Numbers, Deuteronomy, Joshua, Judges, Ruth, 1 Samuel, 2 Samuel, 1 Kings, 2 Kings, \
+1 Chronicles, 2 Chronicles, Ezra, Nehemiah, Esther, Job, Psalms, Proverbs, Ecclesiastes, Song of Solomon, Isaiah, \
+Jeremiah, Lamentations, Ezekiel, Daniel, Hosea, Joel, Amos, Obadiah, Jonah, Micah, Nahum, Habakkuk, Zephaniah, Haggai, \
+Zechariah, Malachi, Matthew, Mark, Luke, John, Acts, Romans, 1 Corinthians, 2 Corinthians, Galatians, Ephesians, \
+Philippians, Colossians, 1 Thessalonians, 2 Thessalonians, 1 Timothy, 2 Timothy, Titus, Philemon, Hebrews, James, \
+1 Peter, 2 Peter, 1 John, 2 John, 3 John, Jude, Revelation. Chapter and verse.";
+
 fn temp_base() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let ts = std::time::SystemTime::now()
@@ -51,6 +60,8 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
             "en",
             "-t",
             &threads,
+            "--prompt",
+            BIBLE_PROMPT,
             "-nt",
             "-otxt",
             "-of",

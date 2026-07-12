@@ -168,6 +168,29 @@ pub fn book_by_osis(osis: &str) -> Option<&'static CanonicalBook> {
     BOOKS.iter().find(|b| b.osis == osis)
 }
 
+/// Exact match first, then fuzzy recovery for near-misses from speech-to-text
+/// (e.g. "roman" → Romans, "mathew" → Matthew, "revelations" → Revelation).
+pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
+    if let Some(b) = resolve_book(input) {
+        return Some(b);
+    }
+    let norm = input.trim().to_lowercase();
+    if norm.len() < 3 {
+        return None;
+    }
+    let mut best: Option<(&'static CanonicalBook, f64)> = None;
+    for b in BOOKS {
+        let score = strsim::jaro_winkler(&norm, &b.name.to_lowercase());
+        if best.map_or(true, |(_, s)| score > s) {
+            best = Some((b, score));
+        }
+    }
+    match best {
+        Some((b, s)) if s >= 0.90 => Some(b),
+        _ => None,
+    }
+}
+
 pub fn resolve_book(input: &str) -> Option<&'static CanonicalBook> {
     let norm = input.trim().to_lowercase();
     let (ord, rest) = split_ordinal(&norm);
