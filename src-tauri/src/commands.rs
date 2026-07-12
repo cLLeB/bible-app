@@ -200,6 +200,38 @@ pub fn delete_song(song_id: i64, state: tauri::State<'_, AppState>) -> Result<()
     db.delete_song(song_id).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SongExport {
+    title: String,
+    author: Option<String>,
+    lyrics: String,
+}
+
+#[tauri::command]
+pub fn export_songs(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let songs = db.all_songs_full().map_err(|e| e.to_string())?;
+    let export: Vec<SongExport> = songs
+        .into_iter()
+        .map(|s| SongExport { title: s.title, author: s.author, lyrics: s.lyrics })
+        .collect();
+    serde_json::to_string_pretty(&export).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_songs(json: String, state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    let items: Vec<SongExport> =
+        serde_json::from_str(&json).map_err(|e| format!("Invalid songs file: {e}"))?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut n = 0;
+    for it in &items {
+        db.add_song(&it.title, it.author.as_deref(), &it.lyrics)
+            .map_err(|e| e.to_string())?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 // ---- Projection ----
 
 /// Called by the projection window on mount to get the current state,

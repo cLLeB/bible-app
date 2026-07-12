@@ -276,6 +276,16 @@ impl Db {
         Ok(())
     }
 
+    pub fn all_songs_full(&self) -> rusqlite::Result<Vec<SongDetail>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, title, author, lyrics FROM songs ORDER BY title COLLATE NOCASE")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SongDetail { id: r.get(0)?, title: r.get(1)?, author: r.get(2)?, lyrics: r.get(3)? })
+        })?;
+        rows.collect()
+    }
+
     pub fn get_song(&self, id: i64) -> rusqlite::Result<Option<SongDetail>> {
         let mut stmt = self
             .conn

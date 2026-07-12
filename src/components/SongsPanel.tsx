@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { deleteSong, getSong, listSongs, type SongDetail, type SongSummary } from "../api";
+import {
+  deleteSong,
+  exportSongs,
+  getSong,
+  importSongs,
+  listSongs,
+  type SongDetail,
+  type SongSummary,
+} from "../api";
 import { useServiceStore } from "../services";
 import { SongEditor } from "./SongEditor";
 import { SongLive } from "./SongLive";
@@ -10,7 +18,32 @@ export function SongsPanel() {
   const [editing, setEditing] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [backup, setBackup] = useState<string | null>(null);
+  const [importText, setImportText] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const addSongCue = useServiceStore((s) => s.addSong);
+
+  async function onExport(): Promise<void> {
+    const json = await exportSongs();
+    setBackup(json);
+    try {
+      await navigator.clipboard.writeText(json);
+      setNotice("Songs copied to clipboard — paste into a file to save.");
+    } catch {
+      setNotice("Copy the text below to save your songs.");
+    }
+  }
+
+  async function onImport(): Promise<void> {
+    try {
+      const count = await importSongs(importText);
+      setImportText("");
+      setNotice(`Imported ${count} song(s).`);
+      await refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   const shown = songs.filter((s) =>
     `${s.title} ${s.author ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
@@ -105,6 +138,38 @@ export function SongsPanel() {
 
         <div>{selected && <SongLive song={selected} />}</div>
       </div>
+
+      <details className="rounded border p-2 text-sm">
+        <summary className="cursor-pointer text-gray-600">Backup / share songs</summary>
+        <div className="mt-2 space-y-2">
+          {notice && <p className="text-green-700">{notice}</p>}
+          <button onClick={onExport} className="rounded border px-3 py-1">
+            Export all songs (copy)
+          </button>
+          {backup && (
+            <textarea
+              readOnly
+              value={backup}
+              rows={4}
+              className="w-full rounded border px-2 py-1 font-mono text-xs"
+            />
+          )}
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            placeholder="Paste exported songs JSON here to import…"
+            rows={3}
+            className="w-full rounded border px-2 py-1 font-mono text-xs"
+          />
+          <button
+            onClick={onImport}
+            disabled={!importText.trim()}
+            className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
+          >
+            Import songs
+          </button>
+        </div>
+      </details>
     </section>
   );
 }

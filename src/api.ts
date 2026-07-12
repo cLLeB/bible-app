@@ -108,6 +108,10 @@ export const updateSong = (
 export const deleteSong = (songId: number): Promise<void> =>
   invoke<void>("delete_song", { songId });
 
+export const exportSongs = (): Promise<string> => invoke<string>("export_songs");
+export const importSongs = (json: string): Promise<number> =>
+  invoke<number>("import_songs", { json });
+
 export interface Candidate {
   verse: VersePayload;
   confidence: number;

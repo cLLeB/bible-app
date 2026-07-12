@@ -106,6 +106,8 @@ pub fn run() {
             commands::get_song,
             commands::update_song,
             commands::delete_song,
+            commands::export_songs,
+            commands::import_songs,
             commands::start_listening,
             commands::stop_listening,
             commands::start_remote,
