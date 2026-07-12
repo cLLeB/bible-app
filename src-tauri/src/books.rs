@@ -168,6 +168,11 @@ pub fn book_by_osis(osis: &str) -> Option<&'static CanonicalBook> {
     BOOKS.iter().find(|b| b.osis == osis)
 }
 
+/// Books with only one chapter — commonly cited by verse alone ("Jude 24").
+pub fn is_single_chapter(osis: &str) -> bool {
+    matches!(osis, "Obad" | "Phlm" | "2John" | "3John" | "Jude")
+}
+
 /// The next book in canonical order (None past Revelation).
 pub fn book_after(osis: &str) -> Option<&'static CanonicalBook> {
     let b = book_by_osis(osis)?;

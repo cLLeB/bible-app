@@ -143,19 +143,39 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
         }
 
         if let Some((osis, len, source)) = book {
+            let single = crate::books::is_single_chapter(&osis);
             let mut j = i + len;
             if j < tokens.len() && eq_ci(&tokens[j], "chapter") {
                 j += 1;
             }
-            if let Some((chapter, verse_in_tok)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
+            // Single-chapter book cited directly by verse: "Jude verse 24" → 1:24.
+            if single && j < tokens.len() && (eq_ci(&tokens[j], "verse") || eq_ci(&tokens[j], "verses")) {
+                if let Some((v, _)) = tokens.get(j + 1).and_then(|t| parse_num_token(t)) {
+                    ctx.book_osis = Some(osis.clone());
+                    ctx.chapter = Some(1);
+                    out.push(Detection {
+                        reference: ParsedRef { book_osis: osis, chapter: 1, verse: Some(v) },
+                        source,
+                    });
+                    i = j + 2;
+                    continue;
+                }
+            }
+            if let Some((n1, verse_in_tok)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
                 j += 1;
-                let verse = if verse_in_tok.is_some() {
+                let mut chapter = n1;
+                let mut verse = if verse_in_tok.is_some() {
                     verse_in_tok
                 } else {
                     let (v, nj) = read_trailing_verse(&tokens, j);
                     j = nj;
                     v
                 };
+                // Single-chapter book with a lone number: that number is the verse.
+                if single && verse.is_none() {
+                    verse = Some(chapter);
+                    chapter = 1;
+                }
                 ctx.book_osis = Some(osis.clone());
                 ctx.chapter = Some(chapter);
                 out.push(Detection {
@@ -300,6 +320,29 @@ mod tests {
         // slash glue
         let d = one("turn to Romans 8/28");
         assert_eq!((d.book_osis.as_str(), d.chapter, d.verse), ("Rom", 8, Some(28)));
+    }
+
+    #[test]
+    fn single_chapter_books_cited_by_verse() {
+        // "Jude 24" means Jude 1:24, not chapter 24
+        let a = one("let's read Jude 24");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Jude", 1, Some(24)));
+
+        // explicit "Jude verse 24"
+        let b = one("turn to Jude verse 24");
+        assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("Jude", 1, Some(24)));
+
+        // "Philemon 6" → Philemon 1:6
+        let c = one("open to Philemon 6");
+        assert_eq!((c.book_osis.as_str(), c.chapter, c.verse), ("Phlm", 1, Some(6)));
+
+        // explicit chapter still respected: "Jude 1:24"
+        let d = one("Jude 1:24");
+        assert_eq!((d.book_osis.as_str(), d.chapter, d.verse), ("Jude", 1, Some(24)));
+
+        // a normal multi-chapter book is unaffected: "Romans 8" stays chapter 8
+        let e = one("Romans 8");
+        assert_eq!((e.book_osis.as_str(), e.chapter, e.verse), ("Rom", 8, None));
     }
 
     #[test]

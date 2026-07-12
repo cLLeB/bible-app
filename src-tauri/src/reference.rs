@@ -44,8 +44,14 @@ pub fn parse_reference(input: &str) -> Option<ParsedRef> {
             nums.push(piece.parse::<u16>().ok()?);
         }
     }
-    let chapter = *nums.first()?;
-    let verse = nums.get(1).copied();
+    let mut chapter = *nums.first()?;
+    let mut verse = nums.get(1).copied();
+
+    // Single-chapter books cited by verse alone ("Jude 24") → chapter 1.
+    if crate::books::is_single_chapter(book.osis) && verse.is_none() {
+        verse = Some(chapter);
+        chapter = 1;
+    }
 
     Some(ParsedRef {
         book_osis: book.osis.to_string(),
