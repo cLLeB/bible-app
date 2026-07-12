@@ -5,6 +5,7 @@ import {
   setProjection,
   setProjectionSettings,
   showStage,
+  startRemote,
   type ProjectionSettings,
 } from "../api";
 
@@ -13,6 +14,7 @@ export function DisplayPanel() {
   const [minutes, setMinutes] = useState(5);
   const [label, setLabel] = useState("Starting soon");
   const [settings, setSettings] = useState<ProjectionSettings>({ fontScale: 1, theme: "dark" });
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
 
   useEffect(() => {
     getProjectionSettings().then(setSettings).catch(() => {});
@@ -43,7 +45,20 @@ export function DisplayPanel() {
         <button onClick={() => showStage()} className="rounded border px-3 py-1">
           Stage display
         </button>
+        <button
+          onClick={async () => setRemoteUrl(await startRemote())}
+          className="rounded border px-3 py-1"
+        >
+          Phone remote
+        </button>
       </div>
+
+      {remoteUrl && (
+        <p className="text-sm text-gray-600">
+          Remote running — open <span className="font-mono text-blue-700">{remoteUrl}</span> on a
+          phone connected to the same Wi-Fi.
+        </p>
+      )}
 
       <div className="flex gap-2">
         <input

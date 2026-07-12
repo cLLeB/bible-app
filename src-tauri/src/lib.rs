@@ -5,6 +5,7 @@ mod db;
 mod detect;
 mod events;
 mod reference;
+mod remote;
 mod semantic;
 mod slides;
 mod stt;
@@ -51,6 +52,7 @@ pub fn run() {
                 current: Mutex::new(ProjectionState::Blank),
                 settings: Mutex::new(ProjectionSettings::default()),
                 listening: Arc::new(AtomicBool::new(false)),
+                remote_running: Arc::new(AtomicBool::new(false)),
             });
 
             // Closing the projection/stage windows should hide them, not
@@ -87,6 +89,7 @@ pub fn run() {
             commands::delete_song,
             commands::start_listening,
             commands::stop_listening,
+            commands::start_remote,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -34,6 +34,8 @@ export const setProjectionSettings = (settings: ProjectionSettings): Promise<voi
 
 export const showStage = (): Promise<void> => invoke<void>("show_stage");
 
+export const startRemote = (): Promise<string> => invoke<string>("start_remote");
+
 export interface SongSummary {
   id: number;
   title: string;

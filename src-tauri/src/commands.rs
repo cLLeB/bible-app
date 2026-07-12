@@ -13,6 +13,7 @@ pub struct AppState {
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
+    pub remote_running: Arc<AtomicBool>, // LAN remote server started?
 }
 
 pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -46,12 +47,9 @@ fn extract_range(query: &str) -> (String, Option<u16>) {
     (query.to_string(), None)
 }
 
-#[tauri::command]
-pub fn lookup_reference(
-    query: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<VersePayload, String> {
-    let (base_query, end) = extract_range(&query);
+/// Reference lookup usable from commands and the LAN remote server.
+pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, String> {
+    let (base_query, end) = extract_range(query);
     let parsed = parse_reference(&base_query).ok_or_else(|| format!("Could not parse '{query}'"))?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
@@ -81,6 +79,14 @@ pub fn lookup_reference(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Verse not found: '{query}'"))?;
     Ok(build_payload(rec))
+}
+
+#[tauri::command]
+pub fn lookup_reference(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<VersePayload, String> {
+    do_lookup(&state, &query)
 }
 
 #[tauri::command]
@@ -195,17 +201,27 @@ fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn project(
+/// Set projection state from an app handle (usable off the command path, e.g.
+/// the LAN remote server thread).
+pub(crate) fn project_via_handle(
     app: &tauri::AppHandle,
-    state: &tauri::State<'_, AppState>,
     next: ProjectionState,
 ) -> Result<(), String> {
+    let state = app.state::<AppState>();
     if let Ok(mut cur) = state.current.lock() {
         *cur = next.clone();
     }
     ensure_projection_window(app)?;
     app.emit_to("projection", "set-projection", next)
         .map_err(|e| e.to_string())
+}
+
+fn project(
+    app: &tauri::AppHandle,
+    _state: &tauri::State<'_, AppState>,
+    next: ProjectionState,
+) -> Result<(), String> {
+    project_via_handle(app, next)
 }
 
 #[tauri::command]
@@ -343,4 +359,10 @@ pub fn start_listening(
 #[tauri::command]
 pub fn stop_listening(state: tauri::State<'_, AppState>) {
     state.listening.store(false, Ordering::SeqCst);
+}
+
+/// Start the LAN phone remote; returns the URL to open on a phone.
+#[tauri::command]
+pub fn start_remote(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    crate::remote::start(app, state.remote_running.clone())
 }
