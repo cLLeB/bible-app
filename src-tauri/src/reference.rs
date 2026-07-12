@@ -18,7 +18,9 @@ pub fn parse_reference(input: &str) -> Option<ParsedRef> {
     let mut tail: Vec<&str> = Vec::new();
     let mut split_at = tokens.len();
     for (i, tok) in tokens.iter().enumerate().rev() {
-        if tok.chars().all(|c| c.is_ascii_digit() || c == ':') && tok.chars().any(|c| c.is_ascii_digit()) {
+        if tok.chars().all(|c| c.is_ascii_digit() || c == ':' || c == '.')
+            && tok.chars().any(|c| c.is_ascii_digit())
+        {
             tail.insert(0, tok);
             split_at = i;
         } else {
@@ -35,7 +37,7 @@ pub fn parse_reference(input: &str) -> Option<ParsedRef> {
     // Flatten tail into numbers. Accept "3:16", "3", "16" tokens or "3 16".
     let mut nums: Vec<u16> = Vec::new();
     for tok in tail {
-        for piece in tok.split(':') {
+        for piece in tok.split(|c| c == ':' || c == '.') {
             if piece.is_empty() {
                 continue;
             }
