@@ -31,12 +31,6 @@ pub fn overlap(query_words: &[String], verse_text: &str) -> usize {
     query_words.iter().filter(|w| vt.contains(w.as_str())).count()
 }
 
-/// Map word overlap to a confidence score (0.55..0.9).
-pub fn confidence(overlap: usize, total: usize) -> f32 {
-    let frac = overlap as f32 / total.max(1) as f32;
-    (0.55 + frac * 0.35).min(0.9)
-}
-
 /// True if a match is strong enough to surface as a quote suggestion.
 pub fn is_strong(overlap: usize, total: usize) -> bool {
     overlap >= 3 && (overlap as f32 / total.max(1) as f32) >= 0.5

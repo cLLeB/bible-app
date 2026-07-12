@@ -184,6 +184,37 @@ impl Db {
 
     /// Full-text search verses (BM25). Returns records best-first with their
     /// rank (lower = better match).
+    /// Full-text search across ALL installed translations. Lets a paraphrase
+    /// quoted from memory in one wording (e.g. KJV) match even when a different
+    /// translation is active; the caller maps the coordinates back.
+    pub fn search_fts_any(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<(VerseRecord, f64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.book_osis, v.chapter, v.verse, v.text, t.code, bm25(verses_fts) AS rank
+             FROM verses_fts
+             JOIN verses v ON v.id = verses_fts.rowid
+             JOIN translations t ON t.id = v.translation_id
+             WHERE verses_fts MATCH ?1
+             ORDER BY rank LIMIT ?2",
+        )?;
+        let rows = stmt.query_map((query, limit as i64), |row| {
+            Ok((
+                VerseRecord {
+                    book_osis: row.get(0)?,
+                    chapter: row.get(1)?,
+                    verse: row.get(2)?,
+                    text: row.get(3)?,
+                    translation: row.get(4)?,
+                },
+                row.get::<_, f64>(5)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
     pub fn search_fts(
         &self,
         translation_code: &str,

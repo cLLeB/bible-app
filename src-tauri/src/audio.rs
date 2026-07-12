@@ -4,6 +4,7 @@ use crate::events::Candidate;
 use crate::{semantic, stt};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -64,11 +65,13 @@ fn clean_transcript(raw: &str) -> String {
         .filter(|l| !(l.starts_with('(') && l.ends_with(')')))
         .collect::<Vec<_>>()
         .join(" ");
-    joined
+    let cleaned = joined
         .replace("[BLANK_AUDIO]", "")
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    // Fix common speech-to-text mishearings of biblical names before detection.
+    crate::corrections::correct(&cleaned)
 }
 
 fn confidence_of(d: &Detection) -> (f32, &'static str) {
@@ -87,8 +90,123 @@ fn confidence_of(d: &Detection) -> (f32, &'static str) {
     }
 }
 
+/// Collect ranked verse candidates for a piece of description: famous stories
+/// (keyword/phrase, scored best-first) then strong FTS quote matches. Used both
+/// for the first uncertain guess and for every refinement pass.
+fn research(
+    db: &crate::db::Db,
+    tr: &str,
+    text: &str,
+    min_keywords: usize,
+) -> Vec<crate::reference::ParsedRef> {
+    use crate::reference::ParsedRef;
+    let mut refs: Vec<ParsedRef> = Vec::new();
+    for h in crate::knowledge::detect_stories_scored(text, min_keywords) {
+        let r = ParsedRef { book_osis: h.osis, chapter: h.chapter, verse: Some(h.verse) };
+        if !refs.contains(&r) {
+            refs.push(r);
+        }
+    }
+    if let Some((query, words)) = semantic::fts_query(text) {
+        // Active translation first, then any installed translation — so a verse
+        // quoted from memory in a different wording (e.g. KJV while set to WEB)
+        // still matches; present_best resolves the coordinates in the active text.
+        let active = db.search_fts(tr, &query, 3).unwrap_or_default();
+        let any = db.search_fts_any(&query, 3).unwrap_or_default();
+        for (rec, _rank) in active.into_iter().chain(any) {
+            if semantic::is_strong(semantic::overlap(&words, &rec.text), words.len()) {
+                let r = ParsedRef { book_osis: rec.book_osis, chapter: rec.chapter, verse: Some(rec.verse) };
+                if !refs.contains(&r) {
+                    refs.push(r);
+                }
+            }
+        }
+    }
+    refs
+}
+
+/// Append `extra` after `primary`, dropping duplicates, preserving order.
+fn merge_ranked(
+    mut primary: Vec<crate::reference::ParsedRef>,
+    extra: Vec<crate::reference::ParsedRef>,
+) -> Vec<crate::reference::ParsedRef> {
+    for r in extra {
+        if !primary.contains(&r) {
+            primary.push(r);
+        }
+    }
+    primary
+}
+
+/// Emit the top standby candidate as a suggestion (unless it is already the last
+/// thing shown) and record its text so we can notice the speaker reading it.
+/// Returns false if the candidate cannot be resolved to a verse.
+fn present_best(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    tr: &str,
+    last: &mut Option<RefKey>,
+    p: &mut crate::resolution::Pending,
+) -> bool {
+    let Some(r) = p.candidates.first().cloned() else {
+        return false;
+    };
+    let rec = match db.find_verse(tr, &r) {
+        Ok(Some(rec)) => rec,
+        _ => return false,
+    };
+    let payload = build_payload(rec);
+    p.presented_text = payload.text.clone();
+    let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
+    if last.as_ref() != Some(&key) {
+        let _ = app.emit(
+            "verse-candidate",
+            Candidate { verse: payload, confidence: 0.7, source: "suggestion".into() },
+        );
+        *last = Some(key);
+    }
+    // Surface the standby alternatives so the operator can pick one directly.
+    let alternatives: Vec<crate::events::VersePayload> = p
+        .candidates
+        .iter()
+        .skip(1)
+        .take(4)
+        .filter_map(|alt| db.find_verse(tr, alt).ok().flatten().map(build_payload))
+        .collect();
+    let _ = app.emit("verse-alternatives", alternatives);
+    true
+}
+
+/// Consecutive non-refining utterances after which we stop actively looping and
+/// let the last suggestion stand (the speaker has moved on).
+const REFINE_GIVE_UP: u32 = 2;
+
+#[cfg(test)]
+mod tests {
+    use super::merge_ranked;
+    use crate::reference::ParsedRef;
+
+    fn r(osis: &str, ch: u16, v: u16) -> ParsedRef {
+        ParsedRef { book_osis: osis.into(), chapter: ch, verse: Some(v) }
+    }
+
+    #[test]
+    fn merge_ranked_keeps_primary_first_and_dedups() {
+        // Fresh search results rank first; remaining standby items follow;
+        // duplicates are dropped, order preserved.
+        let fresh = vec![r("Luke", 15, 3), r("Luke", 15, 11)];
+        let standby = vec![r("Luke", 15, 11), r("Matt", 18, 12)];
+        let merged = merge_ranked(fresh, standby);
+        assert_eq!(
+            merged,
+            vec![r("Luke", 15, 3), r("Luke", 15, 11), r("Matt", 18, 12)]
+        );
+    }
+}
+
 /// Transcribe a clip, emit transcript (final only), and emit new candidates.
 /// Shared by the final (endpointed) flush and the interim mid-utterance pass.
+#[allow(clippy::too_many_arguments)] // threads per-loop mic/detection state
 fn transcribe_detect(
     app: &AppHandle,
     model: &Path,
@@ -96,6 +214,8 @@ fn transcribe_detect(
     audio: &[f32],
     ctx: &mut RefContext,
     last: &mut Option<RefKey>,
+    pending: &mut Option<crate::resolution::Pending>,
+    recent: &mut VecDeque<String>,
     emit_transcript: bool,
 ) {
     let text = match stt::transcribe(audio, model, binary) {
@@ -110,15 +230,25 @@ fn transcribe_detect(
     }
     if emit_transcript {
         let _ = app.emit("transcript", text.clone());
+        // Keep a rolling window of recent words so a quotation spread across
+        // pauses can still be recognized as a whole.
+        for w in text.split_whitespace() {
+            recent.push_back(w.to_lowercase());
+        }
+        while recent.len() > 40 {
+            recent.pop_front();
+        }
     }
 
     let detections = detect::detect_with_context(&text, ctx);
+    let has_explicit = detections.iter().any(|d| d.source != DetectSource::Story);
 
-    // Relative voice navigation ("next verse", "next chapter") against the
-    // currently-presented scripture — the fast hands-free flow.
+    // Relative voice navigation ("next verse", "next chapter") wins over
+    // everything and ends any pending confirmation loop.
     if detections.is_empty() {
         if let Some(dir) = detect::detect_nav_command(&text) {
             if let Some(payload) = crate::commands::navigate_handle(app, dir) {
+                *pending = None;
                 let _ = app.emit(
                     "verse-candidate",
                     Candidate { verse: payload, confidence: 0.9, source: "voice-nav".into() },
@@ -131,45 +261,161 @@ fn transcribe_detect(
     let state = app.state::<AppState>();
     // A spoken translation ("...in ASV") switches to it when installed.
     let tr = crate::commands::resolve_translation(&state, &text);
-    let _ = app.emit("translation-changed", &tr);
-    let candidates: Vec<Candidate> = {
-        let db = match state.db.lock() {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-        let mut out = Vec::new();
-        if !detections.is_empty() {
-            // Explicit / fuzzy / context references.
-            for d in &detections {
-                let r = &d.reference;
-                let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
-                if last.as_ref() == Some(&key) {
-                    continue;
-                }
-                if let Ok(Some(rec)) = db.find_verse(&tr, r) {
-                    let (confidence, source) = confidence_of(d);
-                    out.push(Candidate { verse: build_payload(rec), confidence, source: source.to_string() });
-                    *last = Some(key);
-                }
-            }
-        } else if let Some((query, words)) = semantic::fts_query(&text) {
-            // No spoken reference — look for a quoted/paraphrased verse (FTS).
-            if let Ok(hits) = db.search_fts(&tr, &query, 3) {
-                if let Some((rec, _rank)) = hits.into_iter().next() {
-                    let ov = semantic::overlap(&words, &rec.text);
-                    let key: RefKey = (rec.book_osis.clone(), rec.chapter, Some(rec.verse));
-                    if semantic::is_strong(ov, words.len()) && last.as_ref() != Some(&key) {
-                        let confidence = semantic::confidence(ov, words.len());
-                        out.push(Candidate { verse: build_payload(rec), confidence, source: "quote".into() });
-                        *last = Some(key);
+
+    // --- Confirm/refine conversation loop (final utterances only) ---
+    if emit_transcript {
+        if let Some(p) = pending.take() {
+            if !has_explicit {
+                let db = match state.db.lock() {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                match crate::resolution::classify(&text, &p.presented_text) {
+                    crate::resolution::Response::Affirm => {
+                        if let Some(r) = p.candidates.first() {
+                            if let Ok(Some(rec)) = db.find_verse(&tr, r) {
+                                let _ = app.emit("verse-confirmed", build_payload(rec));
+                            }
+                        }
+                        return; // pending cleared
+                    }
+                    crate::resolution::Response::Deny => {
+                        let mut p = p;
+                        if !p.candidates.is_empty() {
+                            p.candidates.remove(0);
+                        }
+                        let desc = crate::resolution::description_part(&text);
+                        if !desc.is_empty() {
+                            p.description.push(' ');
+                            p.description.push_str(&desc);
+                        }
+                        let found = research(&db, &tr, &p.description, 2);
+                        p.candidates = merge_ranked(found, std::mem::take(&mut p.candidates));
+                        p.misses = 0;
+                        if present_best(app, &db, &tr, last, &mut p) {
+                            *pending = Some(p);
+                        }
+                        return;
+                    }
+                    crate::resolution::Response::Other => {
+                        let mut p = p;
+                        p.description.push(' ');
+                        p.description.push_str(&text);
+                        let found = research(&db, &tr, &p.description, 2);
+                        let improved = matches!(
+                            (found.first(), p.candidates.first()),
+                            (Some(nb), cur) if Some(nb) != cur
+                        );
+                        if improved {
+                            p.candidates = merge_ranked(found, std::mem::take(&mut p.candidates));
+                            p.misses = 0;
+                            if present_best(app, &db, &tr, last, &mut p) {
+                                *pending = Some(p);
+                            }
+                        } else {
+                            p.misses += 1;
+                            if p.misses < REFINE_GIVE_UP {
+                                *pending = Some(p); // keep waiting a little longer
+                            }
+                            // else: settle — the last suggestion stands.
+                        }
+                        return;
                     }
                 }
             }
+            // has_explicit: a fresh reference supersedes the loop; fall through.
         }
-        out
+    }
+
+    let _ = app.emit("translation-changed", &tr);
+    let db = match state.db.lock() {
+        Ok(d) => d,
+        Err(_) => return,
     };
-    for c in candidates {
-        let _ = app.emit("verse-candidate", c);
+    if has_explicit {
+        // Confident references: explicit / fuzzy / context / descriptive.
+        for d in detections.iter().filter(|d| d.source != DetectSource::Story) {
+            let r = &d.reference;
+            let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
+            if last.as_ref() == Some(&key) {
+                continue;
+            }
+            if let Ok(Some(rec)) = db.find_verse(&tr, r) {
+                let (confidence, source) = confidence_of(d);
+                // Spoken verse range ("John 3:16 through 18", "the whole chapter"):
+                // resolve an open-ended span to the chapter's last verse.
+                let payload = match (r.verse, d.verse_end) {
+                    (Some(start), Some(end)) => {
+                        let real_end = if end == detect::TO_CHAPTER_END {
+                            db.chapter_last_verse(&tr, &r.book_osis, r.chapter)
+                                .ok()
+                                .flatten()
+                                .unwrap_or(start)
+                        } else {
+                            end
+                        };
+                        crate::commands::build_range_payload(
+                            &db, &tr, &r.book_osis, r.chapter, start, real_end,
+                        )
+                        .unwrap_or_else(|| build_payload(rec))
+                    }
+                    _ => build_payload(rec),
+                };
+                let _ = app.emit(
+                    "verse-candidate",
+                    Candidate { verse: payload, confidence, source: source.to_string() },
+                );
+                *last = Some(key);
+            }
+        }
+    } else {
+        // Uncertain: a topical request ("what the Bible says about worry"), a
+        // paraphrased story, or a quoted verse. Present the best guess and, on a
+        // final utterance, open the confirm/refine loop with the alternatives on
+        // standby (for a topic, that's the whole set of verses to cycle through).
+        let topic = crate::knowledge::detect_topic(&text);
+        let ranked: Vec<crate::reference::ParsedRef> = match &topic {
+            Some((_name, refs)) => refs
+                .iter()
+                .map(|(o, c, v)| crate::reference::ParsedRef {
+                    book_osis: o.clone(),
+                    chapter: *c,
+                    verse: Some(*v),
+                })
+                .collect(),
+            None => research(&db, &tr, &text, 3),
+        };
+        // Nothing from this utterance alone — try the rolling window in case a
+        // quotation was spoken across a pause.
+        let mut ranked = if ranked.is_empty() && emit_transcript && recent.len() >= 8 {
+            let joined: String = recent.iter().cloned().collect::<Vec<_>>().join(" ");
+            research(&db, &tr, &joined, 3)
+        } else {
+            ranked
+        };
+        // Operator learning: if this description was corrected before, rank the
+        // remembered verse first.
+        if let Ok(learned) = state.learned.lock() {
+            if let Some((o, c, v)) = learned.get(&crate::resolution::signature(&text)) {
+                let chosen = crate::reference::ParsedRef { book_osis: o.clone(), chapter: *c, verse: Some(*v) };
+                ranked.retain(|r| r != &chosen);
+                ranked.insert(0, chosen);
+            }
+        }
+        if !ranked.is_empty() {
+            if let Some((name, _)) = &topic {
+                let _ = app.emit("topic-detected", name.clone());
+            }
+            let mut p = crate::resolution::Pending {
+                candidates: ranked,
+                description: text.clone(),
+                presented_text: String::new(),
+                misses: 0,
+            };
+            if present_best(app, &db, &tr, last, &mut p) && emit_transcript {
+                *pending = Some(p);
+            }
+        }
     }
 }
 
@@ -221,6 +467,8 @@ fn run_inner(
     let mut last_interim = 0usize;
     let mut ctx = RefContext::default();
     let mut last_ref: Option<RefKey> = None;
+    let mut pending: Option<crate::resolution::Pending> = None;
+    let mut recent_words: VecDeque<String> = VecDeque::new();
     let mut last_activity = Instant::now();
 
     while flag.load(Ordering::SeqCst) {
@@ -250,7 +498,7 @@ fn run_inner(
                 if speech_ms >= MIN_SPEECH_MS
                     && utter.len().saturating_sub(last_interim) >= INTERIM_SAMPLES
                 {
-                    transcribe_detect(app, model, binary, &utter, &mut ctx, &mut last_ref, false);
+                    transcribe_detect(app, model, binary, &utter, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, false);
                     last_interim = utter.len();
                     last_activity = Instant::now();
                 }
@@ -268,7 +516,7 @@ fn run_inner(
                             ctx.clear();
                         }
                         last_activity = Instant::now();
-                        transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, true);
+                        transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                     }
                 }
             }
@@ -283,7 +531,7 @@ fn run_inner(
                         last_interim = 0;
                         if had >= MIN_SPEECH_MS {
                             last_activity = Instant::now();
-                            transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, true);
+                            transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                         }
                     }
                 }
