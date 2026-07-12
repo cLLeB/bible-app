@@ -54,10 +54,16 @@ export function DisplayPanel() {
       </div>
 
       {remoteUrl && (
-        <p className="text-sm text-gray-600">
-          Remote running — open <span className="font-mono text-blue-700">{remoteUrl}</span> on a
-          phone connected to the same Wi-Fi.
-        </p>
+        <div className="space-y-1 text-sm text-gray-600">
+          <p>
+            Phone remote: open <span className="font-mono text-blue-700">{remoteUrl}</span> on a
+            phone on the same Wi-Fi.
+          </p>
+          <p>
+            OBS / browser output: add a Browser Source at{" "}
+            <span className="font-mono text-blue-700">{remoteUrl}/projection</span>.
+          </p>
+        </div>
       )}
 
       <div className="flex gap-2">

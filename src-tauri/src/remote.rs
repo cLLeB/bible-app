@@ -44,6 +44,36 @@ fn lan_ip() -> Option<String> {
     Some(addr.ip().to_string())
 }
 
+const PROJECTION_PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Projection</title>
+<style>html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif;overflow:hidden}
+#wrap{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 6vw;box-sizing:border-box}
+#body{font-size:5vw;line-height:1.15;white-space:pre-line;max-width:90vw}
+#cap{font-size:2.2vw;color:#bbb;margin-top:4vh}</style></head>
+<body><div id="wrap"><div id="body"></div><div id="cap"></div></div>
+<script>
+function fmt(ms){let t=Math.max(0,Math.floor(ms/1000));let m=Math.floor(t/60),s=t%60;return m+':'+String(s).padStart(2,'0');}
+let cur=null;
+async function poll(){try{let r=await fetch('/api/projection');cur=await r.json();}catch(e){}render();}
+function render(){let b=document.getElementById('body'),c=document.getElementById('cap');if(!cur){b.textContent='';c.textContent='';return;}
+ switch(cur.kind){case 'verse':case 'song':b.textContent=cur.text;c.textContent=cur.caption;break;
+ case 'message':b.textContent=cur.text;c.textContent='';break;
+ case 'countdown':b.textContent=fmt(cur.targetMs-Date.now());c.textContent=cur.label||'';break;
+ case 'logo':b.textContent='✝';c.textContent='';break;
+ default:b.textContent='';c.textContent='';}}
+setInterval(poll,400);setInterval(render,250);poll();
+</script></body></html>"#;
+
+fn projection_json(app: &AppHandle) -> String {
+    let state = app.state::<AppState>();
+    let guard = state.current.lock();
+    let json = match guard {
+        Ok(ref g) => serde_json::to_string(&**g).unwrap_or_else(|_| "{\"kind\":\"blank\"}".into()),
+        Err(_) => "{\"kind\":\"blank\"}".into(),
+    };
+    json
+}
+
 fn state_summary(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     let guard = state.current.lock();
@@ -81,6 +111,8 @@ pub fn start(app: AppHandle, running: Arc<AtomicBool>) -> Result<String, String>
             let method = req.method().to_string();
             let (code, body) = match (method.as_str(), url_path.as_str()) {
                 ("GET", "/") => (200, PAGE.to_string()),
+                ("GET", "/projection") => (200, PROJECTION_PAGE.to_string()),
+                ("GET", "/api/projection") => (200, projection_json(&app)),
                 ("GET", "/api/state") => (200, state_summary(&app)),
                 ("POST", "/api/blank") => {
                     let _ = project_via_handle(&app, ProjectionState::Blank);
@@ -104,10 +136,12 @@ pub fn start(app: AppHandle, running: Arc<AtomicBool>) -> Result<String, String>
                 }
                 _ => (404, "not found".into()),
             };
-            let header = if url_path == "/" {
-                "Content-Type: text/html; charset=utf-8"
+            let header = if url_path == "/" || url_path == "/projection" {
+                "text/html; charset=utf-8"
+            } else if url_path == "/api/projection" {
+                "application/json; charset=utf-8"
             } else {
-                "Content-Type: text/plain; charset=utf-8"
+                "text/plain; charset=utf-8"
             };
             let response = tiny_http::Response::from_string(body)
                 .with_status_code(code)
