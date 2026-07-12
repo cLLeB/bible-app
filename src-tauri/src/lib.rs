@@ -42,6 +42,7 @@ pub fn run() {
             if let Some(json) = seed_json {
                 db.seed_from_json(&json).expect("seed");
             }
+            db.seed_hymns_if_empty().expect("seed hymns");
 
             app.manage(AppState {
                 db: Mutex::new(db),

@@ -30,13 +30,52 @@ pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
     }
 }
 
+/// Pull a verse-range end off the query: "16-18", "16 to 18", "16 through 18".
+fn extract_range(query: &str) -> (String, Option<u16>) {
+    let lower = query.to_lowercase();
+    for sep in [" through ", " thru ", " to ", "-"] {
+        if let Some(pos) = lower.rfind(sep) {
+            let after = lower[pos + sep.len()..].trim();
+            if let Some(tok) = after.split_whitespace().next() {
+                if let Ok(end) = tok.parse::<u16>() {
+                    return (query[..pos].trim().to_string(), Some(end));
+                }
+            }
+        }
+    }
+    (query.to_string(), None)
+}
+
 #[tauri::command]
 pub fn lookup_reference(
     query: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<VersePayload, String> {
-    let parsed = parse_reference(&query).ok_or_else(|| format!("Could not parse '{query}'"))?;
+    let (base_query, end) = extract_range(&query);
+    let parsed = parse_reference(&base_query).ok_or_else(|| format!("Could not parse '{query}'"))?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    if let (Some(start), Some(end)) = (parsed.verse, end) {
+        if end > start {
+            if let Some(text) = db
+                .find_verse_range(&state.translation, &parsed.book_osis, parsed.chapter, start, end)
+                .map_err(|e| e.to_string())?
+            {
+                let book = book_by_osis(&parsed.book_osis)
+                    .map(|b| b.name.to_string())
+                    .unwrap_or_else(|| parsed.book_osis.clone());
+                return Ok(VersePayload {
+                    reference: format!("{} {}:{}-{}", book, parsed.chapter, start, end),
+                    book,
+                    chapter: parsed.chapter,
+                    verse: start,
+                    text,
+                    translation: state.translation.clone(),
+                });
+            }
+        }
+    }
+
     let rec = db
         .find_verse(&state.translation, &parsed)
         .map_err(|e| e.to_string())?

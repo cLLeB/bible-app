@@ -138,6 +138,32 @@ impl Db {
         Ok(parsed.verses.len())
     }
 
+    /// Fetch verses start..=end of a chapter and join their text. Returns None
+    /// if the starting verse is absent.
+    pub fn find_verse_range(
+        &self,
+        translation_code: &str,
+        book_osis: &str,
+        chapter: u16,
+        start: u16,
+        end: u16,
+    ) -> rusqlite::Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.text FROM verses v JOIN translations t ON t.id = v.translation_id
+             WHERE t.code = ?1 AND v.book_osis = ?2 AND v.chapter = ?3
+               AND v.verse BETWEEN ?4 AND ?5 ORDER BY v.verse",
+        )?;
+        let rows = stmt.query_map((translation_code, book_osis, chapter, start, end), |r| {
+            r.get::<_, String>(0)
+        })?;
+        let texts: Vec<String> = rows.collect::<rusqlite::Result<_>>()?;
+        if texts.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(texts.join(" ")))
+        }
+    }
+
     pub fn find_verse(
         &self,
         translation_code: &str,
@@ -246,6 +272,18 @@ impl Db {
         }
     }
 
+    /// Seed a few public-domain hymns the first time (songs table empty).
+    pub fn seed_hymns_if_empty(&self) -> rusqlite::Result<()> {
+        let count: i64 = self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get(0))?;
+        if count > 0 {
+            return Ok(());
+        }
+        for (title, author, lyrics) in BUNDLED_HYMNS {
+            self.add_song(title, Some(author), lyrics)?;
+        }
+        Ok(())
+    }
+
     pub fn get_song_slides(&self, song_id: i64) -> rusqlite::Result<Vec<SlideRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT order_index, text FROM song_slides WHERE song_id = ?1 ORDER BY order_index",
@@ -256,6 +294,35 @@ impl Db {
         rows.collect()
     }
 }
+
+/// Public-domain hymns (all pre-1900) bundled as starter content.
+static BUNDLED_HYMNS: &[(&str, &str, &str)] = &[
+    (
+        "Amazing Grace",
+        "John Newton",
+        "Amazing grace! how sweet the sound,\nThat saved a wretch like me!\nI once was lost, but now am found,\nWas blind, but now I see.\n\n'Twas grace that taught my heart to fear,\nAnd grace my fears relieved;\nHow precious did that grace appear\nThe hour I first believed!\n\nThrough many dangers, toils and snares,\nI have already come;\n'Tis grace hath brought me safe thus far,\nAnd grace will lead me home.",
+    ),
+    (
+        "Holy, Holy, Holy",
+        "Reginald Heber",
+        "Holy, holy, holy! Lord God Almighty!\nEarly in the morning our song shall rise to Thee;\nHoly, holy, holy! merciful and mighty!\nGod in three Persons, blessed Trinity!\n\nHoly, holy, holy! all the saints adore Thee,\nCasting down their golden crowns around the glassy sea;\nCherubim and seraphim falling down before Thee,\nWhich wert, and art, and evermore shalt be.",
+    ),
+    (
+        "It Is Well with My Soul",
+        "Horatio Spafford",
+        "When peace like a river attendeth my way,\nWhen sorrows like sea billows roll;\nWhatever my lot, Thou hast taught me to say,\nIt is well, it is well with my soul.\n\nIt is well with my soul,\nIt is well, it is well with my soul.",
+    ),
+    (
+        "Blessed Assurance",
+        "Fanny Crosby",
+        "Blessed assurance, Jesus is mine!\nO what a foretaste of glory divine!\nHeir of salvation, purchase of God,\nBorn of His Spirit, washed in His blood.\n\nThis is my story, this is my song,\nPraising my Savior all the day long;\nThis is my story, this is my song,\nPraising my Savior all the day long.",
+    ),
+    (
+        "Come Thou Fount",
+        "Robert Robinson",
+        "Come, Thou Fount of every blessing,\nTune my heart to sing Thy grace;\nStreams of mercy, never ceasing,\nCall for songs of loudest praise.\n\nHere I raise mine Ebenezer;\nHither by Thy help I'm come;\nAnd I hope, by Thy good pleasure,\nSafely to arrive at home.",
+    ),
+];
 
 #[cfg(test)]
 mod tests {
