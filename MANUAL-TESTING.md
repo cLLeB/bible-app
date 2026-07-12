@@ -70,6 +70,12 @@ Speak clearly, then pause for about a second and a half. Try:
 
 **Limits:** anything outside the 3 loaded verses says "not found" until you load the full Bible.
 
+**Translation picker:** a **Translation** dropdown appears next to the "Scripture" heading **only
+if you have more than one translation loaded**. With just WEB it stays hidden (that's expected).
+If you load extra public-domain Bibles (as `*.canonical.json` files in the `data` folder), you can
+switch between them here and it affects lookups, search, and live detection. Your choice is
+remembered.
+
 ---
 
 ## 3. Songs
@@ -87,6 +93,12 @@ Speak clearly, then pause for about a second and a half. Try:
 
 **What you should NOT see:** editing/deleting should never crash; the live preview should
 update as you type.
+
+**Backup / share songs:** expand the **"Backup / share songs"** area at the bottom of Songs.
+- **Export all songs (copy)** → copies your whole song library as text (also shown in a box).
+  Paste it into a text file to keep as a backup.
+- Paste that text back into the **import** box on another machine → **Import songs** → they're
+  added. Great for moving your library between computers.
 
 ---
 
@@ -142,7 +154,8 @@ is currently seeing, with a red dot when something is live.
 
 - **Reworded paraphrases** (very different words but same meaning) may not be caught yet — only
   close quotes are. The stronger AI paraphrase engine is planned but not built.
-- **Only one Bible translation** is active for now.
+- **Only WEB is loaded by default.** Multiple translations are supported, but you'd need to add
+  the extra Bible files yourself.
 - No importing from CCLI/SongSelect or PowerPoint yet.
 - No printing, no cloud sync (by design — this is an offline tool).
 
