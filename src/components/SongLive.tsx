@@ -6,6 +6,7 @@ import {
   type Slide,
   type SongSummary,
 } from "../api";
+import { useLiveStore } from "../services";
 
 interface SongLiveProps {
   song: SongSummary;
@@ -42,6 +43,7 @@ export function SongLive({ song }: SongLiveProps) {
 
   function projectAt(i: number): void {
     if (i < 0 || i >= slidesRef.current.length) return;
+    useLiveStore.getState().setOwner("song");
     setIndex(i);
     void projectSlide(song.id, i);
   }
@@ -49,6 +51,7 @@ export function SongLive({ song }: SongLiveProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (isTypingTarget(e.target)) return;
+      if (useLiveStore.getState().owner !== "song") return;
       const cur = indexRef.current;
       switch (e.key) {
         case "ArrowRight":

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { deleteSong, getSong, listSongs, type SongDetail, type SongSummary } from "../api";
+import { useServiceStore } from "../services";
 import { SongEditor } from "./SongEditor";
 import { SongLive } from "./SongLive";
 
@@ -8,6 +9,7 @@ export function SongsPanel() {
   const [selected, setSelected] = useState<SongSummary | null>(null);
   const [editing, setEditing] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const addSongCue = useServiceStore((s) => s.addSong);
 
   async function refresh(): Promise<void> {
     try {
@@ -66,6 +68,13 @@ export function SongsPanel() {
               >
                 {s.title}
                 {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
+              </button>
+              <button
+                onClick={() => addSongCue(s.id, s.title)}
+                className="rounded border px-2 py-1 text-xs"
+                title="Add to service order"
+              >
+                ＋
               </button>
               <button onClick={() => onEdit(s)} className="rounded border px-2 py-1 text-xs">
                 Edit

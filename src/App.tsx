@@ -3,6 +3,7 @@ import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LookupBar } from "./components/LookupBar";
 import { ResultCard } from "./components/ResultCard";
+import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
 
 export default function App() {
@@ -16,6 +17,8 @@ export default function App() {
         <LookupBar />
         <ResultCard />
       </section>
+      <hr />
+      <ServicePanel />
       <hr />
       <SongsPanel />
       <hr />
