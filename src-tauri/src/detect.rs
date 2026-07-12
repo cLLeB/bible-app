@@ -30,8 +30,9 @@ impl RefContext {
 }
 
 fn parse_num_token(tok: &str) -> Option<(u16, Option<u16>)> {
-    if tok.contains(':') {
-        let mut parts = tok.split(':');
+    // Accept "3:16", "3.16" (whisper often renders "3 16" as "3.16"), or "3".
+    if tok.contains(':') || tok.contains('.') {
+        let mut parts = tok.split(|c| c == ':' || c == '.');
         let a = parts.next()?.parse::<u16>().ok()?;
         let b = parts.next().and_then(|p| p.parse::<u16>().ok());
         Some((a, b))
@@ -275,6 +276,17 @@ mod tests {
         let r = &later[0].reference;
         assert_eq!((r.book_osis.as_str(), r.chapter, r.verse), ("Rom", 8, Some(28)));
         assert_eq!(later[0].source, DetectSource::Context);
+    }
+
+    #[test]
+    fn handles_dot_and_implied_forms() {
+        // whisper renders "John two five" as "John 2.5" (dot, no "chapter/verse")
+        let a = one("let's turn our bibles to John 2.5 in the ASV translation");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("John", 2, Some(5)));
+
+        // implied "John 2 5" (two bare numbers, no "chapter/verse" words)
+        let b = one("turn to John 2 5");
+        assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("John", 2, Some(5)));
     }
 
     #[test]
