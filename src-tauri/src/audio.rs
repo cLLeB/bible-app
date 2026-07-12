@@ -80,6 +80,10 @@ fn confidence_of(d: &Detection) -> (f32, &'static str) {
             if d.reference.verse.is_some() { (0.82, "fuzzy") } else { (0.72, "fuzzy") }
         }
         DetectSource::Context => (0.80, "context"),
+        DetectSource::Descriptive => {
+            if d.reference.verse.is_some() { (0.9, "descriptive") } else { (0.8, "descriptive") }
+        }
+        DetectSource::Story => (0.7, "story"),
     }
 }
 

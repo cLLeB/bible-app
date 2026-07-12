@@ -4,6 +4,7 @@ mod commands;
 mod db;
 mod detect;
 mod events;
+mod knowledge;
 mod reference;
 mod remote;
 mod semantic;

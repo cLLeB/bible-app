@@ -4,9 +4,11 @@ use crate::reference::ParsedRef;
 /// How a reference was recognized — drives confidence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DetectSource {
-    Explicit, // exact book name + numbers
-    Fuzzy,    // book name recovered by fuzzy match
-    Context,  // bare "verse N" / "chapter N" resolved via remembered book
+    Explicit,    // exact book name + numbers
+    Fuzzy,       // book name recovered by fuzzy match
+    Context,     // bare "verse N" / "chapter N" resolved via remembered book
+    Descriptive, // "last book of the Old Testament", "third book of Moses"
+    Story,       // famous story/passage ("the prodigal son")
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +132,12 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                 }
             }
         }
+        // Descriptive: "last book of the Old Testament", "third book of Moses".
+        if book.is_none() {
+            if let Some((osis, k)) = crate::knowledge::resolve_descriptive(&tokens, i) {
+                book = Some((osis.to_string(), k, DetectSource::Descriptive));
+            }
+        }
         if book.is_none() {
             for len in 1..=2 {
                 if i + len <= tokens.len() {
@@ -154,7 +162,7 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                     ctx.book_osis = Some(osis.clone());
                     ctx.chapter = Some(1);
                     out.push(Detection {
-                        reference: ParsedRef { book_osis: osis, chapter: 1, verse: Some(v) },
+                        reference: ParsedRef { book_osis: osis.clone(), chapter: 1, verse: Some(v) },
                         source,
                     });
                     i = j + 2;
@@ -179,10 +187,18 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                 ctx.book_osis = Some(osis.clone());
                 ctx.chapter = Some(chapter);
                 out.push(Detection {
-                    reference: ParsedRef { book_osis: osis, chapter, verse },
+                    reference: ParsedRef { book_osis: osis.clone(), chapter, verse },
                     source,
                 });
                 i = j;
+                continue;
+            }
+            // A descriptive book with no number yet — remember it so a following
+            // "chapter 3" continuation resolves ("last book of the OT ... chapter 3").
+            if source == DetectSource::Descriptive {
+                ctx.book_osis = Some(osis);
+                ctx.chapter = None;
+                i += len;
                 continue;
             }
         }
@@ -228,6 +244,20 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
         }
 
         i += 1;
+    }
+
+    // Famous stories/passages ("the prodigal son" → Luke 15:11), added as
+    // suggestions unless that book+chapter was already detected explicitly.
+    for (osis, chapter, verse) in crate::knowledge::detect_stories(text) {
+        let dup = out
+            .iter()
+            .any(|d| d.reference.book_osis == osis && d.reference.chapter == chapter);
+        if !dup {
+            out.push(Detection {
+                reference: ParsedRef { book_osis: osis, chapter, verse: Some(verse) },
+                source: DetectSource::Story,
+            });
+        }
     }
     out
 }
@@ -343,6 +373,36 @@ mod tests {
         // a normal multi-chapter book is unaffected: "Romans 8" stays chapter 8
         let e = one("Romans 8");
         assert_eq!((e.book_osis.as_str(), e.chapter, e.verse), ("Rom", 8, None));
+    }
+
+    #[test]
+    fn descriptive_book_names() {
+        // "last book of the Old Testament" = Malachi
+        let a = one("turn to the last book of the old testament chapter 3");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Mal", 3, None));
+
+        // "third book of Moses" = Leviticus
+        let b = one("the third book of moses chapter 1 verse 1");
+        assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("Lev", 1, Some(1)));
+
+        // "last book of the New Testament" = Revelation
+        let c = one("the last book of the new testament 22 20");
+        assert_eq!((c.book_osis.as_str(), c.chapter, c.verse), ("Rev", 22, Some(20)));
+    }
+
+    #[test]
+    fn famous_stories_resolve() {
+        let a = one("let me tell you about the prodigal son this morning");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Luke", 15, Some(11)));
+
+        let b = one("remember david and goliath");
+        assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("1Sam", 17, Some(1)));
+
+        let mut ctx = RefContext::default();
+        let d = detect_with_context("the story of noah's ark", &mut ctx);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].source, DetectSource::Story);
+        assert_eq!(d[0].reference.book_osis, "Gen");
     }
 
     #[test]
