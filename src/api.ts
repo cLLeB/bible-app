@@ -53,6 +53,19 @@ export const lookupReference = (query: string): Promise<VersePayload> =>
 export const searchScripture = (query: string): Promise<VersePayload[]> =>
   invoke<VersePayload[]>("search_scripture", { query });
 
+export interface TranslationInfo {
+  code: string;
+  name: string;
+}
+
+export const listTranslations = (): Promise<TranslationInfo[]> =>
+  invoke<TranslationInfo[]>("list_translations");
+
+export const getTranslation = (): Promise<string> => invoke<string>("get_translation");
+
+export const setTranslation = (code: string): Promise<void> =>
+  invoke<void>("set_translation", { code });
+
 export const projectVerse = (payload: VersePayload): Promise<void> =>
   invoke<void>("project_verse", { payload });
 

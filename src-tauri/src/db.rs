@@ -302,6 +302,12 @@ impl Db {
         rows.collect()
     }
 
+    pub fn list_translations(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT code, name FROM translations ORDER BY code")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
     pub fn get_song_title(&self, song_id: i64) -> rusqlite::Result<Option<String>> {
         let mut stmt = self.conn.prepare("SELECT title FROM songs WHERE id = ?1")?;
         let mut rows = stmt.query([song_id])?;

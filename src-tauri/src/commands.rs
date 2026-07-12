@@ -9,11 +9,17 @@ use tauri::{Emitter, Manager};
 
 pub struct AppState {
     pub db: Mutex<Db>,
-    pub translation: String, // active translation code, e.g. "WEB"
+    pub translation: Mutex<String>, // active translation code, e.g. "WEB"
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
+}
+
+impl AppState {
+    pub fn active_translation(&self) -> String {
+        self.translation.lock().map(|t| t.clone()).unwrap_or_else(|_| "WEB".into())
+    }
 }
 
 pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -49,6 +55,7 @@ fn extract_range(query: &str) -> (String, Option<u16>) {
 
 /// Reference lookup usable from commands and the LAN remote server.
 pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, String> {
+    let tr = state.active_translation();
     let (base_query, end) = extract_range(query);
     let parsed = parse_reference(&base_query).ok_or_else(|| format!("Could not parse '{query}'"))?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -56,7 +63,7 @@ pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, S
     if let (Some(start), Some(end)) = (parsed.verse, end) {
         if end > start {
             if let Some(text) = db
-                .find_verse_range(&state.translation, &parsed.book_osis, parsed.chapter, start, end)
+                .find_verse_range(&tr, &parsed.book_osis, parsed.chapter, start, end)
                 .map_err(|e| e.to_string())?
             {
                 let book = book_by_osis(&parsed.book_osis)
@@ -68,14 +75,14 @@ pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, S
                     chapter: parsed.chapter,
                     verse: start,
                     text,
-                    translation: state.translation.clone(),
+                    translation: tr,
                 });
             }
         }
     }
 
     let rec = db
-        .find_verse(&state.translation, &parsed)
+        .find_verse(&tr, &parsed)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Verse not found: '{query}'"))?;
     Ok(build_payload(rec))
@@ -104,9 +111,36 @@ pub fn search_scripture(
         return Ok(vec![]);
     }
     let fts = terms.join(" OR ");
+    let tr = state.active_translation();
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let hits = db.search_fts(&state.translation, &fts, 25).map_err(|e| e.to_string())?;
+    let hits = db.search_fts(&tr, &fts, 25).map_err(|e| e.to_string())?;
     Ok(hits.into_iter().map(|(rec, _)| build_payload(rec)).collect())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationInfo {
+    pub code: String,
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn list_translations(state: tauri::State<'_, AppState>) -> Result<Vec<TranslationInfo>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let list = db.list_translations().map_err(|e| e.to_string())?;
+    Ok(list.into_iter().map(|(code, name)| TranslationInfo { code, name }).collect())
+}
+
+#[tauri::command]
+pub fn get_translation(state: tauri::State<'_, AppState>) -> String {
+    state.active_translation()
+}
+
+#[tauri::command]
+pub fn set_translation(code: String, state: tauri::State<'_, AppState>) {
+    if let Ok(mut t) = state.translation.lock() {
+        *t = code;
+    }
 }
 
 // ---- Songs ----

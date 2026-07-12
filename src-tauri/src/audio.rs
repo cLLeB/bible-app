@@ -110,6 +110,7 @@ fn transcribe_detect(
 
     let detections = detect::detect_with_context(&text, ctx);
     let state = app.state::<AppState>();
+    let tr = state.active_translation();
     let candidates: Vec<Candidate> = {
         let db = match state.db.lock() {
             Ok(d) => d,
@@ -124,7 +125,7 @@ fn transcribe_detect(
                 if last.as_ref() == Some(&key) {
                     continue;
                 }
-                if let Ok(Some(rec)) = db.find_verse(&state.translation, r) {
+                if let Ok(Some(rec)) = db.find_verse(&tr, r) {
                     let (confidence, source) = confidence_of(d);
                     out.push(Candidate { verse: build_payload(rec), confidence, source: source.to_string() });
                     *last = Some(key);
@@ -132,7 +133,7 @@ fn transcribe_detect(
             }
         } else if let Some((query, words)) = semantic::fts_query(&text) {
             // No spoken reference — look for a quoted/paraphrased verse (FTS).
-            if let Ok(hits) = db.search_fts(&state.translation, &query, 3) {
+            if let Ok(hits) = db.search_fts(&tr, &query, 3) {
                 if let Some((rec, _rank)) = hits.into_iter().next() {
                     let ov = semantic::overlap(&words, &rec.text);
                     let key: RefKey = (rec.book_osis.clone(), rec.chapter, Some(rec.verse));

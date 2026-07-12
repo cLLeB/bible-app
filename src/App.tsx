@@ -7,6 +7,7 @@ import { ResultCard } from "./components/ResultCard";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
+import { TranslationPicker } from "./components/TranslationPicker";
 
 export default function App() {
   return (
@@ -16,7 +17,10 @@ export default function App() {
       <ListenPanel />
       <hr />
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">Scripture</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Scripture</h2>
+          <TranslationPicker />
+        </div>
         <LookupBar />
         <ResultCard />
         <ScriptureSearch />

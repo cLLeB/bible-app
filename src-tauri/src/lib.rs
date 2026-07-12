@@ -44,11 +44,27 @@ pub fn run() {
             if let Some(json) = seed_json {
                 db.seed_from_json(&json).expect("seed");
             }
+            // Seed every *.canonical.json in the project data dir (multi-translation).
+            let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
+            if let Ok(entries) = std::fs::read_dir(&data_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().ends_with(".canonical.json"))
+                        .unwrap_or(false)
+                    {
+                        if let Ok(json) = std::fs::read_to_string(&path) {
+                            let _ = db.seed_from_json(&json);
+                        }
+                    }
+                }
+            }
             db.seed_hymns_if_empty().expect("seed hymns");
 
             app.manage(AppState {
                 db: Mutex::new(db),
-                translation: "WEB".into(),
+                translation: Mutex::new("WEB".into()),
                 current: Mutex::new(ProjectionState::Blank),
                 settings: Mutex::new(ProjectionSettings::default()),
                 listening: Arc::new(AtomicBool::new(false)),
@@ -73,6 +89,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::lookup_reference,
             commands::search_scripture,
+            commands::list_translations,
+            commands::get_translation,
+            commands::set_translation,
             commands::get_projection,
             commands::project_verse,
             commands::project_slide,
