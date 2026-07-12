@@ -16,6 +16,7 @@ const MAX_UTTER_MS: f32 = 12_000.0;
 const MIN_SPEECH_MS: f32 = 600.0;
 const PREROLL_SAMPLES: usize = (TARGET_RATE as usize) * 3 / 10; // 0.3s pre-speech
 const CTX_STALE_SECS: u64 = 300; // clear remembered book after 5min of no speech
+const INTERIM_SAMPLES: usize = (TARGET_RATE as usize) * 4; // interim pass every 4s of long speech
 
 type RefKey = (String, u16, Option<u16>);
 
@@ -73,32 +74,27 @@ fn clean_transcript(raw: &str) -> String {
 fn confidence_of(d: &Detection) -> (f32, &'static str) {
     match d.source {
         DetectSource::Explicit => {
-            if d.reference.verse.is_some() {
-                (0.95, "explicit")
-            } else {
-                (0.85, "explicit")
-            }
+            if d.reference.verse.is_some() { (0.95, "explicit") } else { (0.85, "explicit") }
         }
         DetectSource::Fuzzy => {
-            if d.reference.verse.is_some() {
-                (0.82, "fuzzy")
-            } else {
-                (0.72, "fuzzy")
-            }
+            if d.reference.verse.is_some() { (0.82, "fuzzy") } else { (0.72, "fuzzy") }
         }
         DetectSource::Context => (0.80, "context"),
     }
 }
 
-fn handle_utterance(
+/// Transcribe a clip, emit transcript (final only), and emit new candidates.
+/// Shared by the final (endpointed) flush and the interim mid-utterance pass.
+fn transcribe_detect(
     app: &AppHandle,
     model: &Path,
     binary: &Path,
-    audio: Vec<f32>,
+    audio: &[f32],
     ctx: &mut RefContext,
     last: &mut Option<RefKey>,
+    emit_transcript: bool,
 ) {
-    let text = match stt::transcribe(&audio, model, binary) {
+    let text = match stt::transcribe(audio, model, binary) {
         Ok(t) => clean_transcript(&t),
         Err(e) => {
             let _ = app.emit("listen-error", e);
@@ -108,7 +104,9 @@ fn handle_utterance(
     if text.is_empty() {
         return;
     }
-    let _ = app.emit("transcript", text.clone());
+    if emit_transcript {
+        let _ = app.emit("transcript", text.clone());
+    }
 
     let detections = detect::detect_with_context(&text, ctx);
     if detections.is_empty() {
@@ -129,11 +127,7 @@ fn handle_utterance(
             }
             if let Ok(Some(rec)) = db.find_verse(&state.translation, r) {
                 let (confidence, source) = confidence_of(d);
-                out.push(Candidate {
-                    verse: build_payload(rec),
-                    confidence,
-                    source: source.to_string(),
-                });
+                out.push(Candidate { verse: build_payload(rec), confidence, source: source.to_string() });
                 *last = Some(key);
             }
         }
@@ -151,9 +145,7 @@ fn run_inner(
     binary: &Path,
 ) -> Result<(), String> {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or("no input microphone found")?;
+    let device = host.default_input_device().ok_or("no input microphone found")?;
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
@@ -188,32 +180,17 @@ fn run_inner(
     let _ = app.emit("listen-started", ());
 
     let mut utter: Vec<f32> = Vec::new();
-    let mut recent: Vec<f32> = Vec::new(); // rolling pre-roll buffer
+    let mut recent: Vec<f32> = Vec::new();
     let mut speech_ms = 0f32;
     let mut silence_ms = 0f32;
+    let mut last_interim = 0usize;
     let mut ctx = RefContext::default();
     let mut last_ref: Option<RefKey> = None;
     let mut last_activity = Instant::now();
 
-    let mut flush = |utter: &mut Vec<f32>, speech_ms: &mut f32, silence_ms: &mut f32| {
-        let audio = std::mem::take(utter);
-        let had_speech = *speech_ms;
-        *speech_ms = 0.0;
-        *silence_ms = 0.0;
-        if had_speech < MIN_SPEECH_MS {
-            return;
-        }
-        if last_activity.elapsed().as_secs() > CTX_STALE_SECS {
-            ctx.clear();
-        }
-        last_activity = Instant::now();
-        handle_utterance(app, model, binary, audio, &mut ctx, &mut last_ref);
-    };
-
     while flag.load(Ordering::SeqCst) {
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
-                // maintain pre-roll ring
                 recent.extend_from_slice(&frame);
                 if recent.len() > PREROLL_SAMPLES {
                     let drop = recent.len() - PREROLL_SAMPLES;
@@ -223,7 +200,8 @@ fn run_inner(
                 let dur = ms_of(frame.len());
                 if rms(&frame) > SILENCE_RMS {
                     if utter.is_empty() {
-                        utter.extend_from_slice(&recent); // seed with pre-speech audio
+                        utter.extend_from_slice(&recent);
+                        last_interim = utter.len();
                     }
                     utter.extend_from_slice(&frame);
                     speech_ms += dur;
@@ -233,17 +211,45 @@ fn run_inner(
                     silence_ms += dur;
                 }
 
+                // Interim pass: only fires for long continuous speech (no pause yet).
+                if speech_ms >= MIN_SPEECH_MS
+                    && utter.len().saturating_sub(last_interim) >= INTERIM_SAMPLES
+                {
+                    transcribe_detect(app, model, binary, &utter, &mut ctx, &mut last_ref, false);
+                    last_interim = utter.len();
+                    last_activity = Instant::now();
+                }
+
                 let ended = !utter.is_empty() && silence_ms >= SILENCE_FLUSH_MS;
                 let too_long = ms_of(utter.len()) >= MAX_UTTER_MS;
                 if ended || too_long {
-                    flush(&mut utter, &mut speech_ms, &mut silence_ms);
+                    let audio = std::mem::take(&mut utter);
+                    let had = speech_ms;
+                    speech_ms = 0.0;
+                    silence_ms = 0.0;
+                    last_interim = 0;
+                    if had >= MIN_SPEECH_MS {
+                        if last_activity.elapsed().as_secs() > CTX_STALE_SECS {
+                            ctx.clear();
+                        }
+                        last_activity = Instant::now();
+                        transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, true);
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !utter.is_empty() {
                     silence_ms += 150.0;
                     if silence_ms >= SILENCE_FLUSH_MS {
-                        flush(&mut utter, &mut speech_ms, &mut silence_ms);
+                        let audio = std::mem::take(&mut utter);
+                        let had = speech_ms;
+                        speech_ms = 0.0;
+                        silence_ms = 0.0;
+                        last_interim = 0;
+                        if had >= MIN_SPEECH_MS {
+                            last_activity = Instant::now();
+                            transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, true);
+                        }
                     }
                 }
             }
