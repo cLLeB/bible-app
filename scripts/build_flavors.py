@@ -7,9 +7,9 @@ A FLAVOR = a whisper model + a license tier:
                           OWN private use (never distributed)
 
 Six shippable flavors (model x tier):
-    tiny-distribution   tiny-personal
     base-distribution   base-personal
     small-distribution  small-personal
+    medium-distribution medium-personal
 Plus 'testing' — all models + personal tier — for local QA of everything at once.
 
 For each flavor this script:
@@ -37,7 +37,7 @@ PUBLIC_DOMAIN = ["BSB", "WEB", "KJV", "ASV", "YLT", "DARBY", "BBE", "GNV", "DRB"
 LICENSED = ["NIV", "NLT", "ESV", "NKJV", "NASB", "CSB17", "AMP", "MSG", "NET",
             "GNT", "GNTD", "RSV", "NRSVCE", "CEB", "CEVD", "CJB", "TLV", "LSB",
             "MEV", "ISV", "ERV", "NLV", "NABRE"]
-MODELS = ["tiny", "base", "small"]
+MODELS = ["base", "small", "medium"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -49,7 +49,7 @@ def flavors() -> dict:
     for m in MODELS:
         out[f"{m}-distribution"] = {"tier": "distribution", "models": [m], "codes": PUBLIC_DOMAIN}
         out[f"{m}-personal"] = {"tier": "personal", "models": [m], "codes": PUBLIC_DOMAIN + LICENSED}
-    out["testing"] = {"tier": "personal", "models": ["tiny", "base", "small", "medium"], "codes": PUBLIC_DOMAIN + LICENSED}
+    out["testing"] = {"tier": "personal", "models": ["base", "small", "medium"], "codes": PUBLIC_DOMAIN + LICENSED}
     return out
 
 

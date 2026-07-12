@@ -40,7 +40,9 @@ pub fn models() -> Vec<&'static str> {
         Some(s) if !s.trim().is_empty() => {
             s.split(',').map(|m| m.trim()).filter(|m| !m.is_empty()).collect()
         }
-        _ => vec!["tiny", "base", "small", "medium"],
+        // Base is the practical floor (fast, accurate enough for references);
+        // small and medium trade speed for accuracy. Tiny is dropped.
+        _ => vec!["base", "small", "medium"],
     }
 }
 

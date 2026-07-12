@@ -63,6 +63,12 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
             "en",
             "-t",
             &threads,
+            // Greedy, single-candidate decoding — much faster than the default
+            // beam search, with negligible accuracy loss for short references.
+            "-bs",
+            "1",
+            "-bo",
+            "1",
             "--prompt",
             BIBLE_PROMPT,
             "-nt",

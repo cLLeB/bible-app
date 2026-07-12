@@ -33,6 +33,32 @@ fn ms_of(samples: usize) -> f32 {
     samples as f32 / TARGET_RATE as f32 * 1000.0
 }
 
+/// Fast models (tiny/base) can keep up with real time, so mid-utterance interim
+/// passes are worthwhile. The slower small/medium models fall behind and the
+/// interim passes pile up, so we skip them there and transcribe only on endpoint.
+fn model_is_fast(model: &Path) -> bool {
+    model
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.contains("tiny") || n.contains("base"))
+        .unwrap_or(false)
+}
+
+/// Trim trailing silence (keeping ~0.2s) so whisper isn't fed a second-plus of
+/// dead air after the speaker stops — pure latency with no benefit.
+fn trim_trailing_silence(audio: &[f32]) -> Vec<f32> {
+    let win = TARGET_RATE as usize / 10; // 100 ms
+    let keep = TARGET_RATE as usize / 5; // 200 ms tail
+    let mut end = audio.len();
+    while end >= win {
+        if rms(&audio[end - win..end]) > SILENCE_RMS {
+            break;
+        }
+        end -= win;
+    }
+    audio[..(end + keep).min(audio.len())].to_vec()
+}
+
 fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
     let mono: Vec<f32> = if channels <= 1 {
         data.to_vec()
@@ -479,6 +505,7 @@ fn run_inner(
     let mut pending: Option<crate::resolution::Pending> = None;
     let mut recent_words: VecDeque<String> = VecDeque::new();
     let mut last_activity = Instant::now();
+    let interim_enabled = model_is_fast(model);
 
     while flag.load(Ordering::SeqCst) {
         match rx.recv_timeout(Duration::from_millis(150)) {
@@ -503,8 +530,10 @@ fn run_inner(
                     silence_ms += dur;
                 }
 
-                // Interim pass: only fires for long continuous speech (no pause yet).
-                if speech_ms >= MIN_SPEECH_MS
+                // Interim pass: only for fast models on long continuous speech
+                // (slow models fall behind, so they wait for the endpoint).
+                if interim_enabled
+                    && speech_ms >= MIN_SPEECH_MS
                     && utter.len().saturating_sub(last_interim) >= INTERIM_SAMPLES
                 {
                     transcribe_detect(app, model, binary, &utter, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, false);
@@ -525,6 +554,7 @@ fn run_inner(
                             ctx.clear();
                         }
                         last_activity = Instant::now();
+                        let audio = trim_trailing_silence(&audio);
                         transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                     }
                 }
@@ -540,6 +570,7 @@ fn run_inner(
                         last_interim = 0;
                         if had >= MIN_SPEECH_MS {
                             last_activity = Instant::now();
+                            let audio = trim_trailing_silence(&audio);
                             transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                         }
                     }

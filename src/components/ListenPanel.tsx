@@ -24,7 +24,7 @@ export function ListenPanel() {
   const [model, setModel] = useState<SttModel>(
     () => (localStorage.getItem("stt-model") as SttModel) || "base",
   );
-  const [availableModels, setAvailableModels] = useState<SttModel[]>(["tiny", "base", "small", "medium"]);
+  const [availableModels, setAvailableModels] = useState<SttModel[]>(["base", "small", "medium"]);
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);

@@ -144,6 +144,17 @@ impl Db {
             |r| r.get(0),
         )?;
 
+        // Already seeded on a previous launch? Skip the (idempotent but costly)
+        // re-insert of ~31k verses — keeps startup fast as translations grow.
+        let already: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM verses WHERE translation_id = ?1)",
+            [translation_id],
+            |r| r.get(0),
+        )?;
+        if already {
+            return Ok(0);
+        }
+
         let tx = self.conn.unchecked_transaction()?;
         {
             let mut stmt = tx.prepare(
