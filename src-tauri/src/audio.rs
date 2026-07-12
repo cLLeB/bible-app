@@ -125,7 +125,9 @@ fn transcribe_detect(
     }
 
     let state = app.state::<AppState>();
-    let tr = state.active_translation();
+    // A spoken translation ("...in ASV") switches to it when installed.
+    let tr = crate::commands::resolve_translation(&state, &text);
+    let _ = app.emit("translation-changed", &tr);
     let candidates: Vec<Candidate> = {
         let db = match state.db.lock() {
             Ok(d) => d,

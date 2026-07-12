@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getTranslation, listTranslations, setTranslation, type TranslationInfo } from "../api";
 
 export function TranslationPicker() {
@@ -15,6 +16,15 @@ export function TranslationPicker() {
       if (saved && saved !== (await getTranslation())) await setTranslation(saved);
     }
     void load();
+
+    // A spoken/typed "...in ASV" switches translation on the backend — reflect it.
+    const sub = listen<string>("translation-changed", (e) => {
+      setActive(e.payload);
+      localStorage.setItem("translation", e.payload);
+    });
+    return () => {
+      sub.then((f) => f());
+    };
   }, []);
 
   async function onChange(code: string): Promise<void> {

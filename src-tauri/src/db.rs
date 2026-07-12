@@ -394,6 +394,15 @@ impl Db {
         rows.collect()
     }
 
+    pub fn has_translation(&self, code: &str) -> rusqlite::Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT count(*) FROM translations WHERE code = ?1",
+            [code],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn list_translations(&self) -> rusqlite::Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare("SELECT code, name FROM translations ORDER BY code")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;

@@ -160,6 +160,81 @@ pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
     }
 }
 
+/// Detect a translation named in text ("in ASV", "the King James", "world english").
+/// Returns the CODE if a known name/abbrev appears (regardless of install state).
+fn parse_translation_code(text: &str) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+    let names: &[(&str, &str)] = &[
+        ("king james", "KJV"),
+        ("american standard", "ASV"),
+        ("world english", "WEB"),
+        ("young's literal", "YLT"),
+        ("youngs literal", "YLT"),
+        ("basic english", "BBE"),
+        ("darby", "DARBY"),
+    ];
+    for (n, c) in names {
+        if lower.contains(n) {
+            return Some(c);
+        }
+    }
+    let tokens: Vec<String> = lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let abbr: &[(&str, &str)] = &[
+        ("kjv", "KJV"), ("web", "WEB"), ("asv", "ASV"), ("ylt", "YLT"), ("bbe", "BBE"),
+    ];
+    for (a, c) in abbr {
+        if tokens.iter().any(|t| t == a) {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Remove a translation name/abbrev (and adjacent filler words) from a typed
+/// query so the reference parser gets a clean "Book chapter:verse".
+fn strip_translation_phrase(query: &str) -> String {
+    let mut q = query.to_string();
+    let pats = [
+        "king james version", "king james", "american standard version", "american standard",
+        "world english bible", "world english", "young's literal translation", "young's literal",
+        "youngs literal", "bible in basic english", "basic english", "darby translation", "darby",
+        "kjv", "web", "asv", "ylt", "bbe",
+    ];
+    for pat in pats {
+        while let Some(pos) = q.to_lowercase().find(pat) {
+            q.replace_range(pos..pos + pat.len(), " ");
+        }
+    }
+    q.split_whitespace()
+        .filter(|w| !["in", "from", "the", "version", "translation"].contains(&w.to_lowercase().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// If `text` names an installed translation, switch the active translation to it
+/// and return it; otherwise return the current active translation (fallback).
+pub(crate) fn resolve_translation(state: &AppState, text: &str) -> String {
+    if let Some(code) = parse_translation_code(text) {
+        let exists = state
+            .db
+            .lock()
+            .ok()
+            .and_then(|db| db.has_translation(code).ok())
+            .unwrap_or(false);
+        if exists {
+            if let Ok(mut t) = state.translation.lock() {
+                *t = code.to_string();
+            }
+            return code.to_string();
+        }
+    }
+    state.active_translation()
+}
+
 /// Pull a verse-range end off the query: "16-18", "16 to 18", "16 through 18".
 fn extract_range(query: &str) -> (String, Option<u16>) {
     let lower = query.to_lowercase();
@@ -178,8 +253,9 @@ fn extract_range(query: &str) -> (String, Option<u16>) {
 
 /// Reference lookup usable from commands and the LAN remote server.
 pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, String> {
-    let tr = state.active_translation();
-    let (base_query, end) = extract_range(query);
+    let tr = resolve_translation(state, query);
+    let cleaned = strip_translation_phrase(query);
+    let (base_query, end) = extract_range(&cleaned);
     let parsed = parse_reference(&base_query).ok_or_else(|| format!("Could not parse '{query}'"))?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
@@ -214,10 +290,14 @@ pub(crate) fn do_lookup(state: &AppState, query: &str) -> Result<VersePayload, S
 
 #[tauri::command]
 pub fn lookup_reference(
+    app: tauri::AppHandle,
     query: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<VersePayload, String> {
-    do_lookup(&state, &query)
+    let result = do_lookup(&state, &query)?;
+    // Announce the active translation so the picker reflects any spoken/typed switch.
+    let _ = app.emit("translation-changed", &result.translation);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -556,4 +636,21 @@ pub fn stop_listening(state: tauri::State<'_, AppState>) {
 #[tauri::command]
 pub fn start_remote(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
     crate::remote::start(app, state.remote_running.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_and_strips_spoken_translation() {
+        assert_eq!(parse_translation_code("John 3:16 in ASV"), Some("ASV"));
+        assert_eq!(parse_translation_code("give me the King James Romans 8"), Some("KJV"));
+        assert_eq!(parse_translation_code("world english bible please"), Some("WEB"));
+        assert_eq!(parse_translation_code("John 3:16"), None);
+
+        assert_eq!(strip_translation_phrase("John 3:16 in ASV").trim(), "John 3:16");
+        assert_eq!(strip_translation_phrase("the King James John 3:16").trim(), "John 3:16");
+        assert_eq!(strip_translation_phrase("Romans 8:28").trim(), "Romans 8:28");
+    }
 }

@@ -18,6 +18,10 @@ export function ListenPanel() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [autoProject, setAutoProject] = useState(() => localStorage.getItem("auto-project") === "1");
+  const [threshold, setThreshold] = useState(() => {
+    const s = Number(localStorage.getItem("auto-threshold"));
+    return s >= 50 && s <= 100 ? s / 100 : 0.82;
+  });
 
   function changeModel(m: SttModel): void {
     setModel(m);
@@ -27,10 +31,17 @@ export function ListenPanel() {
     setAutoProject(v);
     localStorage.setItem("auto-project", v ? "1" : "0");
   }
+  function changeThreshold(pct: number): void {
+    const v = Math.min(100, Math.max(50, pct || 82));
+    setThreshold(v / 100);
+    localStorage.setItem("auto-threshold", String(v));
+  }
 
-  // Ref so the once-registered event listener sees the current toggle value.
+  // Refs so the once-registered event listener sees current values.
   const autoRef = useRef(false);
   autoRef.current = autoProject;
+  const thresholdRef = useRef(0.82);
+  thresholdRef.current = threshold;
 
   useEffect(() => {
     const unlisteners = [
@@ -39,7 +50,7 @@ export function ListenPanel() {
       }),
       listen<Candidate>("verse-candidate", (e) => {
         setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
-        if (autoRef.current && e.payload.confidence >= 0.9 && e.payload.source !== "voice-nav") {
+        if (autoRef.current && e.payload.confidence >= thresholdRef.current && e.payload.source !== "voice-nav") {
           void present(e.payload.verse);
         }
       }),
@@ -93,13 +104,23 @@ export function ListenPanel() {
           <option value="medium">Medium (best · GPU recommended)</option>
         </select>
         {listening && <span className="text-sm text-green-700">listening…</span>}
-        <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at 90%+ confidence">
+        <label className="ml-auto flex items-center gap-1 text-sm" title="Automatically project detections at or above this confidence">
           <input
             type="checkbox"
             checked={autoProject}
             onChange={(e) => changeAuto(e.target.checked)}
           />
-          Auto-project ≥90%
+          Auto-project ≥
+          <input
+            type="number"
+            min={50}
+            max={100}
+            value={Math.round(threshold * 100)}
+            onChange={(e) => changeThreshold(Number(e.target.value))}
+            disabled={!autoProject}
+            className="w-14 rounded border px-1 py-0.5"
+          />
+          %
         </label>
       </div>
 
