@@ -43,5 +43,5 @@ Screenshot*.png
 
 # Personal-tier songs (copyrighted, personal use only, never committed)
 data/personal.songs.json
-data/personal-songs.txt
+personal-songs.txt
 data/songs-source/
