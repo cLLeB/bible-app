@@ -19,13 +19,25 @@ For each flavor this script:
   3. runs `npm run tauri build` (installer lands in
      src-tauri/target/release/bundle/).
 
-Requires internet (to import translations) and the whisper model .bin files in
-models/. Nothing here runs at app runtime — the app stays offline.
+Requires whisper model .bin files in models/. Nothing here runs at app runtime —
+the app stays offline.
+
+Translation data is sourced in this priority order (no unnecessary downloads):
+  1. data/ — whatever is already there (--reuse-data keeps it untouched)
+  2. src-tauri/target/release/data/ and _up_/data/ — Tauri's own resource
+     staging dirs, populated by previous builds on this machine
+  3. bolls.life / getbible.net — only fetched for files absent from both above
 
 Usage:
   python scripts/build_flavors.py testing
   python scripts/build_flavors.py base-distribution
   python scripts/build_flavors.py --all
+  python scripts/build_flavors.py --all --reuse-data   # skip translation download if data/ already populated
+
+--reuse-data: skip the wipe+re-download of data/*.canonical.json; use whatever is
+  already in data/. Useful when translations were downloaded in a prior run that
+  was interrupted before the Tauri compile, or when bolls.life is unreachable.
+  The flavor's tier + model env-vars are still baked into the binary correctly.
 """
 import os
 import shutil
@@ -51,6 +63,12 @@ BIN_DIR = ROOT / "bin"        # whisper-cli.exe + its DLLs (user-provided)
 # that flavor's whisper model(s) + the whisper binary, so shipped installers
 # carry STT and run fully offline on any machine.
 BUNDLED = ROOT / "bundled"
+# Local translation cache: Tauri's own resource staging dirs from prior builds.
+# Priority: data/ → CACHE_DIRS → network download.
+CACHE_DIRS = [
+    ROOT / "src-tauri" / "target" / "release" / "data",
+    ROOT / "src-tauri" / "target" / "release" / "_up_" / "data",
+]
 
 
 def flavors() -> dict:
@@ -62,18 +80,34 @@ def flavors() -> dict:
     return out
 
 
-def prepare_translations(codes: list, personal: bool) -> None:
+def prepare_translations(codes: list, personal: bool, reuse_data: bool = False) -> None:
     """Rebuild data/*.canonical.json to exactly this flavor's translation set."""
-    for f in DATA.glob("*.canonical.json"):
-        f.unlink()
-    pd = [c for c in codes if c in PUBLIC_DOMAIN]
-    lic = [c for c in codes if c not in PUBLIC_DOMAIN]
-    importer = str(ROOT / "scripts" / "import_bolls.py")
-    if pd:
-        subprocess.check_call([sys.executable, importer, *pd], cwd=ROOT)
-    if lic and personal:
-        # copyrighted: personal use only — import with --force
-        subprocess.check_call([sys.executable, importer, *lic, "--force"], cwd=ROOT)
+    if not reuse_data:
+        for f in DATA.glob("*.canonical.json"):
+            f.unlink()
+
+    # Always try to restore from local Tauri build cache before downloading
+    for code in codes:
+        target = DATA / f"{code.lower()}.canonical.json"
+        if not target.exists():
+            for cache_dir in CACHE_DIRS:
+                cached = cache_dir / f"{code.lower()}.canonical.json"
+                if cached.exists():
+                    shutil.copy2(cached, target)
+                    print(f"  restored {code} from local cache ({cache_dir.name})")
+                    break
+
+    # Download only what is still missing after the cache restore
+    missing = [c for c in codes if not (DATA / f"{c.lower()}.canonical.json").exists()]
+    if missing:
+        print(f"  downloading missing translation(s): {missing}")
+        importer = str(ROOT / "scripts" / "import_bolls.py")
+        pd_miss = [c for c in missing if c in PUBLIC_DOMAIN]
+        lic_miss = [c for c in missing if c not in PUBLIC_DOMAIN]
+        if pd_miss:
+            subprocess.check_call([sys.executable, importer, *pd_miss], cwd=ROOT)
+        if lic_miss and personal:
+            subprocess.check_call([sys.executable, importer, *lic_miss, "--force"], cwd=ROOT)
 
 
 def check_models(models: list) -> None:
@@ -107,10 +141,10 @@ def stage_runtime(models: list) -> None:
         print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
 
 
-def build(name: str, spec: dict) -> None:
+def build(name: str, spec: dict, reuse_data: bool = False) -> None:
     print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
     check_models(spec["models"])
-    prepare_translations(spec["codes"], spec["tier"] == "personal")
+    prepare_translations(spec["codes"], spec["tier"] == "personal", reuse_data=reuse_data)
     stage_runtime(spec["models"])
     # Never bundle personal songs into a distribution build.
     personal_songs = DATA / "personal.songs.json"
@@ -155,12 +189,14 @@ def main(argv: list) -> None:
         print(__doc__)
         print("Flavors:", ", ".join(fl))
         return
+    reuse_data = "--reuse-data" in argv
+    argv = [a for a in argv if a != "--reuse-data"]
     targets = list(fl) if argv[0] == "--all" else argv
     for t in targets:
         if t not in fl:
             print(f"unknown flavor '{t}'. Options: {', '.join(fl)}", file=sys.stderr)
             continue
-        build(t, fl[t])
+        build(t, fl[t], reuse_data=reuse_data)
 
 
 if __name__ == "__main__":

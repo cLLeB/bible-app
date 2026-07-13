@@ -13,6 +13,9 @@ pub struct AppState {
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
+    // First-run seeding runs on a background thread (it holds the db lock for
+    // as long as it takes), so the UI can tell "still installing" from "ready".
+    pub ready: Arc<AtomicBool>,
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
@@ -609,6 +612,13 @@ pub fn related_verses(
 pub struct TranslationInfo {
     pub code: String,
     pub name: String,
+}
+
+/// Has first-run seeding finished? Deliberately touches no locks, so the UI can
+/// poll it while the seeding thread still holds the db.
+#[tauri::command]
+pub fn library_ready(state: tauri::State<'_, AppState>) -> bool {
+    state.ready.load(Ordering::Relaxed)
 }
 
 #[tauri::command]

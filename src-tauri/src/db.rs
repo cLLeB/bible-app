@@ -130,6 +130,21 @@ impl Db {
         Ok(())
     }
 
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        self.conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
+            .ok()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )?;
+        Ok(())
+    }
+
     pub fn seed_from_json(&self, json: &str) -> rusqlite::Result<usize> {
         let parsed: SeedFile = serde_json::from_str(json)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;

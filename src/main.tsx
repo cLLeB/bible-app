@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { ProjectionView } from "./ProjectionView";
 import { StageView } from "./StageView";
+import { ReadyGate } from "./components/ReadyGate";
 import "./App.css";
 
 // Apply the saved operator-console theme before first paint (no flash).
@@ -19,5 +20,7 @@ function rootFor(label: string) {
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>{rootFor(getCurrentWindow().label)}</React.StrictMode>,
+  <React.StrictMode>
+    <ReadyGate>{rootFor(getCurrentWindow().label)}</ReadyGate>
+  </React.StrictMode>,
 );

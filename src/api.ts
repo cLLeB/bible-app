@@ -133,6 +133,9 @@ export interface FlavorInfo {
 
 export const appFlavor = (): Promise<FlavorInfo> => invoke<FlavorInfo>("app_flavor");
 
+/** False while first-run seeding is still installing the bundled library. */
+export const libraryReady = (): Promise<boolean> => invoke<boolean>("library_ready");
+
 export const translationCatalog = (): Promise<CatalogEntry[]> =>
   invoke<CatalogEntry[]>("translation_catalog");
 

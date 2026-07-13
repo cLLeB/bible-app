@@ -17,13 +17,13 @@ mod stt;
 
 use commands::AppState;
 use events::{ProjectionSettings, ProjectionState};
-use std::sync::atomic::AtomicBool;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
-/// Seed every `*.canonical.json` under `dir` (recursively, shallow) into the DB.
-/// Idempotent, so scanning both the resource dir and the dev dir is safe.
-fn seed_canonical_translations(db: &db::Db, dir: &std::path::Path, depth: u8) {
+/// Collect every `*.canonical.json` under `dir` (recursively, shallow).
+fn collect_canonical_translations(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
     if depth > 2 {
         return;
     }
@@ -31,18 +31,75 @@ fn seed_canonical_translations(db: &db::Db, dir: &std::path::Path, depth: u8) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                seed_canonical_translations(db, &path, depth + 1);
+                collect_canonical_translations(&path, depth + 1, out);
             } else if path
                 .file_name()
                 .map(|n| n.to_string_lossy().ends_with(".canonical.json"))
                 .unwrap_or(false)
             {
-                if let Ok(json) = std::fs::read_to_string(&path) {
-                    let _ = db.seed_from_json(&json);
-                }
+                out.push(path);
             }
         }
     }
+}
+
+/// A file is worth opening only if we haven't already seeded that exact file.
+/// Without this every launch re-parses ~6 MB of JSON per bundled translation
+/// just to discover the verses are already in the DB.
+fn seed_key(path: &Path) -> String {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    format!("seed:{name}:{len}")
+}
+
+/// Seed bundled translations and songs into the DB. Runs on a background thread
+/// and holds the db lock throughout, so it must never run before `manage()`.
+fn seed_library(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Packaged builds carry the translations as resources; `tauri dev` reads the
+    // project `data/` dir (resolved at compile time). The flavor build decides
+    // which translation files are present.
+    let dev_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
+    let mut files = Vec::new();
+    if let Ok(res_dir) = app.path().resource_dir() {
+        collect_canonical_translations(&res_dir, 0, &mut files);
+    }
+    collect_canonical_translations(&dev_dir, 0, &mut files);
+
+    let pending: Vec<PathBuf> =
+        files.into_iter().filter(|p| db.get_setting(&seed_key(p)).is_none()).collect();
+    for (i, path) in pending.iter().enumerate() {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().replace(".canonical.json", "").to_uppercase())
+            .unwrap_or_default();
+        let _ = app.emit(
+            "library-progress",
+            format!("Installing {name}… ({} of {})", i + 1, pending.len()),
+        );
+        let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        db.seed_from_json(&json).map_err(|e| e.to_string())?;
+        db.set_setting(&seed_key(path), "1").map_err(|e| e.to_string())?;
+    }
+
+    let _ = app.emit("library-progress", "Adding songs…".to_string());
+    db.seed_default_songs(include_str!("../default-songs.json"), 1)
+        .map_err(|e| e.to_string())?;
+    // Personal-tier only: the operator's own song library (gitignored, never
+    // distributed). Seeded from data/personal.songs.json.
+    if crate::flavor::is_personal() {
+        for dir in [app.path().resource_dir().ok(), Some(dev_dir.clone())].into_iter().flatten() {
+            if let Ok(json) = std::fs::read_to_string(dir.join("personal.songs.json")) {
+                let _ = db.seed_personal_songs(&json, 1);
+            }
+        }
+    }
+
+    let _ = app.emit("library-progress", "Building the search index…".to_string());
+    db.sync_fts().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -50,51 +107,46 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Resolve app data dir; open + migrate + seed on first run.
+            // The webview windows already exist and are loading the frontend by
+            // the time this hook runs, so `manage()` has to happen before any
+            // slow work — otherwise the first commands the UI fires (list_songs
+            // and friends) land before the state is registered and fail with
+            // "state not managed". Opening + migrating is fast; seeding the
+            // ~270 MB library is not, so it moves to a background thread below.
             let data_dir = app.path().app_data_dir().expect("app data dir");
             std::fs::create_dir_all(&data_dir).ok();
             let db_path = data_dir.join("bible.sqlite");
             let db = db::open_at(&db_path).expect("open db");
             db.migrate().expect("migrate");
 
-            // Seed every bundled translation (*.canonical.json), idempotently.
-            // Packaged builds carry them as resources; `tauri dev` reads the
-            // project `data/` dir (resolved at compile time). The flavor build
-            // decides which translation files are present.
-            if let Ok(res_dir) = app.path().resource_dir() {
-                seed_canonical_translations(&db, &res_dir, 0);
-            }
-            let dev_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
-            seed_canonical_translations(&db, &dev_dir, 0);
-            db.seed_default_songs(include_str!("../default-songs.json"), 1)
-                .expect("seed default songs");
-            // Personal-tier only: the operator's own song library (gitignored,
-            // never distributed). Seeded from data/personal.songs.json.
-            if crate::flavor::is_personal() {
-                for dir in [
-                    app.path().resource_dir().ok(),
-                    Some(dev_dir.clone()),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if let Ok(json) = std::fs::read_to_string(dir.join("personal.songs.json")) {
-                        let _ = db.seed_personal_songs(&json, 1);
-                    }
-                }
-            }
-            db.sync_fts().expect("sync fts");
-
+            let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
                 db: Mutex::new(db),
                 translation: Mutex::new("WEB".into()),
                 current: Mutex::new(ProjectionState::Blank),
                 settings: Mutex::new(ProjectionSettings::default()),
                 stage: Mutex::new(crate::events::StageInfo::default()),
+                ready: ready.clone(),
                 listening: Arc::new(AtomicBool::new(false)),
                 remote_running: Arc::new(AtomicBool::new(false)),
                 cursor: Mutex::new(None),
                 learned: Mutex::new(std::collections::HashMap::new()),
+            });
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let result = seed_library(&handle);
+                // Ready either way: a failed seed leaves a usable (if incomplete)
+                // library, and the UI surfaces the error rather than hanging.
+                ready.store(true, Ordering::Relaxed);
+                match result {
+                    Ok(()) => {
+                        let _ = handle.emit("library-ready", ());
+                    }
+                    Err(e) => {
+                        let _ = handle.emit("library-error", e);
+                    }
+                }
             });
 
             // Closing the projection/stage windows should hide them, not
@@ -117,6 +169,7 @@ pub fn run() {
             commands::search_scripture,
             commands::related_verses,
             commands::app_flavor,
+            commands::library_ready,
             commands::translation_catalog,
             commands::download_translation,
             commands::chunk_passage,

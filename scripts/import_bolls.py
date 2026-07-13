@@ -166,34 +166,54 @@ def clean(text: str) -> str:
     return " ".join(t.split())
 
 
-def fetch_json(url: str, attempts: int = 4):
+def _read_chunked(resp, chunk_size: int = 8192, timeout: float = 30.0) -> bytes:
+    """Read an HTTP response in chunks, setting a per-chunk socket timeout so a
+    stalled connection (server stops sending mid-stream) fails within `timeout`
+    seconds rather than hanging until the OS gives up."""
+    import socket
+    try:
+        resp.fp.raw._sock.settimeout(timeout)
+    except Exception:
+        pass  # best-effort; some urllib internals differ
+    chunks = []
+    while True:
+        chunk = resp.read(chunk_size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def fetch_json(url: str, attempts: int = 6):
     """GET + parse JSON, retrying on transient network errors (the dumps are
-    several MB and the single-core server sometimes drops mid-stream)."""
+    several MB and the single-core server sometimes drops mid-stream).
+    Uses a 30 s per-chunk socket timeout so stalled connections fail fast."""
     last = None
     for i in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "bible-app-importer"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(_read_chunked(resp).decode("utf-8"))
         except Exception as e:  # network/parse errors are all retryable here
             last = e
-            wait = 2 * (i + 1)
+            wait = 3 * (i + 1)
             print(f"  retry {i + 1}/{attempts} after error: {e} (waiting {wait}s)", file=sys.stderr)
             time.sleep(wait)
     raise last
 
 
-def fetch_text(url: str, attempts: int = 4) -> str:
-    """GET raw text (for XML sources), retrying on transient network errors."""
+def fetch_text(url: str, attempts: int = 6) -> str:
+    """GET raw text (for XML sources), retrying on transient network errors.
+    Uses a 30 s per-chunk socket timeout so stalled connections fail fast."""
     last = None
     for i in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "bible-app-importer"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                return resp.read().decode("utf-8")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return _read_chunked(resp).decode("utf-8")
         except Exception as e:
             last = e
-            wait = 2 * (i + 1)
+            wait = 3 * (i + 1)
             print(f"  retry {i + 1}/{attempts} after error: {e} (waiting {wait}s)", file=sys.stderr)
             time.sleep(wait)
     raise last
