@@ -69,6 +69,21 @@ export const useServiceStore = create<ServiceState>()(
         }),
       clear: () => set({ cues: [] }),
     }),
-    { name: "service-order", partialize: (s) => ({ cues: s.cues }) },
+    {
+      name: "service-order",
+      version: 1,
+      partialize: (s) => ({ cues: s.cues }),
+      // Older builds stored verse cues without `bookOsis`, which can't project.
+      // Drop any incomplete cue so the run sheet only holds usable items.
+      migrate: (persisted) => {
+        const raw = (persisted as { cues?: Cue[] } | undefined)?.cues ?? [];
+        const cues = raw.filter((c) =>
+          c && c.type === "song"
+            ? c.songId != null
+            : Boolean(c && c.type === "verse" && c.verse?.bookOsis != null),
+        );
+        return { cues };
+      },
+    },
   ),
 );
