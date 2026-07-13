@@ -37,7 +37,7 @@ PUBLIC_DOMAIN = ["BSB", "WEB", "KJV", "ASV", "YLT", "DARBY", "BBE", "GNV", "DRB"
 LICENSED = ["NIV", "NLT", "ESV", "NKJV", "NASB", "CSB17", "AMP", "MSG", "NET",
             "GNT", "GNTD", "RSV", "NRSVCE", "CEB", "CEVD", "CJB", "TLV", "LSB",
             "MEV", "ISV", "ERV", "NLV", "NABRE"]
-MODELS = ["base", "small", "medium"]
+MODELS = ["base", "small", "tiny"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"

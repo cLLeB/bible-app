@@ -30,6 +30,18 @@ import pathlib
 
 BOLLS = "https://bolls.life/static/translations/{code}.json"
 
+# Public-domain translations bolls.life no longer hosts, sourced elsewhere.
+# getbible.net serves a nested books/chapters/verses JSON (canonical nr 1..66).
+GETBIBLE = "https://api.getbible.net/v2/{code}.json"
+GETBIBLE_SOURCE = {"BBE": "basicenglish", "WBT": "wb"}
+
+# gratis-bible serves OSIS XML with container verses (osisID='Book.Chap.Verse',
+# book already an OSIS id). getbible's "darby" is the FRENCH Darby, so the
+# English Darby comes from here instead.
+OSIS_XML_SOURCE = {
+    "DARBY": "https://raw.githubusercontent.com/gratis-bible/bible/master/en/darby.xml",
+}
+
 # OSIS ids in canonical order 1..66 — MUST match src-tauri/src/books.rs BOOKS.
 OSIS_BY_ORDER = [
     "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth", "1Sam", "2Sam",
@@ -40,6 +52,11 @@ OSIS_BY_ORDER = [
     "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus", "Phlm", "Heb", "Jas",
     "1Pet", "2Pet", "1John", "2John", "3John", "Jude", "Rev",
 ]
+
+# Reverse map for OSIS-XML sources whose book ids are already OSIS strings.
+OSIS_TO_NUM = {osis: i + 1 for i, osis in enumerate(OSIS_BY_ORDER)}
+# Container verse element: <verse osisID='Gen.1.1'>text</verse>.
+OSIS_VERSE_RE = re.compile(r"<verse osisID='([^']+)'>(.*?)</verse>", re.DOTALL)
 
 # Translations free to bundle and ship. Public-domain classics plus modern
 # translations released under a free/unrestricted license (BSB, WEB). Modern
@@ -166,6 +183,55 @@ def fetch_json(url: str, attempts: int = 4):
     raise last
 
 
+def fetch_text(url: str, attempts: int = 4) -> str:
+    """GET raw text (for XML sources), retrying on transient network errors."""
+    last = None
+    for i in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "bible-app-importer"})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read().decode("utf-8")
+        except Exception as e:
+            last = e
+            wait = 2 * (i + 1)
+            print(f"  retry {i + 1}/{attempts} after error: {e} (waiting {wait}s)", file=sys.stderr)
+            time.sleep(wait)
+    raise last
+
+
+def _rows_from_bolls(code: str):
+    """bolls.life: a flat array of {book, chapter, verse, text}."""
+    for row in fetch_json(BOLLS.format(code=code)):
+        yield int(row["book"]), int(row["chapter"]), int(row["verse"]), row["text"]
+
+
+def _rows_from_getbible(code: str):
+    """getbible.net: nested books[nr].chapters[].verses[] with canonical nr 1..66."""
+    data = fetch_json(GETBIBLE.format(code=GETBIBLE_SOURCE[code]))
+    for book in data["books"]:
+        book_id = int(book["nr"])
+        for ch in book["chapters"]:
+            chapter = int(ch["chapter"])
+            for v in ch["verses"]:
+                yield book_id, chapter, int(v["verse"]), v["text"]
+
+
+def _rows_from_osis_xml(code: str):
+    """gratis-bible OSIS: container verses with osisID='Book.Chap.Verse'. The book
+    part is already an OSIS id, mapped back to the canonical 1..66 number; verses
+    in non-canonical books (not in our 66) are skipped."""
+    raw = fetch_text(OSIS_XML_SOURCE[code])
+    for osis_id, text in OSIS_VERSE_RE.findall(raw):
+        parts = osis_id.split(".")
+        if len(parts) != 3:
+            continue
+        book, chapter, verse = parts
+        num = OSIS_TO_NUM.get(book)
+        if num is None:  # apocrypha / non-canonical book
+            continue
+        yield num, int(chapter), int(verse), text
+
+
 def import_one(code: str, force: bool) -> None:
     name = PUBLIC_DOMAIN.get(code)
     if name is None:
@@ -179,24 +245,29 @@ def import_one(code: str, force: bool) -> None:
             return
         name = LICENSED.get(code, code)  # forced: personal-use responsibility
 
-    url = BOLLS.format(code=code)
-    print(f"Downloading {url} ...")
-    rows = fetch_json(url)
+    if code in OSIS_XML_SOURCE:
+        print(f"Downloading {OSIS_XML_SOURCE[code]} ...")
+        rows = _rows_from_osis_xml(code)
+    elif code in GETBIBLE_SOURCE:
+        print(f"Downloading {GETBIBLE.format(code=GETBIBLE_SOURCE[code])} ...")
+        rows = _rows_from_getbible(code)
+    else:
+        print(f"Downloading {BOLLS.format(code=code)} ...")
+        rows = _rows_from_bolls(code)
 
     out = []
     skipped_books = set()
-    for row in rows:
-        book_id = int(row["book"])
+    for book_id, chapter, verse, raw in rows:
         if not (1 <= book_id <= 66):
             skipped_books.add(book_id)  # apocrypha / non-canonical — we hold 66 books
             continue
-        text = clean(row["text"])
+        text = clean(raw)
         if not text:
             continue
         out.append({
             "book_osis": OSIS_BY_ORDER[book_id - 1],
-            "chapter": int(row["chapter"]),
-            "verse": int(row["verse"]),
+            "chapter": chapter,
+            "verse": verse,
             "text": text,
         })
 
