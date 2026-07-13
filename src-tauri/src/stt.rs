@@ -1,6 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows spawns a console window for a console subsystem binary unless told
+/// not to. whisper-cli is invoked once per interim pass and once per endpoint,
+/// so without this a black window flashes several times per spoken sentence.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -53,8 +61,8 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
         .unwrap_or(4)
         .to_string();
 
-    let out = Command::new(binary)
-        .args([
+    let mut cmd = Command::new(binary);
+    cmd.args([
             "-m",
             model.to_str().ok_or("bad model path")?,
             "-f",
@@ -75,9 +83,10 @@ pub fn transcribe(samples16k: &[f32], model: &Path, binary: &Path) -> Result<Str
             "-otxt",
             "-of",
             base.to_str().ok_or("bad out path")?,
-        ])
-        .output()
-        .map_err(|e| format!("failed to run whisper binary: {e}"))?;
+        ]);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let out = cmd.output().map_err(|e| format!("failed to run whisper binary: {e}"))?;
 
     let txt_path = base.with_extension("txt");
     let result = std::fs::read_to_string(&txt_path).map(|t| t.trim().to_string());
