@@ -26,7 +26,9 @@ export function ServicePanel() {
   }
 
   async function projectItem(index: number, slideIdx = 0): Promise<void> {
-    const cue = cues[index];
+    // Read from the live ref, not the closure — the keyboard handler is bound
+    // once and would otherwise see a stale (empty) cue list.
+    const cue = st.current.cues[index];
     if (!cue) return;
     useLiveStore.getState().setOwner("service");
     setItem(index);
