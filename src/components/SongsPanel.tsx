@@ -9,6 +9,7 @@ import {
   type SongSummary,
 } from "../api";
 import { useServiceStore } from "../services";
+import { parseSongsText, songsToText, type SongText } from "../lib/songs";
 import { SongEditor } from "./SongEditor";
 import { SongLive } from "./SongLive";
 
@@ -26,10 +27,11 @@ export function SongsPanel() {
 
   async function onExport(): Promise<void> {
     const json = await exportSongs();
-    setBackup(json);
+    const text = songsToText(JSON.parse(json) as SongText[]);
+    setBackup(text);
     try {
-      await navigator.clipboard.writeText(json);
-      setNotice("Songs copied to clipboard — paste into a file to save.");
+      await navigator.clipboard.writeText(text);
+      setNotice("Songs copied to clipboard — paste into a document to save.");
     } catch {
       setNotice("Copy the text below to save your songs.");
     }
@@ -37,7 +39,12 @@ export function SongsPanel() {
 
   async function onImport(): Promise<void> {
     try {
-      const count = await importSongs(importText);
+      const songs = parseSongsText(importText);
+      if (songs.length === 0) {
+        setError("No songs found — put a title on its own line, then the lyrics.");
+        return;
+      }
+      const count = await importSongs(JSON.stringify(songs));
       setImportText("");
       setNotice(`Imported ${count} song(s).`);
       await refresh();
@@ -156,7 +163,7 @@ export function SongsPanel() {
           {bundled.length > 0 && (
             <details className="rounded-lg border p-2">
               <summary className="cursor-pointer text-sm text-[var(--muted)]">
-                Bundled hymns ({bundled.length}) · read-only
+                Hymns ({bundled.length})
               </summary>
               <ul className="mt-2 max-h-80 space-y-0.5 overflow-y-auto pr-1">
                 {bundled.map((s) => songRow(s, true))}
@@ -172,16 +179,20 @@ export function SongsPanel() {
         <summary className="cursor-pointer text-sm text-[var(--muted)]">Backup / share songs</summary>
         <div className="mt-2 space-y-2">
           {notice && <p className="text-sm text-green-700">{notice}</p>}
-          <button onClick={onExport} className="btn btn-sm">Export all songs (copy)</button>
+          <button onClick={onExport} className="btn btn-sm">Copy my songs as text</button>
           {backup && (
-            <textarea readOnly value={backup} rows={4} className="textarea w-full font-mono text-xs" />
+            <textarea readOnly value={backup} rows={6} className="textarea w-full text-sm" />
           )}
+          <p className="text-xs text-[var(--muted)]">
+            To add songs, paste them below — one per block, a title on its own line, an
+            optional “by Author” line, then the lyrics. Separate multiple songs with a line of “===”.
+          </p>
           <textarea
             value={importText}
             onChange={(e) => setImportText(e.target.value)}
-            placeholder="Paste exported songs JSON here to import…"
-            rows={3}
-            className="textarea w-full font-mono text-xs"
+            placeholder={"Amazing Grace\nby John Newton\n\nAmazing grace, how sweet the sound…"}
+            rows={5}
+            className="textarea w-full text-sm"
           />
           <button onClick={onImport} disabled={!importText.trim()} className="btn btn-sm btn-primary">
             Import songs

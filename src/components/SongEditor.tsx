@@ -22,16 +22,23 @@ export function SongEditor({ editing, onSaved, onCancel }: SongEditorProps) {
     setError(null);
   }, [editing]);
 
-  const preview = splitLyrics(lyrics);
+  // If the pasted lyrics have no blank-line verse separation (one big block),
+  // auto-group them into readable slides so they display nicely without the
+  // operator having to format anything by hand.
+  const autoFormatted =
+    lyrics.trim() && splitLyrics(lyrics).length <= 1
+      ? groupEveryNLines(lyrics, linesPerSlide)
+      : lyrics;
+  const preview = splitLyrics(autoFormatted);
 
   async function onSubmit(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (!title.trim() || !lyrics.trim()) return;
     try {
       if (editing) {
-        await updateSong(editing.id, title.trim(), author.trim() || null, lyrics);
+        await updateSong(editing.id, title.trim(), author.trim() || null, autoFormatted);
       } else {
-        await addSong(title.trim(), author.trim() || null, lyrics);
+        await addSong(title.trim(), author.trim() || null, autoFormatted);
       }
       setTitle("");
       setAuthor("");
