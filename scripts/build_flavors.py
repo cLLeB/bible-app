@@ -46,6 +46,11 @@ MODELS_DIR = ROOT / "models"
 # Per-flavor installers collected here. NOT `dist/` — that is Vite's frontendDist,
 # which `vite build` empties at the start of every `tauri build`, wiping collections.
 DIST = ROOT / "installers"
+BIN_DIR = ROOT / "bin"        # whisper-cli.exe + its DLLs (user-provided)
+# Staging dir that tauri.conf `resources` bundles: filled per-flavor with just
+# that flavor's whisper model(s) + the whisper binary, so shipped installers
+# carry STT and run fully offline on any machine.
+BUNDLED = ROOT / "bundled"
 
 
 def flavors() -> dict:
@@ -80,10 +85,33 @@ def check_models(models: list) -> None:
         )
 
 
+def stage_runtime(models: list) -> None:
+    """Fill bundled/ with THIS flavor's whisper model(s) + the whisper binary and
+    DLLs, so tauri.conf `resources` bundle exactly what the flavor needs (and no
+    other model). Cleared each build so flavors never leak assets into each other."""
+    if BUNDLED.exists():
+        shutil.rmtree(BUNDLED)
+    (BUNDLED / "models").mkdir(parents=True, exist_ok=True)
+    (BUNDLED / "bin").mkdir(parents=True, exist_ok=True)
+    for m in models:
+        src = MODELS_DIR / f"ggml-{m}.en.bin"
+        if src.exists():
+            shutil.copy2(src, BUNDLED / "models" / src.name)
+        else:
+            print(f"  WARNING: model {src.name} missing — STT unavailable in this flavor", file=sys.stderr)
+    if BIN_DIR.is_dir():
+        for f in BIN_DIR.iterdir():
+            if f.is_file():
+                shutil.copy2(f, BUNDLED / "bin" / f.name)
+    else:
+        print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
+
+
 def build(name: str, spec: dict) -> None:
     print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
     check_models(spec["models"])
     prepare_translations(spec["codes"], spec["tier"] == "personal")
+    stage_runtime(spec["models"])
     # Never bundle personal songs into a distribution build.
     personal_songs = DATA / "personal.songs.json"
     hidden = None

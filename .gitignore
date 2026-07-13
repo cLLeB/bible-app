@@ -48,3 +48,6 @@ data/songs-source/
 
 # Per-flavor build installers
 installers/
+
+# Per-flavor bundling staging dir (model + whisper binary copied in per build)
+bundled/

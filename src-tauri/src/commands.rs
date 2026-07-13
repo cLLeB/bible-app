@@ -928,27 +928,42 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
         .find(|p| p.exists())
 }
 
-/// Locate the whisper model + binary. Dev: project `models/` and `bin/` dirs.
-/// `kind` selects the flavor: "base" (normal) or "tiny" (low-end PCs).
-fn resolve_model_and_binary(kind: &str) -> Result<(PathBuf, PathBuf), String> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or("bad project root")?
-        .to_path_buf();
-    let models = root.join("models");
+/// Locate the whisper model + binary. Searched in order: the packaged app's
+/// resource dir (`<res>/models`, `<res>/bin` — how shipped installers carry
+/// them), then the dev project's `models/` and `bin/` dirs. `kind` selects the
+/// flavor's model: "base" (normal), "small" (best), or "tiny" (low-end PCs).
+fn resolve_model_and_binary(res_dir: Option<&Path>, kind: &str) -> Result<(PathBuf, PathBuf), String> {
+    let dev_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().map(Path::to_path_buf);
 
-    let requested = models.join(format!("ggml-{kind}.en.bin"));
-    let model = if requested.exists() {
-        requested
-    } else {
-        first_existing(
-            &models,
-            &["ggml-base.en.bin", "ggml-tiny.en.bin", "ggml-small.en.bin", "ggml-medium.en.bin"],
-        )
-        .ok_or("No whisper model found. Put ggml-base.en.bin in the project 'models' folder.")?
-    };
+    // Directories to search for the model, bundled resources first.
+    let mut model_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(r) = res_dir {
+        model_dirs.push(r.join("models"));
+    }
+    if let Some(root) = &dev_root {
+        model_dirs.push(root.join("models"));
+    }
 
-    let binary = first_existing(&root.join("bin"), &["whisper-cli.exe", "main.exe", "whisper.exe"])
+    let named = format!("ggml-{kind}.en.bin");
+    let fallbacks = ["ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin", "ggml-medium.en.bin"];
+    let model = model_dirs
+        .iter()
+        .find_map(|d| {
+            let exact = d.join(&named);
+            if exact.exists() { Some(exact) } else { first_existing(d, &fallbacks) }
+        })
+        .ok_or("No whisper model found (looked in bundled resources and the project 'models' folder).")?;
+
+    let mut bin_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(r) = res_dir {
+        bin_dirs.push(r.join("bin"));
+    }
+    if let Some(root) = &dev_root {
+        bin_dirs.push(root.join("bin"));
+    }
+    let binary = bin_dirs
+        .iter()
+        .find_map(|d| first_existing(d, &["whisper-cli.exe", "main.exe", "whisper.exe"]))
         .unwrap_or_else(|| PathBuf::from("whisper-cli")); // else rely on PATH
 
     Ok((model, binary))
@@ -964,7 +979,8 @@ pub fn start_listening(
         return Ok(());
     }
     let kind = model.unwrap_or_else(|| "base".to_string());
-    let (model, binary) = resolve_model_and_binary(&kind)?;
+    let res_dir = app.path().resource_dir().ok();
+    let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
