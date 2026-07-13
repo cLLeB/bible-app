@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getSongSlides, projectSlide, projectVerse, type Slide } from "../api";
-import { type Cue, useLiveStore, useServiceStore } from "../services";
+import { getSongSlides, presentCoords, projectSlide, projectVerse, type Slide } from "../api";
+import { type Cue, useLiveStore, useScriptureStore, useServiceStore } from "../services";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -12,6 +12,7 @@ export function ServicePanel() {
   const [item, setItem] = useState(-1); // current cue index (-1 = none live)
   const [slide, setSlide] = useState(0); // slide index within a song cue
   const [slides, setSlides] = useState<Slide[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   // Refs for the global key handler.
   const st = useRef({ cues, item, slide, slides });
@@ -29,15 +30,31 @@ export function ServicePanel() {
     if (!cue) return;
     useLiveStore.getState().setOwner("service");
     setItem(index);
-    if (cue.type === "verse") {
-      setSlides([]);
-      setSlide(0);
-      await projectVerse(cue.verse);
-    } else {
-      const s = st.current.slides.length && st.current.item === index ? st.current.slides : await loadSlidesFor(cue);
-      const clamped = Math.min(Math.max(0, slideIdx), Math.max(0, s.length - 1));
-      setSlide(clamped);
-      if (s.length) await projectSlide(cue.songId, clamped);
+    setError(null);
+    try {
+      if (cue.type === "verse") {
+        setSlides([]);
+        setSlide(0);
+        // Re-fetch by coordinates so it always projects fresh in the current
+        // translation (robust to any stale stored payload). Fall back to the
+        // stored payload if coordinates are unavailable.
+        const v = cue.verse;
+        const shown =
+          v.bookOsis != null
+            ? await presentCoords(v.bookOsis, v.chapter, v.verse)
+            : (await projectVerse(v), v);
+        useScriptureStore.getState().setCurrent(shown);
+      } else {
+        const s =
+          st.current.slides.length && st.current.item === index
+            ? st.current.slides
+            : await loadSlidesFor(cue);
+        const clamped = Math.min(Math.max(0, slideIdx), Math.max(0, s.length - 1));
+        setSlide(clamped);
+        if (s.length) await projectSlide(cue.songId, clamped);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -91,6 +108,8 @@ export function ServicePanel() {
           </button>
         )}
       </div>
+
+      {error && <p className="rounded bg-red-50 px-2 py-1 text-sm text-red-700">{error}</p>}
 
       {cues.length > 0 && nextCue && (
         <p className="text-xs text-gray-500">Next up: {cueLabel(nextCue)}</p>
