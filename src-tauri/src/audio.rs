@@ -17,6 +17,7 @@ const MAX_UTTER_MS: f32 = 12_000.0;
 const MIN_SPEECH_MS: f32 = 600.0;
 const PREROLL_SAMPLES: usize = (TARGET_RATE as usize) * 3 / 10; // 0.3s pre-speech
 const CTX_STALE_SECS: u64 = 300; // clear remembered book after 5min of no speech
+const IDLE_STOP_SECS: u64 = 20 * 60; // stop listening after 20min with nothing said
 const INTERIM_SAMPLES: usize = (TARGET_RATE as usize) * 4; // interim pass every 4s of long speech
 
 type RefKey = (String, u16, Option<u16>);
@@ -236,7 +237,7 @@ mod tests {
 fn transcribe_detect(
     app: &AppHandle,
     model: &Path,
-    binary: &Path,
+    decode: stt::Decode,
     audio: &[f32],
     ctx: &mut RefContext,
     last: &mut Option<RefKey>,
@@ -244,13 +245,19 @@ fn transcribe_detect(
     recent: &mut VecDeque<String>,
     emit_transcript: bool,
 ) {
-    let text = match stt::transcribe(audio, model, binary) {
-        Ok(t) => clean_transcript(&t),
+    let raw = match stt::transcribe(audio, model, decode) {
+        Ok(t) => t,
         Err(e) => {
             let _ = app.emit("listen-error", e);
             return;
         }
     };
+    let text = clean_transcript(&raw);
+    // Capture the endpointed utterance (audio + what the model heard) when
+    // calibration is on, so decode settings can be tuned against real speech.
+    if emit_transcript {
+        crate::capture::save(app, audio, &raw, &text, model);
+    }
     if text.is_empty() {
         return;
     }
@@ -458,7 +465,7 @@ fn run_inner(
     app: &AppHandle,
     flag: &Arc<AtomicBool>,
     model: &Path,
-    binary: &Path,
+    decode: stt::Decode,
 ) -> Result<(), String> {
     let host = cpal::default_host();
     let device = host.default_input_device().ok_or("no input microphone found")?;
@@ -508,6 +515,13 @@ fn run_inner(
     let interim_enabled = model_is_fast(model);
 
     while flag.load(Ordering::SeqCst) {
+        // A listening session left running transcribes room noise indefinitely,
+        // which is pure CPU burn nobody asked for. Stand down after a long
+        // silence; the operator can start it again in one click.
+        if last_activity.elapsed().as_secs() > IDLE_STOP_SECS {
+            let _ = app.emit("listen-idle-stop", ());
+            break;
+        }
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
                 recent.extend_from_slice(&frame);
@@ -536,7 +550,7 @@ fn run_inner(
                     && speech_ms >= MIN_SPEECH_MS
                     && utter.len().saturating_sub(last_interim) >= INTERIM_SAMPLES
                 {
-                    transcribe_detect(app, model, binary, &utter, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, false);
+                    transcribe_detect(app, model, decode, &utter, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, false);
                     last_interim = utter.len();
                     last_activity = Instant::now();
                 }
@@ -555,7 +569,7 @@ fn run_inner(
                         }
                         last_activity = Instant::now();
                         let audio = trim_trailing_silence(&audio);
-                        transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
+                        transcribe_detect(app, model, decode, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                     }
                 }
             }
@@ -571,7 +585,7 @@ fn run_inner(
                         if had >= MIN_SPEECH_MS {
                             last_activity = Instant::now();
                             let audio = trim_trailing_silence(&audio);
-                            transcribe_detect(app, model, binary, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
+                            transcribe_detect(app, model, decode, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
                         }
                     }
                 }
@@ -583,8 +597,16 @@ fn run_inner(
     Ok(())
 }
 
-pub fn run_listen_loop(app: AppHandle, flag: Arc<AtomicBool>, model: PathBuf, binary: PathBuf) {
-    if let Err(e) = run_inner(&app, &flag, &model, &binary) {
+pub fn run_listen_loop(app: AppHandle, flag: Arc<AtomicBool>, model: PathBuf) {
+    let decode = stt::Decode::from_env_or_default();
+    // Load the model before the first word, so the opening utterance isn't
+    // paying for a cold load on top of its own decode.
+    if let Err(e) = stt::preload(&model) {
+        let _ = app.emit("listen-error", e);
+        flag.store(false, Ordering::SeqCst);
+        return;
+    }
+    if let Err(e) = run_inner(&app, &flag, &model, decode) {
         let _ = app.emit("listen-error", e);
     }
     flag.store(false, Ordering::SeqCst);

@@ -90,6 +90,10 @@ export function ListenPanel() {
         setError(null);
       }),
       listen("listen-stopped", () => setListening(false)),
+      listen("listen-idle-stop", () => {
+        setListening(false);
+        setError("Stopped listening after 20 minutes of silence — click to start again.");
+      }),
       listen<string>("listen-error", (e) => setError(e.payload)),
     ];
     return () => {

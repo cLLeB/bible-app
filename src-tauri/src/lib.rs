@@ -1,19 +1,20 @@
 mod audio;
-mod books;
+pub mod books;
+mod capture;
 mod commands;
-mod corrections;
+pub mod corrections;
 mod flavor;
 mod db;
-mod detect;
+pub mod detect;
 mod events;
-mod knowledge;
-mod reference;
+pub mod knowledge;
+pub mod reference;
 mod remote;
 mod resolution;
 mod translations;
-mod semantic;
+pub mod semantic;
 mod slides;
-mod stt;
+pub mod stt;
 
 use commands::AppState;
 use events::{ProjectionSettings, ProjectionState};
@@ -161,6 +162,22 @@ pub fn run() {
                         }
                     });
                 }
+            }
+
+            // ...but that leaves them alive, and Tauri only exits once every
+            // window is gone. So closing the console has to mean quit, or the
+            // process lingers with no window at all — still holding the mic and
+            // still transcribing, with no way to stop it but Task Manager.
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let state = handle.state::<AppState>();
+                        state.listening.store(false, Ordering::SeqCst);
+                        state.remote_running.store(false, Ordering::SeqCst);
+                        handle.exit(0);
+                    }
+                });
             }
             Ok(())
         })
