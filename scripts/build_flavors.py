@@ -80,10 +80,20 @@ def build(name: str, spec: dict) -> None:
     print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
     check_models(spec["models"])
     prepare_translations(spec["codes"], spec["tier"] == "personal")
+    # Never bundle personal songs into a distribution build.
+    personal_songs = DATA / "personal.songs.json"
+    hidden = None
+    if spec["tier"] == "distribution" and personal_songs.exists():
+        hidden = personal_songs.with_name("personal.songs.hidden")
+        personal_songs.rename(hidden)
     env = dict(os.environ)
     env["BIBLE_APP_TIER"] = spec["tier"]
     env["BIBLE_APP_MODELS"] = ",".join(spec["models"])
-    subprocess.check_call(["npm", "run", "tauri", "build"], cwd=ROOT, env=env, shell=(os.name == "nt"))
+    try:
+        subprocess.check_call(["npm", "run", "tauri", "build"], cwd=ROOT, env=env, shell=(os.name == "nt"))
+    finally:
+        if hidden and hidden.exists():
+            hidden.rename(personal_songs)
     print(f"=== '{name}' built. Installer under src-tauri/target/release/bundle/ ===")
 
 

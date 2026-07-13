@@ -545,6 +545,38 @@ impl Db {
         Ok(())
     }
 
+    /// Seed the operator's personal song library (Personal-tier builds only).
+    /// Inserted as ordinary editable songs (not read-only), skipping titles that
+    /// already exist, and re-seeded only when `version` advances.
+    pub fn seed_personal_songs(&self, json: &str, version: i64) -> rusqlite::Result<usize> {
+        let stored: i64 = self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = 'personal_songs_v'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if stored >= version {
+            return Ok(0);
+        }
+        let songs: Vec<DefaultSong> = serde_json::from_str(json)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let mut n = 0;
+        for s in &songs {
+            if !self.song_exists(&s.title)? {
+                self.insert_song(&s.title, s.author.as_deref(), &s.lyrics, false)?;
+                n += 1;
+            }
+        }
+        self.conn.execute("DELETE FROM settings WHERE key = 'personal_songs_v'", [])?;
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES('personal_songs_v', ?1)",
+            [version.to_string()],
+        )?;
+        Ok(n)
+    }
+
     pub fn get_song_slides(&self, song_id: i64) -> rusqlite::Result<Vec<SlideRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT order_index, text FROM song_slides WHERE song_id = ?1 ORDER BY order_index",

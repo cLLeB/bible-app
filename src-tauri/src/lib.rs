@@ -68,6 +68,21 @@ pub fn run() {
             seed_canonical_translations(&db, &dev_dir, 0);
             db.seed_default_songs(include_str!("../default-songs.json"), 1)
                 .expect("seed default songs");
+            // Personal-tier only: the operator's own song library (gitignored,
+            // never distributed). Seeded from data/personal.songs.json.
+            if crate::flavor::is_personal() {
+                for dir in [
+                    app.path().resource_dir().ok(),
+                    Some(dev_dir.clone()),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if let Ok(json) = std::fs::read_to_string(dir.join("personal.songs.json")) {
+                        let _ = db.seed_personal_songs(&json, 1);
+                    }
+                }
+            }
             db.sync_fts().expect("sync fts");
 
             app.manage(AppState {

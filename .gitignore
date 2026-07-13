@@ -40,3 +40,8 @@ __pycache__/
 # Screenshots
 Screenshot*.png
 *.screenshot.png
+
+# Personal-tier songs (copyrighted, personal use only, never committed)
+data/personal.songs.json
+data/personal-songs.txt
+data/songs-source/
