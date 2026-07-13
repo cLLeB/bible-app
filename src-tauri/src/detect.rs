@@ -654,6 +654,20 @@ mod tests {
     }
 
     #[test]
+    fn misheard_book_names_resolve_with_a_number() {
+        // Base model roughness: misheard book + number still lands the reference.
+        let a = one("turn to the economy chapter 8 verse 6");
+        assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Deut", 8, Some(6)));
+        let b = one("open to philippines 4 13");
+        assert_eq!((b.book_osis.as_str(), b.chapter, b.verse), ("Phil", 4, Some(13)));
+        let c = one("read malikai 3 10");
+        assert_eq!((c.book_osis.as_str(), c.chapter, c.verse), ("Mal", 3, Some(10)));
+
+        // Safety: a misheard book with NO number projects nothing.
+        assert!(detect_references("the economy is really struggling this year").is_empty());
+    }
+
+    #[test]
     fn ignores_non_references() {
         assert!(detect_references("and so the lord spoke to the people").is_empty());
     }

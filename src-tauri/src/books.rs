@@ -217,6 +217,76 @@ pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
     }
 }
 
+/// Common speech-to-text mishearings of book names → OSIS. Safe to be generous:
+/// a book only becomes a *detection* when a chapter number follows it, so a
+/// stray match on its own projects nothing. Keys are lowercased, as spoken.
+/// (Numbered books like Samuel/Corinthians go through the ordinal path; a few
+/// stem mishearings for those are covered by resolve_book_fuzzy.)
+fn book_alias(key: &str) -> Option<&'static str> {
+    let m: &[(&str, &str)] = &[
+        // Torah / history
+        ("genesee", "Gen"), ("genesys", "Gen"), ("jenesis", "Gen"), ("genes is", "Gen"), ("genesis book", "Gen"),
+        ("exit us", "Exod"), ("exodous", "Exod"), ("exadus", "Exod"), ("exidus", "Exod"), ("exodus book", "Exod"),
+        ("leviticous", "Lev"), ("levidicus", "Lev"), ("levitikus", "Lev"), ("levi ticus", "Lev"), ("the viticus", "Lev"),
+        ("number", "Num"), ("numbas", "Num"), ("numbahs", "Num"),
+        ("the economy", "Deut"), ("duteronomy", "Deut"), ("deuteronmy", "Deut"), ("deutronomy", "Deut"), ("deuter economy", "Deut"),
+        ("joshway", "Josh"), ("josh you a", "Josh"), ("joshuah", "Josh"),
+        ("judgers", "Judg"), ("the judges", "Judg"),
+        ("ruthe", "Ruth"), ("root", "Ruth"),
+        ("chronicals", "1Chr"), ("cronicles", "1Chr"), ("chronic als", "1Chr"),
+        ("ezraw", "Ezra"), ("as raw", "Ezra"),
+        ("nehemia", "Neh"), ("nehmiah", "Neh"), ("nia miah", "Neh"), ("the amiah", "Neh"), ("na hemiah", "Neh"),
+        ("ester", "Esth"), ("estha", "Esth"), ("esta", "Esth"),
+        ("jobe", "Job"),
+        // Poetry / wisdom
+        ("salms", "Ps"), ("psalm", "Ps"), ("thalms", "Ps"), ("sarms", "Ps"),
+        ("proverves", "Prov"), ("proverb", "Prov"),
+        ("ecclesiastics", "Eccl"), ("ecclesiastis", "Eccl"), ("a clesiastes", "Eccl"), ("ecclesiasties", "Eccl"), ("the clesiastes", "Eccl"),
+        ("song of soloman", "Song"), ("songs of solomon", "Song"),
+        // Major prophets
+        ("isiah", "Isa"), ("isaya", "Isa"), ("i saya", "Isa"), ("ezaya", "Isa"),
+        ("jeramiah", "Jer"), ("jere maya", "Jer"), ("jimaya", "Jer"), ("jeremaya", "Jer"),
+        ("lamentation", "Lam"), ("lamintations", "Lam"), ("the mentations", "Lam"), ("la mentations", "Lam"),
+        ("ez a kiel", "Ezek"), ("ezeekiel", "Ezek"), ("hezekiel", "Ezek"), ("the zekiel", "Ezek"),
+        ("danielle", "Dan"), ("dan yell", "Dan"), ("danyel", "Dan"),
+        // Minor prophets
+        ("hoseya", "Hos"), ("hosaya", "Hos"), ("ho sea", "Hos"),
+        ("jole", "Joel"), ("joelle", "Joel"),
+        ("aymos", "Amos"), ("a mose", "Amos"), ("ay moss", "Amos"),
+        ("obadia", "Obad"), ("obidiah", "Obad"), ("a bad iah", "Obad"), ("obba diah", "Obad"), ("oba dia", "Obad"),
+        ("jona", "Jonah"), ("joana", "Jonah"), ("jonna", "Jonah"), ("joena", "Jonah"),
+        ("mika", "Mic"), ("meeka", "Mic"), ("mike a", "Mic"),
+        ("nayhum", "Nah"), ("nay um", "Nah"), ("nahoom", "Nah"), ("nahom", "Nah"),
+        ("habukkuk", "Hab"), ("habakuk", "Hab"), ("have a cook", "Hab"), ("hab a cook", "Hab"), ("habacook", "Hab"),
+        ("zephania", "Zeph"), ("zefaniah", "Zeph"), ("the phania", "Zeph"), ("zafania", "Zeph"), ("ze phania", "Zeph"),
+        ("hagai", "Hag"), ("hi guy", "Hag"), ("haggi", "Hag"), ("hag eye", "Hag"), ("hagg eye", "Hag"),
+        ("zacharia", "Zech"), ("zakaria", "Zech"), ("zecharia", "Zech"), ("zach a riah", "Zech"), ("zekaria", "Zech"),
+        ("malikai", "Mal"), ("malakai", "Mal"), ("malaki", "Mal"), ("mally kai", "Mal"), ("malachy", "Mal"),
+        // Gospels / Acts
+        ("mathews", "Matt"), ("matthews", "Matt"), ("mathew", "Matt"),
+        ("marc", "Mark"), ("marck", "Mark"),
+        ("luk", "Luke"), ("luce", "Luke"),
+        ("jon", "John"), ("joan", "John"),
+        // Epistles
+        ("romins", "Rom"), ("romens", "Rom"),
+        ("corinthions", "1Cor"), ("corinthia", "1Cor"), ("corin thians", "1Cor"),
+        ("galations", "Gal"), ("galacians", "Gal"), ("gal ations", "Gal"),
+        ("efesians", "Eph"), ("a fesians", "Eph"), ("ephisians", "Eph"), ("ee fesians", "Eph"),
+        ("philippines", "Phil"), ("phillipians", "Phil"), ("philipians", "Phil"), ("flippians", "Phil"), ("the lippians", "Phil"),
+        ("colossions", "Col"), ("colosians", "Col"), ("colossals", "Col"), ("colo sions", "Col"), ("the loceans", "Col"),
+        ("thesalonians", "1Thess"), ("thessalonia", "1Thess"), ("the salonians", "1Thess"), ("thessa lonians", "1Thess"),
+        ("timithy", "1Tim"), ("tim of the", "1Tim"), ("timmothy", "1Tim"),
+        ("tightus", "Titus"), ("tidus", "Titus"), ("tie tus", "Titus"),
+        ("file mon", "Phlm"), ("phil e mon", "Phlm"), ("philemen", "Phlm"), ("philimon", "Phlm"), ("the lemon", "Phlm"),
+        ("hebrus", "Heb"), ("the brews", "Heb"), ("he brews", "Heb"),
+        ("jams", "Jas"), ("jame's", "Jas"),
+        ("peater", "1Pet"), ("petre", "1Pet"), ("pee ter", "1Pet"),
+        ("jood", "Jude"), ("juud", "Jude"), ("jewed", "Jude"),
+        ("revelations", "Rev"), ("revalation", "Rev"), ("revolation", "Rev"), ("revelaton", "Rev"), ("revol ations", "Rev"),
+    ];
+    m.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
 pub fn resolve_book(input: &str) -> Option<&'static CanonicalBook> {
     let norm = input.trim().to_lowercase();
     let (ord, rest) = split_ordinal(&norm);
@@ -228,7 +298,9 @@ pub fn resolve_book(input: &str) -> Option<&'static CanonicalBook> {
         format!("{n}{stem}")
     } else {
         abbrev_to_osis(&rest)
-            .or_else(|| abbrev_to_osis(&rest_key))?
+            .or_else(|| abbrev_to_osis(&rest_key))
+            .or_else(|| book_alias(&rest))
+            .or_else(|| book_alias(&rest_key))?
             .to_string()
     };
     book_by_osis(&target_osis)
@@ -263,5 +335,16 @@ mod tests {
     #[test]
     fn rejects_unknown() {
         assert!(resolve_book("Hogwarts").is_none());
+    }
+
+    #[test]
+    fn resolves_mishearing_aliases() {
+        assert_eq!(resolve_book("philippines").unwrap().osis, "Phil");
+        assert_eq!(resolve_book("the economy").unwrap().osis, "Deut");
+        assert_eq!(resolve_book("malikai").unwrap().osis, "Mal");
+        assert_eq!(resolve_book("habukkuk").unwrap().osis, "Hab");
+        assert_eq!(resolve_book("ecclesiastics").unwrap().osis, "Eccl");
+        assert_eq!(resolve_book("revelations").unwrap().osis, "Rev");
+        assert_eq!(resolve_book("nehemia").unwrap().osis, "Neh");
     }
 }
