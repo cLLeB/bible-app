@@ -43,7 +43,9 @@ MODELS = ["base", "small", "tiny"]
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 MODELS_DIR = ROOT / "models"
-DIST = ROOT / "dist"  # per-flavor installers collected here (each build clobbers bundle/)
+# Per-flavor installers collected here. NOT `dist/` — that is Vite's frontendDist,
+# which `vite build` empties at the start of every `tauri build`, wiping collections.
+DIST = ROOT / "installers"
 
 
 def flavors() -> dict:

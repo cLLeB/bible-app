@@ -47,4 +47,4 @@ personal-songs.txt
 data/songs-source/
 
 # Per-flavor build installers
-dist/
+installers/
