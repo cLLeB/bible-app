@@ -4,6 +4,7 @@ import {
   getProjectionSettings,
   setProjection,
   setProjectionSettings,
+  setStageMessage,
   showStage,
   startRemote,
   type ProjectionSettings,
@@ -11,6 +12,7 @@ import {
 
 export function DisplayPanel() {
   const [message, setMessage] = useState("");
+  const [stageMsg, setStageMsg] = useState("");
   const [minutes, setMinutes] = useState(5);
   const [label, setLabel] = useState("Starting soon");
   const [settings, setSettings] = useState<ProjectionSettings>({ fontScale: 1, theme: "dark" });
@@ -72,6 +74,34 @@ export function DisplayPanel() {
           className="btn btn-primary"
         >
           Show
+        </button>
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          value={stageMsg}
+          onChange={(e) => setStageMsg(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && stageMsg.trim()) void setStageMessage(stageMsg.trim());
+          }}
+          placeholder="Private note to the stage (e.g. wrap up, go to prayer)"
+          className="input flex-1"
+        />
+        <button
+          onClick={() => stageMsg.trim() && setStageMessage(stageMsg.trim())}
+          className="btn btn-primary"
+          title="Shows only on the stage monitor, never on the projector"
+        >
+          Send
+        </button>
+        <button
+          onClick={() => {
+            setStageMsg("");
+            void setStageMessage("");
+          }}
+          className="btn"
+        >
+          Clear
         </button>
       </div>
 

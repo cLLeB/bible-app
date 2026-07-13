@@ -24,7 +24,7 @@ pub struct Candidate {
 /// What the projection window should currently display. Unified across
 /// content types (spec §5.1 ProjectionState machine, Phase 1 subset).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ProjectionState {
     Blank,
     Blackout,
@@ -33,6 +33,27 @@ pub enum ProjectionState {
     Song { text: String, caption: String },
     Message { text: String },
     Countdown { target_ms: i64, label: String },
+}
+
+/// One line of content on the stage/confidence monitor: the big text plus its
+/// reference/title caption.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StageSlot {
+    pub text: String,
+    pub caption: String,
+}
+
+/// What the stage (confidence) monitor shows the platform team: the current
+/// live line, a preview of what's next, and any private operator message.
+/// Deliberately independent of `ProjectionState` so blanking/blackout of the
+/// congregation screen does not wipe the stage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StageInfo {
+    pub current: Option<StageSlot>,
+    pub next: Option<StageSlot>,
+    pub message: String,
 }
 
 /// Display appearance applied over any ProjectionState.
@@ -60,6 +81,21 @@ mod tests {
         assert!(json.contains("\"kind\":\"verse\""));
         let blank = serde_json::to_string(&ProjectionState::Blank).unwrap();
         assert_eq!(blank, "{\"kind\":\"blank\"}");
+    }
+
+    #[test]
+    fn countdown_round_trips_camel_case_fields() {
+        // The frontend sends `targetMs`; struct-variant fields must be camelCased
+        // too (enum `rename_all` only touches variant names), else deserialization
+        // fails and the command silently errors.
+        let json = r#"{"kind":"countdown","targetMs":1234,"label":"Starting soon"}"#;
+        let parsed: ProjectionState = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            parsed,
+            ProjectionState::Countdown { target_ms: 1234, label: "Starting soon".into() }
+        );
+        let out = serde_json::to_string(&parsed).unwrap();
+        assert!(out.contains("\"targetMs\":1234"), "got {out}");
     }
 
     #[test]

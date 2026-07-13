@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { getSongSlides, presentCoords, projectSlide, projectVerse, type Slide } from "../api";
+import {
+  getSongSlides,
+  presentCoords,
+  projectSlide,
+  projectVerse,
+  setStage,
+  type Slide,
+  type StageSlot,
+} from "../api";
 import { type Cue, useLiveStore, useScriptureStore, useServiceStore } from "../services";
+import { slideSlot, verseSlot } from "../stage";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -25,6 +34,15 @@ export function ServicePanel() {
     return s;
   }
 
+  // The first line of the cue at `i`, for the stage "next" preview.
+  async function cueSlot(i: number): Promise<StageSlot | null> {
+    const cue = st.current.cues[i];
+    if (!cue) return null;
+    if (cue.type === "verse") return verseSlot(cue.verse);
+    const s = await getSongSlides(cue.songId).catch(() => [] as Slide[]);
+    return slideSlot(s[0]?.text ?? "", cue.title);
+  }
+
   async function projectItem(index: number, slideIdx = 0): Promise<void> {
     // Read from the live ref, not the closure — the keyboard handler is bound
     // once and would otherwise see a stale (empty) cue list.
@@ -34,6 +52,8 @@ export function ServicePanel() {
     setItem(index);
     setError(null);
     try {
+      let current: StageSlot;
+      let next: StageSlot | null;
       if (cue.type === "verse") {
         setSlides([]);
         setSlide(0);
@@ -46,6 +66,8 @@ export function ServicePanel() {
             ? await presentCoords(v.bookOsis, v.chapter, v.verse)
             : (await projectVerse(v), v);
         useScriptureStore.getState().setCurrent(shown);
+        current = verseSlot(shown);
+        next = await cueSlot(index + 1);
       } else {
         const s =
           st.current.slides.length && st.current.item === index
@@ -54,7 +76,14 @@ export function ServicePanel() {
         const clamped = Math.min(Math.max(0, slideIdx), Math.max(0, s.length - 1));
         setSlide(clamped);
         if (s.length) await projectSlide(cue.songId, clamped);
+        current = slideSlot(s[clamped]?.text ?? "", cue.title);
+        // Next slide in this song, else the first line of the next cue.
+        next =
+          clamped + 1 < s.length
+            ? slideSlot(s[clamped + 1].text, cue.title)
+            : await cueSlot(index + 1);
       }
+      void setStage(current, next).catch(() => {});
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }

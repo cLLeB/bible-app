@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { navigate, presentCoords, type NavDir, type VersePayload } from "../api";
 import { useLiveStore, useScriptureStore } from "../services";
+import { pushScriptureStage } from "../stage";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -13,6 +14,15 @@ export function ScripturePresenter() {
   const [jump, setJump] = useState("");
   const curRef = useRef<VersePayload | null>(null);
   curRef.current = current;
+
+  // Mirror the live scripture verse (and its next verse) onto the stage monitor.
+  // Only when scripture owns the screen — during a service the ServicePanel
+  // drives the stage so "next" reflects the run order, not the next chapter verse.
+  useEffect(() => {
+    if (current && useLiveStore.getState().owner === "scripture") {
+      void pushScriptureStage(current);
+    }
+  }, [current]);
 
   // Voice navigation projects from the backend; mirror it here so the
   // presenter's "current" (and keyboard nav) stays in sync with the screen.

@@ -7,6 +7,8 @@ import {
   type SongSummary,
 } from "../api";
 import { useLiveStore } from "../services";
+import { clearStage, slideSlot } from "../stage";
+import { setStage } from "../api";
 
 interface SongLiveProps {
   song: SongSummary;
@@ -42,10 +44,16 @@ export function SongLive({ song }: SongLiveProps) {
   }, [song.id]);
 
   function projectAt(i: number): void {
-    if (i < 0 || i >= slidesRef.current.length) return;
+    const all = slidesRef.current;
+    if (i < 0 || i >= all.length) return;
     useLiveStore.getState().setOwner("song");
     setIndex(i);
     void projectSlide(song.id, i);
+    const next = all[i + 1];
+    void setStage(
+      slideSlot(all[i].text, song.title),
+      next ? slideSlot(next.text, song.title) : null,
+    ).catch(() => {});
   }
 
   useEffect(() => {
@@ -73,6 +81,7 @@ export function SongLive({ song }: SongLiveProps) {
           e.preventDefault();
           setIndex(-1);
           void blankProjection();
+          void clearStage();
           break;
       }
     }
@@ -100,6 +109,7 @@ export function SongLive({ song }: SongLiveProps) {
           onClick={() => {
             setIndex(-1);
             void blankProjection();
+            void clearStage();
           }}
           className="btn btn-sm"
         >

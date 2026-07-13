@@ -47,6 +47,31 @@ export const setProjectionSettings = (settings: ProjectionSettings): Promise<voi
 
 export const showStage = (): Promise<void> => invoke<void>("show_stage");
 
+export interface StageSlot {
+  text: string;
+  caption: string;
+}
+
+export interface StageInfo {
+  current: StageSlot | null;
+  next: StageSlot | null;
+  message: string;
+}
+
+export const getStage = (): Promise<StageInfo> => invoke<StageInfo>("get_stage");
+
+export const setStage = (
+  current: StageSlot | null,
+  next: StageSlot | null,
+): Promise<void> => invoke<void>("set_stage", { current, next });
+
+export const setStageMessage = (message: string): Promise<void> =>
+  invoke<void>("set_stage_message", { message });
+
+/// Next verse from the current cursor, without projecting it (stage preview).
+export const peekNext = (): Promise<VersePayload | null> =>
+  invoke<VersePayload | null>("peek_next");
+
 export const startRemote = (): Promise<string> => invoke<string>("start_remote");
 
 export interface SongSummary {

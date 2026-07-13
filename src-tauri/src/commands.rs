@@ -1,6 +1,6 @@
 use crate::books::{book_after, book_before, book_by_osis};
 use crate::db::{Db, SongSummary};
-use crate::events::{ProjectionSettings, ProjectionState, VersePayload};
+use crate::events::{ProjectionSettings, ProjectionState, StageInfo, StageSlot, VersePayload};
 use crate::reference::parse_reference;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +12,7 @@ pub struct AppState {
     pub translation: Mutex<String>, // active translation code, e.g. "WEB"
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
+    pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
@@ -860,6 +861,64 @@ pub fn set_projection_settings(
         .map_err(|e| e.to_string())
 }
 
+// ---- Stage / confidence monitor ----
+
+/// Emit the current stage state to the stage window (also fine while it's hidden).
+fn emit_stage(app: &tauri::AppHandle, info: &StageInfo) -> Result<(), String> {
+    app.emit_to("stage", "set-stage", info.clone())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_stage(state: tauri::State<'_, AppState>) -> StageInfo {
+    state.stage.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+/// Set the current + next lines shown on the stage monitor. Preserves any
+/// active operator message.
+#[tauri::command]
+pub fn set_stage(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    current: Option<StageSlot>,
+    next: Option<StageSlot>,
+) -> Result<(), String> {
+    let info = {
+        let mut s = state.stage.lock().map_err(|e| e.to_string())?;
+        s.current = current;
+        s.next = next;
+        s.clone()
+    };
+    emit_stage(&app, &info)
+}
+
+/// Push (or clear, with an empty string) a private message to the platform team.
+#[tauri::command]
+pub fn set_stage_message(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: String,
+) -> Result<(), String> {
+    let info = {
+        let mut s = state.stage.lock().map_err(|e| e.to_string())?;
+        s.message = message;
+        s.clone()
+    };
+    emit_stage(&app, &info)
+}
+
+/// Peek at the next verse from the current cursor without projecting it or
+/// moving the cursor — used to populate the stage "next" preview.
+#[tauri::command]
+pub fn peek_next(state: tauri::State<'_, AppState>) -> Option<VersePayload> {
+    let cur = state.cursor.lock().ok().and_then(|c| c.clone())?;
+    let tr = state.active_translation();
+    let db = state.db.lock().ok()?;
+    let (osis, ch, v) = compute_nav(&db, &tr, &cur, "next-verse").ok().flatten()?;
+    let rec = db.verse_at(&tr, &osis, ch, v).ok().flatten()?;
+    Some(build_payload(rec))
+}
+
 // ---- Live listening (STT) ----
 
 fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
@@ -995,6 +1054,7 @@ mod tests {
             translation: Mutex::new(active.to_string()),
             current: Mutex::new(ProjectionState::Blank),
             settings: Mutex::new(ProjectionSettings::default()),
+            stage: Mutex::new(StageInfo::default()),
             listening: Arc::new(AtomicBool::new(false)),
             remote_running: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),
