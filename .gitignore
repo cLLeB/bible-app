@@ -45,3 +45,6 @@ Screenshot*.png
 data/personal.songs.json
 personal-songs.txt
 data/songs-source/
+
+# Per-flavor build installers
+dist/

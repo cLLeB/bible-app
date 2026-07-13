@@ -28,6 +28,7 @@ Usage:
   python scripts/build_flavors.py --all
 """
 import os
+import shutil
 import subprocess
 import sys
 import pathlib
@@ -42,6 +43,7 @@ MODELS = ["base", "small", "tiny"]
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 MODELS_DIR = ROOT / "models"
+DIST = ROOT / "dist"  # per-flavor installers collected here (each build clobbers bundle/)
 
 
 def flavors() -> dict:
@@ -94,7 +96,27 @@ def build(name: str, spec: dict) -> None:
     finally:
         if hidden and hidden.exists():
             hidden.rename(personal_songs)
-    print(f"=== '{name}' built. Installer under src-tauri/target/release/bundle/ ===")
+    collect_outputs(name)
+    print(f"=== '{name}' built. Installers in {DIST / name} ===")
+
+
+def collect_outputs(name: str) -> None:
+    """Copy this flavor's installers out of the shared bundle/ dir into
+    dist/<name>/ (prefixed with the flavor), since the next build overwrites
+    bundle/ with an identically-named installer."""
+    bundle = ROOT / "src-tauri" / "target" / "release" / "bundle"
+    out = DIST / name
+    out.mkdir(parents=True, exist_ok=True)
+    collected = []
+    for sub, pattern in (("msi", "*.msi"), ("nsis", "*.exe")):
+        for f in sorted((bundle / sub).glob(pattern)):
+            dest = out / f"{name}-{f.name}"
+            shutil.copy2(f, dest)
+            collected.append(dest.name)
+    if collected:
+        print(f"  collected {len(collected)} installer(s): {', '.join(collected)}")
+    else:
+        print(f"  WARNING: no installers found under {bundle} to collect", file=sys.stderr)
 
 
 def main(argv: list) -> None:
