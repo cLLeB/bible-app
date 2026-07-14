@@ -127,20 +127,55 @@ pub fn resolves_to(text: &str, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Persist the winning settings for this model, so listening uses them from now on.
-pub fn save(db: &Db, model: &Path, d: &Decode) -> rusqlite::Result<()> {
+/// Voices the app knows about. Settings are stored per speaker, not just per model:
+/// a guest calibrating on a Sunday must not overwrite the tuning of whoever normally
+/// preaches, and a voice tuned through the sound desk is not the same voice tuned
+/// close to the laptop.
+pub const DEFAULT_PROFILES: &[&str] = &["Miss Hilda", "Vice-President", "Guest"];
+
+pub fn profiles(db: &Db) -> Vec<String> {
+    let stored = db
+        .get_setting("voice_profiles")
+        .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+        .unwrap_or_default();
+    if stored.is_empty() {
+        DEFAULT_PROFILES.iter().map(|s| s.to_string()).collect()
+    } else {
+        stored
+    }
+}
+
+pub fn active_profile(db: &Db) -> String {
+    db.get_setting("voice_profile")
+        .unwrap_or_else(|| DEFAULT_PROFILES[0].to_string())
+}
+
+pub fn set_active_profile(db: &Db, name: &str) -> rusqlite::Result<()> {
+    let mut all = profiles(db);
+    if !all.iter().any(|p| p == name) {
+        all.push(name.to_string());
+        let json = serde_json::to_string(&all).unwrap_or_default();
+        db.set_setting("voice_profiles", &json)?;
+    }
+    db.set_setting("voice_profile", name)
+}
+
+/// Persist the winning settings for this speaker + model, so listening uses them.
+pub fn save(db: &Db, model: &Path, profile: &str, d: &Decode) -> rusqlite::Result<()> {
     let window = match d.window {
         Window::Full => "full".to_string(),
         Window::Fit { margin } => margin.to_string(),
     };
     let value = format!("beam={},prompt={},normalize={},window={}", d.beam, d.prompt as u8, d.normalize as u8, window);
-    db.set_setting(&key_for(model), &value)
+    db.set_setting(&key_for(model, profile), &value)
 }
 
-/// Load calibrated settings for this model, falling back to the shipped defaults.
-pub fn load(db: &Db, model: &Path) -> Decode {
+/// Load this speaker's calibrated settings for this model, falling back to the
+/// shipped defaults — which are themselves measured on real preaching, so an
+/// uncalibrated speaker is not starting from nothing.
+pub fn load(db: &Db, model: &Path, profile: &str) -> Decode {
     let mut d = Decode::for_model(model);
-    let Some(spec) = db.get_setting(&key_for(model)) else { return d };
+    let Some(spec) = db.get_setting(&key_for(model, profile)) else { return d };
     for part in spec.split(',') {
         let Some((k, v)) = part.split_once('=') else { continue };
         match k {
@@ -160,9 +195,9 @@ pub fn load(db: &Db, model: &Path) -> Decode {
     d
 }
 
-fn key_for(model: &Path) -> String {
+fn key_for(model: &Path, profile: &str) -> String {
     let name = model.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    format!("decode:{name}")
+    format!("decode:{name}:{profile}")
 }
 
 #[cfg(test)]
@@ -193,15 +228,44 @@ mod tests {
         db.migrate().unwrap();
         let model = Path::new("ggml-small.en.bin");
         let want = Decode { beam: 1, prompt: false, normalize: true, window: Window::Fit { margin: 2.0 } };
-        save(&db, model, &want).unwrap();
-        assert_eq!(load(&db, model), want);
+        save(&db, model, "Miss Hilda", &want).unwrap();
+        assert_eq!(load(&db, model, "Miss Hilda"), want);
     }
 
     #[test]
-    fn uncalibrated_models_fall_back_to_shipped_defaults() {
+    fn uncalibrated_speakers_fall_back_to_shipped_defaults() {
         let db = crate::db::open_at(Path::new(":memory:")).unwrap();
         db.migrate().unwrap();
         let model = Path::new("ggml-base.en.bin");
-        assert_eq!(load(&db, model), Decode::for_model(model));
+        assert_eq!(load(&db, model, "Guest"), Decode::for_model(model));
+    }
+
+    /// The whole point: a guest tuning their voice on a Sunday must leave the
+    /// regular preacher's tuning exactly as it was.
+    #[test]
+    fn calibrating_one_speaker_does_not_disturb_another() {
+        let db = crate::db::open_at(Path::new(":memory:")).unwrap();
+        db.migrate().unwrap();
+        let model = Path::new("ggml-base.en.bin");
+
+        let hers = Decode { beam: 5, prompt: true, normalize: true, window: Window::Full };
+        let theirs = Decode { beam: 1, prompt: true, normalize: false, window: Window::Fit { margin: 1.5 } };
+        save(&db, model, "Miss Hilda", &hers).unwrap();
+        save(&db, model, "Guest", &theirs).unwrap();
+
+        assert_eq!(load(&db, model, "Miss Hilda"), hers);
+        assert_eq!(load(&db, model, "Guest"), theirs);
+    }
+
+    #[test]
+    fn the_regular_preacher_is_the_default_voice() {
+        let db = crate::db::open_at(Path::new(":memory:")).unwrap();
+        db.migrate().unwrap();
+        assert_eq!(active_profile(&db), "Miss Hilda");
+        assert!(profiles(&db).contains(&"Vice-President".to_string()));
+
+        set_active_profile(&db, "Pastor Visiting").unwrap();
+        assert_eq!(active_profile(&db), "Pastor Visiting");
+        assert!(profiles(&db).contains(&"Pastor Visiting".to_string()));
     }
 }

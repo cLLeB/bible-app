@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { AudioInputPicker } from "./AudioInputPicker";
 import { CalibrationPanel } from "./CalibrationPanel";
 import {
   appFlavor,
@@ -179,6 +180,8 @@ export function ListenPanel() {
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}
+
+      <AudioInputPicker disabled={listening} />
 
       <CalibrationPanel model={model} disabled={listening} />
 

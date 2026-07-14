@@ -233,6 +233,36 @@ export interface CalibrationResult {
   baseline: ConfigScore;
 }
 
+// ---- Audio input ----
+// The laptop mic hears the room; a sound-desk feed hears the preacher's microphone.
+// Everything the recognizer was measured against is the latter.
+
+export interface AudioInputs {
+  /** null = the system default input. */
+  chosen: string | null;
+  all: string[];
+}
+
+export const audioInputs = (): Promise<AudioInputs> => invoke<AudioInputs>("audio_inputs");
+
+export const setAudioInput = (name: string | null): Promise<void> =>
+  invoke<void>("set_audio_input", { name });
+
+/** Listens for ~3s and returns the loudest level heard (0..1). */
+export const testAudioInput = (): Promise<number> => invoke<number>("test_audio_input");
+
+export interface VoiceProfiles {
+  active: string;
+  all: string[];
+}
+
+/** Who is preaching today. Settings are stored per speaker, so calibrating a guest
+ *  never disturbs the regular preacher's tuning. */
+export const voiceProfiles = (): Promise<VoiceProfiles> => invoke<VoiceProfiles>("voice_profiles");
+
+export const setVoiceProfile = (name: string): Promise<void> =>
+  invoke<void>("set_voice_profile", { name });
+
 export const calibrationScript = (): Promise<ScriptLine[]> =>
   invoke<ScriptLine[]>("calibration_script");
 

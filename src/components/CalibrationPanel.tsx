@@ -4,6 +4,8 @@ import {
   calibrationScript,
   recordCalibrationLine,
   runCalibration,
+  setVoiceProfile,
+  voiceProfiles,
   type CalibrationResult,
   type ConfigScore,
   type ScriptLine,
@@ -25,6 +27,8 @@ type Phase = "idle" | "recording" | "scoring" | "done";
  */
 export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
   const [script, setScript] = useState<ScriptLine[]>([]);
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [who, setWho] = useState<string>("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [current, setCurrent] = useState(0);
   const [recorded, setRecorded] = useState<Set<number>>(new Set());
@@ -34,6 +38,12 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
 
   useEffect(() => {
     void calibrationScript().then(setScript).catch(() => setScript([]));
+    void voiceProfiles()
+      .then((p) => {
+        setProfiles(p.all);
+        setWho(p.active);
+      })
+      .catch(() => undefined);
     const un = listen<ConfigScore>("calibration-progress", (e) =>
       setProgress((prev) => [...prev, e.payload]),
     );
@@ -59,6 +69,26 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
     }
   }
 
+  async function changeWho(name: string): Promise<void> {
+    if (!name) return;
+    try {
+      await setVoiceProfile(name);
+      setWho(name);
+      if (!profiles.includes(name)) setProfiles([...profiles, name]);
+      // Another speaker means other recordings and another result.
+      setRecorded(new Set());
+      setResult(null);
+      setProgress([]);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function addWho(): Promise<void> {
+    const name = window.prompt("Name of the speaker (e.g. “Guest — Pastor Mensah”)")?.trim();
+    if (name) await changeWho(name);
+  }
+
   async function score(): Promise<void> {
     setError(null);
     setProgress([]);
@@ -80,15 +110,36 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
         Voice calibration{" "}
         <span className="text-[var(--muted)]">
-          — teach it your voice ({done}/{total} lines recorded)
+          — {who || "speaker"} ({done}/{total} lines recorded)
         </span>
       </summary>
 
       <div className="space-y-3 px-3 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">Preaching today:</span>
+          <select
+            className="select"
+            style={{ width: "auto", minWidth: "12rem" }}
+            value={who}
+            disabled={disabled || phase !== "idle"}
+            onChange={(e) => void changeWho(e.target.value)}
+          >
+            {profiles.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          <button className="btn" disabled={disabled || phase !== "idle"} onClick={() => void addWho()}>
+            + Add speaker
+          </button>
+        </div>
+
         <p className="text-sm text-[var(--muted)]">
-          Read each line the way you'd actually say it in a service. The app then replays
-          your recordings through every recognizer setting and keeps the one that finds the
-          most scripture. Nothing leaves this machine.
+          Each speaker is tuned separately, so calibrating a guest never disturbs anyone
+          else's settings. Have them read the lines the way they'd actually preach —
+          through the same microphone or desk feed the service will use, since that is the
+          sound the app has to work with. Nothing leaves this machine.
         </p>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
@@ -124,7 +175,7 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
             disabled={disabled || done === 0 || phase !== "idle"}
             onClick={() => void score()}
           >
-            {phase === "scoring" ? "Comparing settings…" : `Tune ${model} on my voice`}
+            {phase === "scoring" ? "Comparing settings…" : `Tune ${model} for ${who || "this speaker"}`}
           </button>
           {disabled && (
             <span className="text-sm text-[var(--muted)]">Stop listening first.</span>
@@ -150,7 +201,7 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
             </p>
             <p className="text-[var(--muted)]">
               The shipped default ({result.baseline.label}) found {result.baseline.resolved} of{" "}
-              {result.baseline.total} on your voice.
+              {result.baseline.total} on this voice. Only {who}'s settings changed.
             </p>
           </div>
         )}

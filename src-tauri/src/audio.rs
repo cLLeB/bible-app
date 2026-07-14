@@ -731,9 +731,52 @@ pub fn segment_utterances(samples: &[f32]) -> Vec<(f32, Vec<f32>)> {
 /// Open the default microphone and stream 16 kHz mono frames down a channel.
 /// Shared by the listen loop and the calibration recorder, so both hear exactly
 /// the same audio path (same device, same resampling, same levels).
-fn open_mic() -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
+/// Every audio input the machine offers — the built-in mic, but also a USB audio
+/// interface or line-in carrying the sound desk's feed.
+///
+/// The desk feed is worth reaching for: it is the preacher's microphone, already
+/// mixed, with no room, no reverb and no congregation in it. Everything this app was
+/// measured against is that kind of signal.
+pub fn input_devices() -> Vec<String> {
     let host = cpal::default_host();
-    let device = host.default_input_device().ok_or("no input microphone found")?;
+    host.input_devices()
+        .map(|ds| ds.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+/// The chosen input, or the system default if none is set / it has been unplugged.
+fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
+    let host = cpal::default_host();
+    if let Some(want) = name.filter(|n| !n.is_empty()) {
+        if let Ok(mut devices) = host.input_devices() {
+            if let Some(d) = devices.find(|d| d.name().map(|n| n == want).unwrap_or(false)) {
+                return Ok(d);
+            }
+        }
+        // Named but absent: the interface is unplugged. Say so rather than quietly
+        // listening to the laptop's own microphone instead.
+        return Err(format!("audio input \"{want}\" is not connected"));
+    }
+    host.default_input_device().ok_or_else(|| "no audio input found".to_string())
+}
+
+/// Listen on `device` for a few moments and report the loudest level heard, so the
+/// operator can confirm the desk feed is actually arriving before the service.
+pub fn input_level(device: Option<&str>, secs: f32) -> Result<f32, String> {
+    let (stream, rx) = open_mic(device)?;
+    let deadline = Instant::now() + Duration::from_secs_f32(secs);
+    let mut peak = 0.0f32;
+    while Instant::now() < deadline {
+        if let Ok(frame) = rx.recv_timeout(Duration::from_millis(200)) {
+            peak = peak.max(frame.iter().fold(0.0f32, |m, s| m.max(s.abs())));
+        }
+    }
+    drop(stream);
+    Ok(peak)
+}
+
+fn open_mic(name: Option<&str>) -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
+    let device = pick_device(name)?;
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
@@ -771,8 +814,11 @@ fn open_mic() -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
 /// Record exactly one spoken utterance: wait for speech, then endpoint on
 /// silence. Used by calibration, where each clip must line up with one prompt.
 /// Returns None if nobody spoke before `wait_secs`.
-pub fn record_one_utterance(wait_secs: u64) -> Result<Option<Vec<f32>>, String> {
-    let (stream, rx) = open_mic()?;
+pub fn record_one_utterance(
+    wait_secs: u64,
+    device: Option<&str>,
+) -> Result<Option<Vec<f32>>, String> {
+    let (stream, rx) = open_mic(device)?;
     let mut utter: Vec<f32> = Vec::new();
     let mut preroll: Vec<f32> = Vec::new();
     let mut speech_ms = 0f32;
@@ -827,40 +873,9 @@ fn run_inner(
     model: &Path,
     binary: &Path,
     decode: stt::Decode,
+    device: Option<&str>,
 ) -> Result<(), String> {
-    let host = cpal::default_host();
-    let device = host.default_input_device().ok_or("no input microphone found")?;
-    let supported = device.default_input_config().map_err(|e| e.to_string())?;
-    let sample_format = supported.sample_format();
-    let config: cpal::StreamConfig = supported.into();
-    let channels = config.channels as usize;
-    let src_rate = config.sample_rate.0 as f32;
-
-    let (tx, rx) = mpsc::channel::<Vec<f32>>();
-    let err_fn = |e| eprintln!("audio stream error: {e}");
-
-    let build = match sample_format {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config,
-            move |data: &[f32], _: &_| {
-                let _ = tx.send(downmix_resample(data, channels, src_rate));
-            },
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config,
-            move |data: &[i16], _: &_| {
-                let f: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                let _ = tx.send(downmix_resample(&f, channels, src_rate));
-            },
-            err_fn,
-            None,
-        ),
-        other => return Err(format!("unsupported sample format {other:?}")),
-    };
-    let stream = build.map_err(|e| e.to_string())?;
-    stream.play().map_err(|e| e.to_string())?;
+    let (stream, rx) = open_mic(device)?;
     let _ = app.emit("listen-started", ());
 
     let mut utter: Vec<f32> = Vec::new();
@@ -964,13 +979,14 @@ pub fn run_listen_loop(
     model: PathBuf,
     binary: PathBuf,
     decode: stt::Decode,
+    device: Option<String>,
 ) {
     // The env override still wins, for benching.
     let decode = match std::env::var("BIBLE_APP_DECODE") {
         Ok(_) => stt::Decode::from_env_or_model(&model),
         Err(_) => decode,
     };
-    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode) {
+    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode, device.as_deref()) {
         let _ = app.emit("listen-error", e);
     }
     flag.store(false, Ordering::SeqCst);

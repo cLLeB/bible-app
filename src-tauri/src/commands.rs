@@ -993,15 +993,22 @@ pub fn start_listening(
     let kind = model.unwrap_or_else(|| "base".to_string());
     let res_dir = app.path().resource_dir().ok();
     let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
-    // Use whatever calibration found for this speaker, if they have run it.
+    // Use whatever calibration found for the speaker who is preaching today.
     let decode = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        crate::calibrate::load(&db, &model)
+        let who = crate::calibrate::active_profile(&db);
+        crate::calibrate::load(&db, &model, &who)
+    };
+    let device = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_setting("input_device").filter(|s| !s.is_empty())
     };
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
-    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model, binary, decode));
+    std::thread::spawn(move || {
+        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device)
+    });
     Ok(())
 }
 
@@ -1014,9 +1021,90 @@ pub fn stop_listening(state: tauri::State<'_, AppState>) {
 // Tune the recognizer to this speaker's voice, mic and room. The clips, the sweep
 // and the result all stay on the machine.
 
+// ---- Audio input ------------------------------------------------------------
+// The laptop microphone hears the room: reverb, the congregation, whatever the PA
+// gives back. A feed from the sound desk carries the preacher's own microphone,
+// already mixed — no room in it at all. Everything this app has been measured
+// against is that kind of signal, so being able to choose the input is the single
+// biggest thing the operator can do for accuracy.
+
+#[tauri::command]
+pub fn audio_inputs(state: tauri::State<'_, AppState>) -> Result<AudioInputs, String> {
+    let chosen = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_setting("input_device")
+    };
+    Ok(AudioInputs { chosen, all: crate::audio::input_devices() })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioInputs {
+    /// None = whatever Windows calls the default input.
+    pub chosen: Option<String>,
+    pub all: Vec<String>,
+}
+
+#[tauri::command]
+pub fn set_audio_input(
+    name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    match name.filter(|n| !n.is_empty()) {
+        Some(n) => db.set_setting("input_device", &n).map_err(|e| e.to_string()),
+        None => db.set_setting("input_device", "").map_err(|e| e.to_string()),
+    }
+}
+
+/// Listen for a couple of seconds and report the loudest level heard (0..1), so the
+/// operator can confirm sound is actually arriving from the desk before the service
+/// rather than discovering it mid-sermon.
+#[tauri::command]
+pub async fn test_audio_input(app: tauri::AppHandle) -> Result<f32, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let device = selected_input(&app)?;
+        crate::audio::input_level(device.as_deref(), 3.0)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn selected_input(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(db.get_setting("input_device").filter(|s| !s.is_empty()))
+}
+
 #[tauri::command]
 pub fn calibration_script() -> Vec<crate::calibrate::ScriptLine> {
     crate::calibrate::script()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceProfiles {
+    pub active: String,
+    pub all: Vec<String>,
+}
+
+/// Who is preaching today, and who else the app knows. Settings are per speaker, so
+/// calibrating a guest never disturbs the regular preacher's tuning.
+#[tauri::command]
+pub fn voice_profiles(state: tauri::State<'_, AppState>) -> Result<VoiceProfiles, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(VoiceProfiles { active: crate::calibrate::active_profile(&db), all: crate::calibrate::profiles(&db) })
+}
+
+/// Switch to (or create) a speaker. A new name starts on the shipped defaults.
+#[tauri::command]
+pub fn set_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give the voice a name.".into());
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())
 }
 
 /// Record one line of the script: waits for the speaker, endpoints on silence
@@ -1032,9 +1120,12 @@ pub async fn record_calibration_line(
         return Err("Stop listening before calibrating.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let audio = crate::audio::record_one_utterance(20)?
-            .ok_or("Didn't hear anything — check the microphone and try again.")?;
-        let dir = crate::capture::dir(&app).ok_or("no place to store the recording")?;
+        // Calibrate through the same input the service will use, or the tuning is for
+        // a signal that never occurs.
+        let device = selected_input(&app)?;
+        let audio = crate::audio::record_one_utterance(20, device.as_deref())?
+            .ok_or("Didn't hear anything — check the input and try again.")?;
+        let dir = speaker_dir(&app)?;
         let path = dir.join(format!("calib_{index:02}.wav"));
         crate::stt::write_wav_16k_mono(&path, &audio)?;
         Ok(CalibrationClip { index, seconds: audio.len() as f32 / 16_000.0 })
@@ -1052,6 +1143,23 @@ pub struct CalibrationClip {
 
 fn state_is_listening(app: &tauri::AppHandle) -> bool {
     app.state::<AppState>().listening.load(Ordering::SeqCst)
+}
+
+/// Where this speaker's calibration recordings live. Per speaker, so a guest
+/// reading the script on a Sunday cannot overwrite the regular preacher's clips.
+fn speaker_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let who = {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        crate::calibrate::active_profile(&db)
+    };
+    let slug: String = who
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    let dir = crate::capture::dir(app).ok_or("no place to store the recording")?.join(slug);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
 /// Replay the recorded lines through every candidate setting, score each on
@@ -1081,7 +1189,7 @@ fn calibration_sweep(
     let res_dir = app.path().resource_dir().ok();
     let (model_path, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
 
-    let dir = crate::capture::dir(&app).ok_or("no recordings found")?;
+    let dir = speaker_dir(&app)?;
     let clips: Vec<(usize, Vec<f32>)> = (0..calibrate::SCRIPT.len())
         .filter_map(|i| {
             let path = dir.join(format!("calib_{i:02}.wav"));
@@ -1089,7 +1197,7 @@ fn calibration_sweep(
         })
         .collect();
     if clips.is_empty() {
-        return Err("No calibration recordings yet.".into());
+        return Err("No recordings yet for this speaker.".into());
     }
 
     let baseline_cfg = crate::stt::Decode::for_model(&model_path);
@@ -1134,7 +1242,8 @@ fn calibration_sweep(
     {
         let db = app.state::<AppState>();
         let db = db.db.lock().map_err(|e| e.to_string())?;
-        calibrate::save(&db, &model_path, &best_cfg).map_err(|e| e.to_string())?;
+        let who = calibrate::active_profile(&db);
+        calibrate::save(&db, &model_path, &who, &best_cfg).map_err(|e| e.to_string())?;
     }
 
     Ok(crate::calibrate::CalibrationResult {
