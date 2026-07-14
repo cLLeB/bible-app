@@ -987,10 +987,18 @@ pub fn start_listening(
     state: tauri::State<'_, AppState>,
     model: Option<String>,
 ) -> Result<(), String> {
+    begin_listening(&app, model.as_deref())
+}
+
+/// Start the listen loop for `kind` (default "base"). Shared by the console button
+/// and the phone remote — the operator is usually standing at the projector when the
+/// preacher steps up, not sitting at the laptop.
+pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Result<(), String> {
+    let state = app.state::<AppState>();
     if state.listening.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let kind = model.unwrap_or_else(|| "base".to_string());
+    let kind = model.unwrap_or("base").to_string();
     let res_dir = app.path().resource_dir().ok();
     let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
     // Use whatever calibration found for the speaker who is preaching today.

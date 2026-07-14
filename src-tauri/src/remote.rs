@@ -24,6 +24,7 @@ button{padding:12px 16px;font-size:1rem;border:0;border-radius:8px;color:#fff;ma
 <input id="q" placeholder="e.g. John 3:16" autofocus>
 <div class="row"><button class="go" onclick="go()">Project</button>
 <button class="blank" onclick="blank()">Blank</button></div>
+<div class="row"><button id="lisbtn" class="go" onclick="listen()">● Start listening</button></div>
 <p id="err"></p>
 <div id="now">…</div>
 <script>
@@ -31,6 +32,16 @@ async function go(){let q=document.getElementById('q').value.trim();if(!q)return
  let r=await fetch('/api/project',{method:'POST',body:q});let t=await r.text();
  document.getElementById('err').textContent=r.ok?'':t;refresh();}
 async function blank(){await fetch('/api/blank',{method:'POST'});refresh();}
+let listening=false;
+async function listen(){
+ let r=await fetch('/api/listen',{method:'POST',body:listening?'stop':'start'});
+ let t=await r.text();
+ if(!r.ok){document.getElementById('err').textContent=t;return;}
+ listening=(t==='listening');
+ let b=document.getElementById('lisbtn');
+ b.textContent=listening?'■ Stop listening':'● Start listening';
+ b.className=listening?'blank':'go';
+ document.getElementById('err').textContent='';}
 async function refresh(){try{let r=await fetch('/api/state');document.getElementById('now').textContent=await r.text();}catch(e){}}
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 setInterval(refresh,2000);refresh();
@@ -116,6 +127,25 @@ pub fn start(app: AppHandle, running: Arc<AtomicBool>) -> Result<String, String>
                 ("GET", "/projection") => (200, PROJECTION_PAGE.to_string()),
                 ("GET", "/api/projection") => (200, projection_json(&app)),
                 ("GET", "/api/state") => (200, state_summary(&app)),
+                // The operator is at the projector when the preacher steps up, not at
+                // the laptop. Listening starts and stops from the phone too.
+                ("POST", "/api/listen") => {
+                    let mut body = String::new();
+                    let _ = req.as_reader().read_to_string(&mut body);
+                    let on = body.trim() == "start";
+                    let result = if on {
+                        crate::commands::begin_listening(&app, None)
+                    } else {
+                        app.state::<crate::commands::AppState>()
+                            .listening
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    };
+                    match result {
+                        Ok(()) => (200, if on { "listening" } else { "stopped" }.to_string()),
+                        Err(e) => (500, e),
+                    }
+                }
                 ("POST", "/api/blank") => {
                     let _ = project_via_handle(&app, ProjectionState::Blank);
                     (200, "ok".into())
