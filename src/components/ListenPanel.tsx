@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { CalibrationPanel } from "./CalibrationPanel";
 import {
   appFlavor,
   blankProjection,
@@ -178,6 +179,8 @@ export function ListenPanel() {
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}
+
+      <CalibrationPanel model={model} disabled={listening} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>

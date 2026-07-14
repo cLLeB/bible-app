@@ -204,3 +204,41 @@ export type SttModel = "tiny" | "base" | "small" | "medium";
 export const startListening = (model: SttModel): Promise<void> =>
   invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");
+
+// ---- Voice calibration ----
+// Tunes the recognizer to this speaker's voice, mic and room. Everything stays
+// on the machine: the recordings, the comparison and the result.
+
+export interface ScriptLine {
+  index: number;
+  say: string;
+  expect: string;
+}
+
+export interface CalibrationClip {
+  index: number;
+  seconds: number;
+}
+
+export interface ConfigScore {
+  label: string;
+  resolved: number;
+  total: number;
+  secondsPerClip: number;
+}
+
+export interface CalibrationResult {
+  best: ConfigScore;
+  all: ConfigScore[];
+  baseline: ConfigScore;
+}
+
+export const calibrationScript = (): Promise<ScriptLine[]> =>
+  invoke<ScriptLine[]>("calibration_script");
+
+/** Blocks until the speaker finishes the line (or nobody speaks for 20s). */
+export const recordCalibrationLine = (index: number): Promise<CalibrationClip> =>
+  invoke<CalibrationClip>("record_calibration_line", { index });
+
+export const runCalibration = (model: SttModel): Promise<CalibrationResult> =>
+  invoke<CalibrationResult>("run_calibration", { model });
