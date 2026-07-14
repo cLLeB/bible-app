@@ -67,33 +67,35 @@ pub enum Window {
     /// whisper's default: the full 30 seconds, however short the clip.
     Full,
     /// Sized to the clip: 50 encoder frames per second of speech, times `margin`.
-    /// Too tight and the decoder loops, repeating the phrase (seen at margin 1.5);
-    /// too loose and the encode cost returns. 2.0 measured clean.
+    /// A very tight window can make the decoder loop and repeat the phrase (which
+    /// `dedupe_repeats` collapses); too loose and the encode cost returns. What is
+    /// right depends on the model — see `Decode::for_model`.
     Fit { margin: f32 },
 }
 
 impl Default for Decode {
     fn default() -> Self {
-        Self { beam: 5, prompt: true, normalize: true, window: Window::Fit { margin: 2.5 } }
+        Self { beam: 5, prompt: true, normalize: true, window: Window::Fit { margin: 1.5 } }
     }
 }
 
 impl Decode {
-    /// Defaults differ by model, because the models fail differently.
+    /// Defaults differ by model, because the models want opposite things. Both
+    /// figures below are measured on 12 recorded utterances of real speech, not
+    /// on synthetic audio — which pointed the other way and was simply wrong.
     ///
-    /// small handles a fitted window at every margin tested — it stays correct
-    /// and gets ~8x faster, so it takes the speed.
+    /// small wants a TIGHT window: fitted x1.5 resolves 10/12, x2 drops to 8/12,
+    /// and the full window manages only 7-8/12. Trimming the encoder to the clip
+    /// evidently keeps it from wandering off into the silence.
     ///
-    /// base and tiny do not: on rare names a truncated window flips the answer
-    /// ("Habakkuk" -> "have a cuck" at margin 2.0 and 3.0, correct at 2.5 — noise,
-    /// not a trend). The weak models are already marginal on the hard words, so
-    /// they keep whisper's full window and spend the time on being right. The
-    /// resident server still makes them far faster than before.
+    /// base and tiny want the FULL window: base resolves 10/12 with it and
+    /// collapses to 3-5/12 fitted, at any margin. The weak models are already
+    /// marginal on the hard words and a truncated window pushes them over.
     pub fn for_model(model: &Path) -> Self {
         let name = model.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
         let weak = name.contains("tiny") || name.contains("base");
         Self {
-            window: if weak { Window::Full } else { Window::Fit { margin: 2.5 } },
+            window: if weak { Window::Full } else { Window::Fit { margin: 1.5 } },
             ..Self::default()
         }
     }
@@ -113,7 +115,7 @@ impl Decode {
                     d.window = if v == "full" {
                         Window::Full
                     } else {
-                        Window::Fit { margin: v.parse().unwrap_or(2.5) }
+                        Window::Fit { margin: v.parse().unwrap_or(1.5) }
                     }
                 }
                 _ => {}
@@ -470,8 +472,8 @@ mod tests {
 
     #[test]
     fn window_fits_the_clip_and_has_a_floor() {
-        let d = Decode::default(); // Fit { margin: 2.5 }
-        assert_eq!(d.audio_ctx(3.0), Some(375));
+        let d = Decode::default(); // Fit { margin: 1.5 }
+        assert_eq!(d.audio_ctx(3.0), Some(256)); // 3s * 50 * 1.5 = 225 -> floor
         assert_eq!(d.audio_ctx(0.5), Some(256)); // floor
         assert_eq!(d.audio_ctx(60.0), Some(1500)); // never exceeds whisper's window
         assert_eq!(Decode { window: Window::Full, ..d }.audio_ctx(3.0), None);
@@ -483,7 +485,7 @@ mod tests {
         assert_eq!(Decode::for_model(Path::new("ggml-tiny.en.bin")).window, Window::Full);
         assert_eq!(
             Decode::for_model(Path::new("ggml-small.en.bin")).window,
-            Window::Fit { margin: 2.5 }
+            Window::Fit { margin: 1.5 }
         );
     }
 

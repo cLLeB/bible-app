@@ -56,17 +56,29 @@ pub fn script() -> Vec<ScriptLine> {
         .collect()
 }
 
-/// The settings worth trying. Deliberately small: every extra candidate costs the
-/// operator real time, and these are the axes that actually moved the answer in
-/// testing (window shape first, then search width).
+/// The settings worth trying. Deliberately few: every extra candidate costs the
+/// operator real time reading and waiting.
+///
+/// The window is swept widest, because it is the axis that moves the answer most
+/// — and it moves it in opposite directions per model (base wants the full 30s
+/// window, small wants it trimmed to the clip). Margins must reach down to 1.2:
+/// on real speech that is where small peaks, and an earlier candidate list that
+/// started at 2.0 could not find its own best setting.
 pub fn candidates() -> Vec<Decode> {
     let mut out = Vec::new();
-    for window in [Window::Full, Window::Fit { margin: 2.5 }, Window::Fit { margin: 2.0 }] {
+    for window in [
+        Window::Full,
+        Window::Fit { margin: 1.2 },
+        Window::Fit { margin: 1.5 },
+        Window::Fit { margin: 2.0 },
+    ] {
         for beam in [5, 1] {
             out.push(Decode { beam, prompt: true, normalize: true, window });
         }
     }
     // Is the scripture prompt helping this speaker, or dragging them around?
+    // (On the voices tested it is load-bearing — dropping it fell to 0-2 of 12 —
+    // but that is exactly the kind of thing worth confirming per speaker.)
     out.push(Decode { prompt: false, ..Decode::default() });
     out
 }
