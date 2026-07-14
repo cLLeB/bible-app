@@ -482,6 +482,15 @@ mod tests {
 
     /// Whisper drops the leading consonant of Nehemiah constantly. Fuzzy matching
     /// scores these closest to Zephaniah and Nahum, so they are listed explicitly.
+    /// From a real sermon: she opens Romans 8:18, then keeps saying "this chapter,
+    /// Romans 8" while teaching. The detector reports the bare chapter; audio.rs is
+    /// what refuses to let it replace the verse already on screen.
+    #[test]
+    fn a_passing_chapter_mention_is_reported_as_chapter_only() {
+        let d = one("so i was looking at this particular chapter romans 8");
+        assert_eq!((d.book_osis.as_str(), d.chapter, d.verse), ("Rom", 8, None));
+    }
+
     #[test]
     fn recovers_nehemiah_from_real_mishearings() {
         for said in [

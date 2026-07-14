@@ -5,7 +5,7 @@ mod capture;
 mod commands;
 pub mod corrections;
 mod flavor;
-mod db;
+pub mod db;
 pub mod detect;
 mod events;
 pub mod knowledge;

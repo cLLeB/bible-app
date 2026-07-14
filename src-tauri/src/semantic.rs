@@ -6,6 +6,11 @@ const STOPWORDS: &[&str] = &[
     "there", "their", "which", "when", "then", "than", "into", "upon", "what", "would", "could",
 ];
 
+/// Words too common to distinguish one verse from another.
+pub fn is_filler(word: &str) -> bool {
+    STOPWORDS.contains(&word)
+}
+
 /// Build an FTS5 query from transcript text (significant words OR'd together)
 /// plus the word list used to score overlap. None if too few words to trust.
 pub fn fts_query(text: &str) -> Option<(String, Vec<String>)> {

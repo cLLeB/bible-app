@@ -178,15 +178,31 @@ fn merge_ranked(
 /// So the confidence follows the evidence: when most of what he just said is in
 /// the verse, he is reading it, and it goes up like any named reference. A loose
 /// echo stays a suggestion.
-fn quote_confidence(text: &str, verse_text: &str) -> f32 {
-    let Some((_, words)) = semantic::fts_query(text) else {
-        return 0.7;
-    };
-    let hit = semantic::overlap(&words, verse_text);
-    let ratio = hit as f32 / words.len().max(1) as f32;
-    if ratio >= 0.7 {
-        0.88 // reading it out
-    } else if ratio >= 0.5 {
+pub fn quote_confidence(text: &str, verse_text: &str) -> f32 {
+    // The question is how much of THE VERSE he said — not how much of what he said
+    // is in the verse. Those are different, and the second one is wrong: an
+    // utterance is ~12s of speech and usually carries a verse *plus* the next one
+    // plus commentary, so a faithful reading scores poorly against any single verse.
+    // Measured that way, scripture being read aloud stayed below the bar.
+    let spoken: std::collections::HashSet<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 4)
+        .map(|w| w.to_lowercase())
+        .collect();
+    let key: Vec<String> = verse_text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 4)
+        .map(|w| w.to_lowercase())
+        .filter(|w| !semantic::is_filler(w))
+        .collect();
+    if key.len() < 4 {
+        return 0.7; // too short to judge by its words alone
+    }
+    let said = key.iter().filter(|w| spoken.contains(*w)).count();
+    let coverage = said as f32 / key.len() as f32;
+    if coverage >= 0.65 {
+        0.88 // he is reading it out
+    } else if coverage >= 0.45 {
         0.75 // quoting loosely
     } else {
         0.7 // alluding
@@ -460,6 +476,20 @@ fn transcribe_detect(
             let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
             if last.as_ref() == Some(&key) {
+                continue;
+            }
+            // A bare chapter mention must not knock a verse of that same chapter off
+            // the screen. A preacher working through Romans 8:18 says "this chapter,
+            // Romans 8" constantly, and every one of those was resetting the wall to
+            // Romans 8:1 — a verse nobody asked for. She means the chapter she is
+            // already in. A bare chapter of a *different* passage is a real move, and
+            // still projects.
+            let bare_chapter_of_what_is_showing = r.verse.is_none()
+                && last
+                    .as_ref()
+                    .map(|(b, c, v)| *b == r.book_osis && *c == r.chapter && v.is_some())
+                    .unwrap_or(false);
+            if bare_chapter_of_what_is_showing {
                 continue;
             }
             if let Ok(Some(rec)) = db.find_verse(&tr, r) {
