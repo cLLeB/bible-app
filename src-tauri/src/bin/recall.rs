@@ -124,7 +124,15 @@ fn decide(
     let confident: Vec<&detect::Detection> =
         hits.iter().filter(|h| h.source != detect::DetectSource::Story).collect();
 
-    if let Some(d) = confident.last() {
+    // Mirror the app: prefer the last reference that names a verse, so a truncation
+    // fragment ("…verse 4, Psalm 60—") cannot beat a complete reference.
+    let chosen = confident
+        .iter()
+        .rev()
+        .find(|d| d.reference.verse.is_some())
+        .or_else(|| confident.last())
+        .copied();
+    if let Some(d) = chosen {
         let r = &d.reference;
         // A bare chapter mention does not knock a verse of that same chapter off the
         // screen — she says "this chapter, Romans 8" while teaching Romans 8:18.

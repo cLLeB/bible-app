@@ -277,6 +277,38 @@ fn read_along(
 
 #[cfg(test)]
 mod tests {
+    /// Real sentences from real sermons. Each yields several references in one
+    /// breath, and the app must land on the one the speaker actually meant.
+    #[test]
+    fn picks_the_reference_the_speaker_settled_on() {
+        use crate::detect::{self, DetectSource};
+        let choose = |said: &str| {
+            let mut ctx = detect::RefContext::default();
+            let hits = detect::detect_with_context(said, &mut ctx);
+            let confident: Vec<_> =
+                hits.iter().filter(|d| d.source != DetectSource::Story).collect();
+            let d = confident
+                .iter()
+                .rev()
+                .find(|d| d.reference.verse.is_some())
+                .or_else(|| confident.last())
+                .copied()
+                .expect("a reference");
+            (d.reference.book_osis.clone(), d.reference.chapter, d.reference.verse)
+        };
+
+        // Chopped mid-sentence: a dangling "Psalm 60" must not beat the real ask.
+        assert_eq!(choose("now let's look at the psalm 65 psalm 65 verse 4 psalm 60"),
+                   ("Ps".into(), 65, Some(4)));
+        // Self-corrections still end on what she meant.
+        assert_eq!(choose("when you read 2 chronicles 1 chronicles chapter 20 the verse 22"),
+                   ("1Chr".into(), 20, Some(22)));
+        assert_eq!(choose("let's read in colossians chapter 13 verse 14 sorry chapter one verse 13 to 14"),
+                   ("Col".into(), 1, Some(13)));
+        // Nothing carries a verse: the last one stands.
+        assert_eq!(choose("2 thessalonians 1 thessalonians 2"), ("1Thess".into(), 2, None));
+    }
+
     /// Verses recovered from the speaker's own words, graded by how much of the
     /// verse he actually said. Reading it out earns the same trust as naming it;
     /// an allusion does not. (0.82 is the default auto-project bar.)
@@ -472,7 +504,22 @@ fn transcribe_detect(
         // so nothing is lost if the guess is wrong.
         let confident: Vec<&Detection> =
             detections.iter().filter(|d| d.source != DetectSource::Story).collect();
-        for d in confident.iter().rev().take(1) {
+        // "The last one" is nearly right, and was wrong in a way only real speech
+        // shows: "let's look at Psalm 65, Psalm 65, verse 4, Psalm 60—" (the
+        // utterance chopped there). Taking the last reference projected Psalm 60,
+        // beaten out of a fully specified Psalm 65:4 by a truncation fragment.
+        //
+        // So prefer the last reference that names a verse, falling back to the last
+        // when none do. A self-correction ends on the verse the speaker meant, so
+        // this still lands on "1 Chronicles 20:22" and "Colossians 1:13"; a trailing
+        // bare chapter no longer outranks a complete reference.
+        let chosen = confident
+            .iter()
+            .rev()
+            .find(|d| d.reference.verse.is_some())
+            .or_else(|| confident.last())
+            .copied();
+        for d in chosen.iter() {
             let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
             if last.as_ref() == Some(&key) {
@@ -523,10 +570,13 @@ fn transcribe_detect(
                 // The references the speaker passed through on the way here — the
                 // "2 Chronicles" of a "2 Chronicles, 1 Chronicles" correction — so
                 // the operator can still reach them in one click if we chose wrong.
+                // Everything else the speaker said in this breath — the reference she
+                // corrected away from, a mangled fragment — one click away in case we
+                // chose wrong.
                 let others: Vec<crate::events::VersePayload> = confident
                     .iter()
                     .rev()
-                    .skip(1)
+                    .filter(|o| o.reference != *r)
                     .filter_map(|o| db.find_verse(&tr, &o.reference).ok().flatten().map(build_payload))
                     .take(4)
                     .collect();
