@@ -168,13 +168,39 @@ fn merge_ranked(
     primary
 }
 
-/// Emit the top standby candidate as a suggestion (unless it is already the last
-/// thing shown) and record its text so we can notice the speaker reading it.
-/// Returns false if the candidate cannot be resolved to a verse.
+/// How far to trust a verse recovered from the speaker's own words.
+///
+/// A flat 0.7 treated a verbatim reading and a vague allusion alike, and 0.7 sits
+/// below the auto-project bar — so scripture the speaker was *reading out* stayed
+/// a suggestion nobody had asked for a second opinion on. Across six recorded
+/// sermons that was 7 of the 17 verses a human operator put on the screen.
+///
+/// So the confidence follows the evidence: when most of what he just said is in
+/// the verse, he is reading it, and it goes up like any named reference. A loose
+/// echo stays a suggestion.
+fn quote_confidence(text: &str, verse_text: &str) -> f32 {
+    let Some((_, words)) = semantic::fts_query(text) else {
+        return 0.7;
+    };
+    let hit = semantic::overlap(&words, verse_text);
+    let ratio = hit as f32 / words.len().max(1) as f32;
+    if ratio >= 0.7 {
+        0.88 // reading it out
+    } else if ratio >= 0.5 {
+        0.75 // quoting loosely
+    } else {
+        0.7 // alluding
+    }
+}
+
+/// Emit the top standby candidate (unless it is already the last thing shown) and
+/// record its text so we can notice the speaker reading it. Returns false if the
+/// candidate cannot be resolved to a verse.
 fn present_best(
     app: &AppHandle,
     db: &crate::db::Db,
     tr: &str,
+    text: &str,
     last: &mut Option<RefKey>,
     p: &mut crate::resolution::Pending,
 ) -> bool {
@@ -187,11 +213,13 @@ fn present_best(
     };
     let payload = build_payload(rec);
     p.presented_text = payload.text.clone();
+    let confidence = quote_confidence(text, &payload.text);
+    let source = if confidence >= 0.88 { "quote" } else { "suggestion" };
     let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
     if last.as_ref() != Some(&key) {
         let _ = app.emit(
             "verse-candidate",
-            Candidate { verse: payload, confidence: 0.7, source: "suggestion".into() },
+            Candidate { verse: payload, confidence, source: source.into() },
         );
         *last = Some(key);
     }
@@ -211,8 +239,43 @@ fn present_best(
 /// let the last suggestion stand (the speaker has moved on).
 const REFINE_GIVE_UP: u32 = 2;
 
+/// The speaker is reading aloud from the passage already on screen — which verse
+/// of it? Searches only within the presented book and chapter, so this can sharpen
+/// the projection but never move it somewhere else. Returns None unless the words
+/// match a verse strongly enough to be a reading rather than a passing allusion.
+fn read_along(
+    db: &crate::db::Db,
+    tr: &str,
+    text: &str,
+    last: &Option<RefKey>,
+) -> Option<crate::db::VerseRecord> {
+    let (book, chapter, _) = last.as_ref()?;
+    let (query, words) = semantic::fts_query(text)?;
+    let hits = db.search_fts(tr, &query, 8).ok()?;
+    hits.into_iter().map(|(rec, _)| rec).find(|rec| {
+        rec.book_osis == *book
+            && rec.chapter == *chapter
+            && semantic::is_strong(semantic::overlap(&words, &rec.text), words.len())
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    /// Verses recovered from the speaker's own words, graded by how much of the
+    /// verse he actually said. Reading it out earns the same trust as naming it;
+    /// an allusion does not. (0.82 is the default auto-project bar.)
+    #[test]
+    fn reading_a_verse_aloud_is_trusted_more_than_alluding_to_it() {
+        use super::quote_confidence;
+        let verse = "Ye are the light of the world. A city that is set on an hill cannot be hid.";
+
+        let reading = "you are the light of the world a city set on the hill cannot be hidden";
+        assert!(quote_confidence(reading, verse) >= 0.82, "a reading should project");
+
+        let allusion = "we are supposed to be light in this dark generation somehow";
+        assert!(quote_confidence(allusion, verse) < 0.82, "an allusion should only suggest");
+    }
+
     use super::merge_ranked;
     use crate::reference::ParsedRef;
 
@@ -338,7 +401,7 @@ fn transcribe_detect(
                         let found = research(&db, &tr, &p.description, 2);
                         p.candidates = merge_ranked(found, std::mem::take(&mut p.candidates));
                         p.misses = 0;
-                        if present_best(app, &db, &tr, last, &mut p) {
+                        if present_best(app, &db, &tr, &text, last, &mut p) {
                             *pending = Some(p);
                         }
                         return;
@@ -355,7 +418,7 @@ fn transcribe_detect(
                         if improved {
                             p.candidates = merge_ranked(found, std::mem::take(&mut p.candidates));
                             p.misses = 0;
-                            if present_best(app, &db, &tr, last, &mut p) {
+                            if present_best(app, &db, &tr, &text, last, &mut p) {
                                 *pending = Some(p);
                             }
                         } else {
@@ -378,6 +441,10 @@ fn transcribe_detect(
         Ok(d) => d,
         Err(_) => return,
     };
+    // Did a confident reference actually reach the screen? If none of them resolve
+    // to real scripture, the utterance is *not* handled — fall through and let the
+    // quote/story matcher have it.
+    let mut projected = false;
     if has_explicit {
         // Confident references: explicit / fuzzy / context / descriptive.
         //
@@ -421,6 +488,7 @@ fn transcribe_detect(
                     Candidate { verse: payload, confidence, source: source.to_string() },
                 );
                 *last = Some(key);
+                projected = true;
 
                 // The references the speaker passed through on the way here — the
                 // "2 Chronicles" of a "2 Chronicles, 1 Chronicles" correction — so
@@ -435,7 +503,43 @@ fn transcribe_detect(
                 let _ = app.emit("verse-alternatives", others);
             }
         }
-    } else {
+        // The reference does not exist — "Colossians chapter 22", built from a
+        // book remembered minutes ago. The memory is evidently stale, so drop it
+        // rather than keep mapping loose verse numbers onto the wrong book. This
+        // was suppressing real hits: a preacher quoting "sit on thrones judging
+        // the twelve tribes of Israel" and saying "verse 29" produced an
+        // impossible Colossians 22:29 and nothing else, when the words themselves
+        // were Luke 22:30 and the quote matcher could have found them.
+        if !projected {
+            ctx.clear();
+        }
+    }
+
+    // Having named the reference, the preacher reads it out. Those words identify
+    // the verse by themselves — no need to have heard the name right — so they are
+    // the strongest confirmation available, and the app was throwing them away.
+    //
+    // Used to sharpen what is already on the wall: a chapter-only reference
+    // ("Matthew chapter 5") lands on the verse actually being read ("blessed are
+    // the poor in spirit" → 5:3), and a misheard verse number corrects itself. The
+    // match is confined to the book and chapter already showing, so reading a verse
+    // aloud can never yank the screen to another book.
+    if !projected {
+        if let Some(refined) = read_along(&db, &tr, &text, last) {
+            let payload = build_payload(refined);
+            let key: RefKey = (payload.book_osis.clone(), payload.chapter, Some(payload.verse));
+            if last.as_ref() != Some(&key) {
+                let _ = app.emit(
+                    "verse-candidate",
+                    Candidate { verse: payload, confidence: 0.88, source: "read-along".into() },
+                );
+                *last = Some(key);
+                projected = true;
+            }
+        }
+    }
+
+    if !projected {
         // Uncertain: a topical request ("what the Bible says about worry"), a
         // paraphrased story, or a quoted verse. Present the best guess and, on a
         // final utterance, open the confirm/refine loop with the alternatives on
@@ -479,7 +583,7 @@ fn transcribe_detect(
                 presented_text: String::new(),
                 misses: 0,
             };
-            if present_best(app, &db, &tr, last, &mut p) && emit_transcript {
+            if present_best(app, &db, &tr, &text, last, &mut p) && emit_transcript {
                 *pending = Some(p);
             }
         }
