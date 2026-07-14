@@ -982,11 +982,7 @@ fn resolve_model_and_binary(
 }
 
 #[tauri::command]
-pub fn start_listening(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    model: Option<String>,
-) -> Result<(), String> {
+pub fn start_listening(app: tauri::AppHandle, model: Option<String>) -> Result<(), String> {
     begin_listening(&app, model.as_deref())
 }
 
