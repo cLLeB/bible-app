@@ -993,16 +993,145 @@ pub fn start_listening(
     let kind = model.unwrap_or_else(|| "base".to_string());
     let res_dir = app.path().resource_dir().ok();
     let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
+    // Use whatever calibration found for this speaker, if they have run it.
+    let decode = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        crate::calibrate::load(&db, &model)
+    };
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
-    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model, binary));
+    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model, binary, decode));
     Ok(())
 }
 
 #[tauri::command]
 pub fn stop_listening(state: tauri::State<'_, AppState>) {
     state.listening.store(false, Ordering::SeqCst);
+}
+
+// ---- Voice calibration ------------------------------------------------------
+// Tune the recognizer to this speaker's voice, mic and room. The clips, the sweep
+// and the result all stay on the machine.
+
+#[tauri::command]
+pub fn calibration_script() -> Vec<crate::calibrate::ScriptLine> {
+    crate::calibrate::script()
+}
+
+/// Record one line of the script. Blocks until the speaker finishes (endpointed
+/// on silence, exactly as live listening does) or nobody speaks for `wait_secs`.
+#[tauri::command]
+pub fn record_calibration_line(
+    app: tauri::AppHandle,
+    index: usize,
+) -> Result<CalibrationClip, String> {
+    if state_is_listening(&app) {
+        return Err("Stop listening before calibrating.".into());
+    }
+    let audio = crate::audio::record_one_utterance(20)?
+        .ok_or("Didn't hear anything — check the microphone and try again.")?;
+
+    let dir = crate::capture::dir(&app).ok_or("no place to store the recording")?;
+    let path = dir.join(format!("calib_{index:02}.wav"));
+    crate::stt::write_wav_16k_mono(&path, &audio)?;
+    Ok(CalibrationClip { index, seconds: audio.len() as f32 / 16_000.0 })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationClip {
+    pub index: usize,
+    pub seconds: f32,
+}
+
+fn state_is_listening(app: &tauri::AppHandle) -> bool {
+    app.state::<AppState>().listening.load(Ordering::SeqCst)
+}
+
+/// Replay the recorded lines through every candidate setting, score each on
+/// whether the right scripture resolved, and keep the winner for this model.
+#[tauri::command]
+pub fn run_calibration(
+    app: tauri::AppHandle,
+    model: Option<String>,
+) -> Result<crate::calibrate::CalibrationResult, String> {
+    use crate::calibrate;
+    use std::time::Instant;
+
+    let kind = model.unwrap_or_else(|| "base".to_string());
+    let res_dir = app.path().resource_dir().ok();
+    let (model_path, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
+
+    let dir = crate::capture::dir(&app).ok_or("no recordings found")?;
+    let clips: Vec<(usize, Vec<f32>)> = (0..calibrate::SCRIPT.len())
+        .filter_map(|i| {
+            let path = dir.join(format!("calib_{i:02}.wav"));
+            read_wav_16k(&path).ok().map(|audio| (i, audio))
+        })
+        .collect();
+    if clips.is_empty() {
+        return Err("No calibration recordings yet.".into());
+    }
+
+    let baseline_cfg = crate::stt::Decode::for_model(&model_path);
+    let mut scores = Vec::new();
+    let mut baseline: Option<calibrate::ConfigScore> = None;
+
+    for cfg in calibrate::candidates() {
+        let mut resolved = 0usize;
+        let mut secs = 0f32;
+        for (i, audio) in &clips {
+            let t0 = Instant::now();
+            let text = match crate::stt::transcribe(audio, &model_path, &binary, cfg) {
+                Ok(t) => crate::corrections::correct(&t),
+                Err(_) => continue,
+            };
+            secs += t0.elapsed().as_secs_f32();
+            if calibrate::resolves_to(&text, calibrate::SCRIPT[*i].1) {
+                resolved += 1;
+            }
+        }
+        let score = calibrate::ConfigScore {
+            label: calibrate::label_of(&cfg),
+            resolved,
+            total: clips.len(),
+            seconds_per_clip: secs / clips.len() as f32,
+        };
+        let _ = app.emit("calibration-progress", score.clone());
+        if cfg == baseline_cfg {
+            baseline = Some(score.clone());
+        }
+        scores.push((cfg, score));
+    }
+
+    // Most scripture resolved wins; ties go to the faster setting.
+    scores.sort_by(|a, b| {
+        b.1.resolved
+            .cmp(&a.1.resolved)
+            .then(a.1.seconds_per_clip.total_cmp(&b.1.seconds_per_clip))
+    });
+    let (best_cfg, best) = scores.first().cloned().ok_or("nothing to score")?;
+
+    {
+        let db = app.state::<AppState>();
+        let db = db.db.lock().map_err(|e| e.to_string())?;
+        calibrate::save(&db, &model_path, &best_cfg).map_err(|e| e.to_string())?;
+    }
+
+    Ok(crate::calibrate::CalibrationResult {
+        baseline: baseline.unwrap_or_else(|| best.clone()),
+        best,
+        all: scores.into_iter().map(|(_, s)| s).collect(),
+    })
+}
+
+fn read_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
+    let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
+    reader
+        .samples::<i16>()
+        .map(|s| s.map(|v| v as f32 / i16::MAX as f32).map_err(|e| e.to_string()))
+        .collect()
 }
 
 /// Start the LAN phone remote; returns the URL to open on a phone.

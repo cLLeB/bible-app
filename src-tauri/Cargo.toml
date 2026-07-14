@@ -32,3 +32,13 @@ strsim = "0.11"
 tiny_http = "0.12"
 ureq = { version = "2", features = ["json", "tls"] }
 
+[target.'cfg(windows)'.dependencies]
+# Job object: guarantees the whisper server dies with us even if we are killed
+# outright, so a model-sized chunk of RAM can never be orphaned.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+

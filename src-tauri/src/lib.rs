@@ -1,5 +1,6 @@
 mod audio;
 pub mod books;
+mod calibrate;
 mod capture;
 mod commands;
 pub mod corrections;
@@ -175,6 +176,7 @@ pub fn run() {
                         let state = handle.state::<AppState>();
                         state.listening.store(false, Ordering::SeqCst);
                         state.remote_running.store(false, Ordering::SeqCst);
+                        crate::stt::shutdown();
                         handle.exit(0);
                     }
                 });
@@ -218,6 +220,9 @@ pub fn run() {
             commands::import_songs,
             commands::start_listening,
             commands::stop_listening,
+            commands::calibration_script,
+            commands::record_calibration_line,
+            commands::run_calibration,
             commands::start_remote,
         ])
         .run(tauri::generate_context!())

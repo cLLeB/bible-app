@@ -34,14 +34,17 @@ fn ms_of(samples: usize) -> f32 {
     samples as f32 / TARGET_RATE as f32 * 1000.0
 }
 
-/// Fast models (tiny/base) can keep up with real time, so mid-utterance interim
-/// passes are worthwhile. The slower small/medium models fall behind and the
-/// interim passes pile up, so we skip them there and transcribe only on endpoint.
+/// Can this model keep up with mid-utterance interim passes? They make a long
+/// spoken reference land before the speaker stops, but only if a pass finishes
+/// faster than speech arrives — otherwise they pile up and everything lags.
+///
+/// small used to be excluded: it took ~20s per pass. With the model resident and
+/// the encoder window fitted it takes ~1.3s, so it now qualifies. medium does not.
 fn model_is_fast(model: &Path) -> bool {
     model
         .file_name()
         .and_then(|n| n.to_str())
-        .map(|n| n.contains("tiny") || n.contains("base"))
+        .map(|n| n.contains("tiny") || n.contains("base") || n.contains("small"))
         .unwrap_or(false)
 }
 
@@ -462,6 +465,99 @@ fn transcribe_detect(
     }
 }
 
+/// Open the default microphone and stream 16 kHz mono frames down a channel.
+/// Shared by the listen loop and the calibration recorder, so both hear exactly
+/// the same audio path (same device, same resampling, same levels).
+fn open_mic() -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
+    let host = cpal::default_host();
+    let device = host.default_input_device().ok_or("no input microphone found")?;
+    let supported = device.default_input_config().map_err(|e| e.to_string())?;
+    let sample_format = supported.sample_format();
+    let config: cpal::StreamConfig = supported.into();
+    let channels = config.channels as usize;
+    let src_rate = config.sample_rate.0 as f32;
+
+    let (tx, rx) = mpsc::channel::<Vec<f32>>();
+    let err_fn = |e| eprintln!("audio stream error: {e}");
+
+    let stream = match sample_format {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &_| {
+                let _ = tx.send(downmix_resample(data, channels, src_rate));
+            },
+            err_fn,
+            None,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &config,
+            move |data: &[i16], _: &_| {
+                let f: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
+                let _ = tx.send(downmix_resample(&f, channels, src_rate));
+            },
+            err_fn,
+            None,
+        ),
+        other => return Err(format!("unsupported sample format {other:?}")),
+    }
+    .map_err(|e| e.to_string())?;
+    stream.play().map_err(|e| e.to_string())?;
+    Ok((stream, rx))
+}
+
+/// Record exactly one spoken utterance: wait for speech, then endpoint on
+/// silence. Used by calibration, where each clip must line up with one prompt.
+/// Returns None if nobody spoke before `wait_secs`.
+pub fn record_one_utterance(wait_secs: u64) -> Result<Option<Vec<f32>>, String> {
+    let (stream, rx) = open_mic()?;
+    let mut utter: Vec<f32> = Vec::new();
+    let mut preroll: Vec<f32> = Vec::new();
+    let mut speech_ms = 0f32;
+    let mut silence_ms = 0f32;
+    let deadline = Instant::now() + Duration::from_secs(wait_secs);
+
+    loop {
+        if utter.is_empty() && Instant::now() > deadline {
+            drop(stream);
+            return Ok(None);
+        }
+        match rx.recv_timeout(Duration::from_millis(150)) {
+            Ok(frame) => {
+                let dur = ms_of(frame.len());
+                if rms(&frame) > SILENCE_RMS {
+                    if utter.is_empty() {
+                        utter.extend_from_slice(&preroll);
+                    }
+                    utter.extend_from_slice(&frame);
+                    speech_ms += dur;
+                    silence_ms = 0.0;
+                } else if utter.is_empty() {
+                    preroll.extend_from_slice(&frame);
+                    if preroll.len() > PREROLL_SAMPLES {
+                        let drop_n = preroll.len() - PREROLL_SAMPLES;
+                        preroll.drain(0..drop_n);
+                    }
+                } else {
+                    utter.extend_from_slice(&frame);
+                    silence_ms += dur;
+                }
+
+                let done = (silence_ms >= SILENCE_FLUSH_MS && speech_ms >= MIN_SPEECH_MS)
+                    || ms_of(utter.len()) >= MAX_UTTER_MS;
+                if done {
+                    drop(stream);
+                    return Ok(Some(trim_trailing_silence(&utter)));
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                drop(stream);
+                return Err("microphone stream ended".into());
+            }
+        }
+    }
+}
+
 fn run_inner(
     app: &AppHandle,
     flag: &Arc<AtomicBool>,
@@ -599,11 +695,23 @@ fn run_inner(
     Ok(())
 }
 
-pub fn run_listen_loop(app: AppHandle, flag: Arc<AtomicBool>, model: PathBuf, binary: PathBuf) {
-    let decode = stt::Decode::from_env_or_default();
+pub fn run_listen_loop(
+    app: AppHandle,
+    flag: Arc<AtomicBool>,
+    model: PathBuf,
+    binary: PathBuf,
+    decode: stt::Decode,
+) {
+    // The env override still wins, for benching.
+    let decode = match std::env::var("BIBLE_APP_DECODE") {
+        Ok(_) => stt::Decode::from_env_or_model(&model),
+        Err(_) => decode,
+    };
     if let Err(e) = run_inner(&app, &flag, &model, &binary, decode) {
         let _ = app.emit("listen-error", e);
     }
     flag.store(false, Ordering::SeqCst);
+    // The whisper server holds the model in RAM; it must not outlive the session.
+    stt::shutdown();
     let _ = app.emit("listen-stopped", ());
 }

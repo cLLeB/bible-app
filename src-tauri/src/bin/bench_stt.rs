@@ -159,7 +159,12 @@ fn main() {
     // loops/accuracy, so it is swept as a value rather than a flag.
     let quick = std::env::var("BENCH_GRID").map(|v| v == "quick").unwrap_or(false);
     let windows = if quick {
-        vec![stt::Window::Fit { margin: 1.5 }, stt::Window::Full]
+        vec![
+            stt::Window::Fit { margin: 2.0 },
+            stt::Window::Fit { margin: 2.5 },
+            stt::Window::Fit { margin: 3.0 },
+            stt::Window::Full,
+        ]
     } else {
         vec![
             stt::Window::Fit { margin: 1.2 },
