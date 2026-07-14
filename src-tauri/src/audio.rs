@@ -11,7 +11,21 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_RATE: u32 = 16_000;
+/// Default speech threshold, used until a speaker's recordings say otherwise.
 const SILENCE_RMS: f32 = 0.010;
+
+/// The speech threshold in force, learned per speaker (see `learn::Room`).
+static SPEECH_ABOVE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+fn speech_above() -> f32 {
+    let bits = SPEECH_ABOVE.load(Ordering::Relaxed);
+    if bits == 0 {
+        SILENCE_RMS
+    } else {
+        f32::from_bits(bits)
+    }
+}
 const SILENCE_FLUSH_MS: f32 = 1300.0;
 const MAX_UTTER_MS: f32 = 12_000.0;
 const MIN_SPEECH_MS: f32 = 600.0;
@@ -55,7 +69,7 @@ fn trim_trailing_silence(audio: &[f32]) -> Vec<f32> {
     let keep = TARGET_RATE as usize / 5; // 200 ms tail
     let mut end = audio.len();
     while end >= win {
-        if rms(&audio[end - win..end]) > SILENCE_RMS {
+        if rms(&audio[end - win..end]) > speech_above() {
             break;
         }
         end -= win;
@@ -98,6 +112,12 @@ fn downmix(frame: &[f32], channels: usize) -> Vec<f32> {
             sum / use_channels.len() as f32
         })
         .collect()
+}
+
+/// The same conversion the microphone path uses, exposed so a recorded sermon is
+/// heard exactly as a live feed would be.
+pub fn to_16k_mono(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
+    downmix_resample(data, channels, src_rate)
 }
 
 fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
@@ -779,7 +799,7 @@ pub fn segment_utterances(samples: &[f32]) -> Vec<(f32, Vec<f32>)> {
     for (i, frame) in samples.chunks(FRAME).enumerate() {
         let at = i * FRAME;
         let dur = ms_of(frame.len());
-        if rms(frame) > SILENCE_RMS {
+        if rms(frame) > speech_above() {
             if utter.is_empty() {
                 start_sample = at.saturating_sub(preroll.len());
                 utter.extend_from_slice(&preroll);
@@ -956,7 +976,7 @@ pub fn record_one_utterance(
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
                 let dur = ms_of(frame.len());
-                if rms(&frame) > SILENCE_RMS {
+                if rms(&frame) > speech_above() {
                     if utter.is_empty() {
                         utter.extend_from_slice(&preroll);
                     }
@@ -1045,7 +1065,7 @@ fn run_inner(
                 }
 
                 let dur = ms_of(frame.len());
-                if rms(&frame) > SILENCE_RMS {
+                if rms(&frame) > speech_above() {
                     if utter.is_empty() {
                         utter.extend_from_slice(&recent);
                         last_interim = utter.len();
@@ -1118,7 +1138,11 @@ pub fn run_listen_loop(
     binary: PathBuf,
     decode: stt::Decode,
     device: Option<String>,
+    room: crate::learn::Room,
 ) {
+    // How loud counts as speech, measured from this speaker's own recordings rather
+    // than assumed to be the same in every church.
+    SPEECH_ABOVE.store(room.speech_above.to_bits(), Ordering::Relaxed);
     // The env override still wins, for benching.
     let decode = match std::env::var("BIBLE_APP_DECODE") {
         Ok(_) => stt::Decode::from_env_or_model(&model),

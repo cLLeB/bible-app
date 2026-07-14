@@ -269,18 +269,34 @@ fn ensure_server(model: &Path, server_exe: &Path) -> Result<u16, String> {
     let child = cmd.spawn().map_err(|e| format!("could not start whisper-server: {e}"))?;
     tie_to_our_lifetime(&child);
 
-    // Loading small takes a few seconds from a cold file cache; wait for the
-    // port rather than guessing at a sleep.
-    let deadline = Instant::now() + Duration::from_secs(90);
+    // The server binds its port before it has finished reading the model — half a
+    // gigabyte, for small — so an open port does not mean it can answer. Firing an
+    // utterance at it in that window times out, falls back to the slow path, and
+    // spawns another server on the next one. So ask it something and wait for it to
+    // actually reply.
+    let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            *guard = Some(Server { child, port, model: model.to_path_buf() });
-            return Ok(port);
+            let probe = ureq::get(&format!("http://127.0.0.1:{port}/"))
+                .timeout(Duration::from_secs(2))
+                .call();
+            // Any HTTP answer at all — even a 404 — means the model is loaded and it
+            // is serving. Only a transport error means it is still busy starting.
+            let serving = match probe {
+                Ok(_) => true,
+                Err(ureq::Error::Status(_, _)) => true,
+                Err(_) => false,
+            };
+            if serving {
+                *guard = Some(Server { child, port, model: model.to_path_buf() });
+                return Ok(port);
+            }
         }
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(250));
     }
     let mut child = child;
     let _ = child.kill();
+    let _ = child.wait();
     Err("whisper-server did not come up".into())
 }
 

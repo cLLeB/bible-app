@@ -263,6 +263,38 @@ export const voiceProfiles = (): Promise<VoiceProfiles> => invoke<VoiceProfiles>
 export const setVoiceProfile = (name: string): Promise<void> =>
   invoke<void>("set_voice_profile", { name });
 
+// ---- Learning from a sermon recording ----
+// Twelve read lines tune the app for someone reading a script at a laptop. A sermon
+// tunes it for a preacher: their pace, their accent, how they name references, and the
+// signal path the church actually uses. Whatever they read aloud is the ground truth.
+
+export interface LearnProgress {
+  stage: string;
+  done: number;
+  total: number;
+  /** Whole job, 0..100. */
+  percent: number;
+  secondsLeft: number;
+}
+
+export interface LearnResult {
+  profile: string;
+  recordings: number;
+  minutes: number;
+  /** The version their readings matched, if they agree on one. */
+  translation: string | null;
+  /** Speech threshold measured from their sound feed. */
+  speechAbove: number;
+  referencesFound: number;
+  before: number;
+  after: number;
+  settings: string;
+  learnedNames: string[];
+}
+
+export const learnFromRecordings = (paths: string[], model: SttModel): Promise<LearnResult> =>
+  invoke<LearnResult>("learn_from_recordings", { paths, model });
+
 export const calibrationScript = (): Promise<ScriptLine[]> =>
   invoke<ScriptLine[]>("calibration_script");
 

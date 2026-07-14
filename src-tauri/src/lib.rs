@@ -1,6 +1,6 @@
 pub mod audio;
 pub mod books;
-mod calibrate;
+pub mod calibrate;
 mod capture;
 mod commands;
 pub mod corrections;
@@ -9,6 +9,7 @@ pub mod db;
 pub mod detect;
 mod events;
 pub mod knowledge;
+pub mod learn;
 pub mod reference;
 mod remote;
 mod resolution;
@@ -108,6 +109,7 @@ fn seed_library(app: &tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // The webview windows already exist and are loading the frontend by
             // the time this hook runs, so `manage()` has to happen before any
@@ -223,6 +225,7 @@ pub fn run() {
             commands::audio_inputs,
             commands::set_audio_input,
             commands::test_audio_input,
+            commands::learn_from_recordings,
             commands::calibration_script,
             commands::voice_profiles,
             commands::set_voice_profile,

@@ -1007,11 +1007,28 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_setting("input_device").filter(|s| !s.is_empty())
     };
+    // Everything learned about this speaker, applied before a word is heard: the book
+    // names they get misheard as, how loud their room is, and the version they read
+    // from.
+    let room = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let who = crate::calibrate::active_profile(&db);
+        crate::books::set_learned_names(crate::learn::book_names(&db, &who));
+        if let Some(code) = crate::learn::load_translation(&db, &who) {
+            if db.list_translations().map(|t| t.iter().any(|(c, _)| *c == code)).unwrap_or(false) {
+                if let Ok(mut tr) = state.translation.lock() {
+                    *tr = code.clone();
+                }
+                let _ = app.emit("translation-changed", &code);
+            }
+        }
+        crate::learn::load_room(&db, &who)
+    };
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
     std::thread::spawn(move || {
-        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device)
+        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device, room)
     });
     Ok(())
 }
@@ -1078,6 +1095,270 @@ fn selected_input(app: &tauri::AppHandle) -> Result<Option<String>, String> {
     let state = app.state::<AppState>();
     let db = state.db.lock().map_err(|e| e.to_string())?;
     Ok(db.get_setting("input_device").filter(|s| !s.is_empty()))
+}
+
+// ---- Learning a preacher from their recordings ------------------------------
+
+/// Teach the app a preacher from recordings of them preaching.
+///
+/// Twelve read lines at a laptop tune the app for someone reading a script. Sermons
+/// tune it for a preacher: their pace, their accent, the way they name references,
+/// and the signal path the church actually uses. Several recordings beat one — each
+/// sermon carries only a handful of passages read aloud, and settings chosen on six
+/// data points are settings chosen on one Sunday.
+///
+/// Ground truth costs nothing: whatever they read out is a verse a human operator got
+/// right that day, so nobody has to mark anything up.
+///
+/// Everything runs on this machine, and everything is written to the selected
+/// speaker's profile alone.
+#[tauri::command]
+pub async fn learn_from_recordings(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    model: Option<String>,
+) -> Result<crate::learn::LearnResult, String> {
+    tauri::async_runtime::spawn_blocking(move || learn_sermons(app, paths, model))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Weight of the discovery pass in the overall progress bar. Listening to every
+/// utterance is the bulk of the work; the sweep only revisits the clips that matter.
+const LISTEN_SHARE: f32 = 0.6;
+
+fn learn_sermons(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    model: Option<String>,
+) -> Result<crate::learn::LearnResult, String> {
+    use crate::learn::{self, Progress};
+    use std::time::Instant;
+
+    if paths.is_empty() {
+        return Err("Pick at least one recording.".into());
+    }
+
+    let started = Instant::now();
+    let say = {
+        let app = app.clone();
+        move |stage: &str, done: usize, total: usize, base: f32, share: f32| {
+            let frac = if total == 0 { 0.0 } else { done as f32 / total as f32 };
+            let overall = (base + share * frac).clamp(0.0, 1.0);
+            let elapsed = started.elapsed().as_secs_f32();
+            let left = if overall > 0.02 { elapsed / overall - elapsed } else { 0.0 };
+            let _ = app.emit(
+                "learn-progress",
+                Progress {
+                    stage: stage.to_string(),
+                    done,
+                    total,
+                    percent: (overall * 100.0) as u8,
+                    seconds_left: left.max(0.0) as u64,
+                },
+            );
+        }
+    };
+
+    let profile = {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        crate::calibrate::active_profile(&db)
+    };
+
+    let res_dir = app.path().resource_dir().ok();
+    let kind = model.unwrap_or_else(|| "base".to_string());
+    let (target_model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
+
+    // Finding what was read aloud does not need the good model — it needs the fast
+    // one, because it has to listen to every second of every sermon. The settings are
+    // then compared on the model the operator will actually use.
+    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), "base")
+        .unwrap_or_else(|_| (target_model.clone(), binary.clone()));
+    let scout_decode = crate::stt::Decode::for_model(&scout_model);
+
+    // ---- pass one: listen to everything, and note what was read out --------------
+    let mut clips: Vec<Vec<f32>> = Vec::new(); // the clips worth re-testing
+    let mut truth: Vec<(usize, String, u16)> = Vec::new(); // (clip index, book, chapter)
+    let mut learned: Vec<String> = Vec::new();
+    let mut minutes = 0.0f32;
+    let mut used = 0usize;
+    let mut rooms: Vec<crate::learn::Room> = Vec::new();
+    // Which version do their readings match? Whatever they read from is what should be
+    // on the screen for them.
+    let mut versions: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    // Size the bar by total audio, not by file count: sermons differ wildly in length.
+    let mut decoded: Vec<(String, Vec<(f32, Vec<f32>)>)> = Vec::new();
+    for (fi, path) in paths.iter().enumerate() {
+        say("Reading the recordings", fi, paths.len(), 0.0, 0.05);
+        let audio = match learn::decode_audio_file(Path::new(path)) {
+            Ok(a) => a,
+            Err(_) => continue, // a file we cannot read is not worth abandoning the rest for
+        };
+        minutes += audio.len() as f32 / 16_000.0 / 60.0;
+        used += 1;
+        // How loud is this speaker's audio, really? Measured from the recording rather
+        // than assumed to be the same as every other church's.
+        rooms.push(learn::measure_room(&audio));
+        let name = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        decoded.push((name, crate::audio::segment_utterances(&audio)));
+    }
+    if decoded.is_empty() {
+        return Err("None of those files could be read as audio.".into());
+    }
+
+    let total_utterances: usize = decoded.iter().map(|(_, u)| u.len()).sum();
+    let mut heard = 0usize;
+
+    {
+        let state = app.state::<AppState>();
+        for (name, utterances) in &decoded {
+            let mut transcripts: Vec<(usize, String)> = Vec::new();
+            for (i, (_at, clip)) in utterances.iter().enumerate() {
+                heard += 1;
+                if heard % 5 == 0 {
+                    say(
+                        &format!("Listening to {name}"),
+                        heard,
+                        total_utterances,
+                        0.05,
+                        LISTEN_SHARE,
+                    );
+                }
+                if let Ok(raw) = crate::stt::transcribe(clip, &scout_model, &binary, scout_decode) {
+                    let text = crate::corrections::correct(raw.trim());
+                    if !text.is_empty() {
+                        transcripts.push((i, text));
+                    }
+                }
+            }
+
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            let mut seen: Vec<(String, u16)> = Vec::new();
+            for (i, text) in &transcripts {
+                let Some(rec) = learn::reading_of(&db, text) else { continue };
+                if seen.iter().any(|(o, c)| *o == rec.book_osis && *c == rec.chapter) {
+                    continue; // one passage, however long the reading
+                }
+                seen.push((rec.book_osis.clone(), rec.chapter));
+                *versions.entry(rec.translation.clone()).or_insert(0) += 1;
+
+                // Keep the reading and the moments before it, where the reference was
+                // announced. That is all the settings have to recover.
+                let first = i.saturating_sub(4);
+                let base = clips.len();
+                for k in first..=*i {
+                    if k < utterances.len() {
+                        clips.push(utterances[k].1.clone());
+                    }
+                }
+                truth.push((base + (*i - first), rec.book_osis.clone(), rec.chapter));
+
+                // A book name that came out as a word we do not know, vouched for by the
+                // chapter she then read, is worth remembering for this speaker.
+                for (_, said) in transcripts.iter().filter(|(j, _)| *j < *i && *i - *j <= 4) {
+                    if let Some(word) = learn::learn_book_name(said, &rec.book_osis, rec.chapter) {
+                        if !learned.contains(&word) {
+                            learn::save_book_name(&db, &profile, &word, &rec.book_osis)
+                                .map_err(|e| e.to_string())?;
+                            learned.push(word);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if truth.is_empty() {
+        return Err("No scripture was read aloud in those recordings, so there is nothing to \
+                    learn from. This needs sermons where the preacher reads the verses out."
+            .into());
+    }
+
+    // ---- pass two: which settings recover the most of it? ------------------------
+    let baseline = crate::stt::Decode::for_model(&target_model);
+    let configs = crate::learn::candidates();
+    let mut best: Option<(crate::stt::Decode, usize)> = None;
+    let mut before = 0usize;
+
+    for (ci, cfg) in configs.iter().enumerate() {
+        say(
+            "Comparing recognizer settings",
+            ci,
+            configs.len(),
+            0.05 + LISTEN_SHARE,
+            1.0 - LISTEN_SHARE - 0.05,
+        );
+        let mut texts: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+        for (k, clip) in clips.iter().enumerate() {
+            if let Ok(raw) = crate::stt::transcribe(clip, &target_model, &binary, *cfg) {
+                texts.insert(k, crate::corrections::correct(raw.trim()));
+            }
+        }
+        let found = truth
+            .iter()
+            .filter(|(i, osis, chapter)| {
+                (i.saturating_sub(4)..=*i).any(|k| {
+                    texts.get(&k).map(|t| learn::resolves_to(t, osis, *chapter)).unwrap_or(false)
+                })
+            })
+            .count();
+        if *cfg == baseline {
+            before = found;
+        }
+        if best.as_ref().map(|(_, b)| found > *b).unwrap_or(true) {
+            best = Some((*cfg, found));
+        }
+    }
+
+    let (cfg, after) = best.ok_or("nothing to compare")?;
+
+    // The room: the median of what each recording said, so one odd file cannot skew it.
+    let room = {
+        let mut levels: Vec<f32> = rooms.iter().map(|r| r.speech_above).collect();
+        levels.sort_by(f32::total_cmp);
+        levels
+            .get(levels.len() / 2)
+            .map(|v| crate::learn::Room { speech_above: *v })
+            .unwrap_or_default()
+    };
+    // The version: whichever their readings matched most often, and only if it clearly
+    // won — a preacher who quotes loosely should not have the screen switched on a whim.
+    let translation = versions
+        .iter()
+        .max_by_key(|(_, n)| **n)
+        .filter(|(_, n)| **n * 2 >= truth.len().max(1))
+        .map(|(code, _)| code.clone());
+
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        learn::save_settings(&db, &target_model, &profile, &cfg).map_err(|e| e.to_string())?;
+        learn::save_room(&db, &profile, &room).map_err(|e| e.to_string())?;
+        if let Some(code) = &translation {
+            learn::save_translation(&db, &profile, code).map_err(|e| e.to_string())?;
+        }
+        // In force straight away, without waiting for the next listen.
+        crate::books::set_learned_names(learn::book_names(&db, &profile));
+    }
+    say("Done", 1, 1, 1.0, 0.0);
+
+    Ok(crate::learn::LearnResult {
+        profile,
+        recordings: used,
+        minutes,
+        translation,
+        speech_above: room.speech_above,
+        references_found: truth.len(),
+        before,
+        after,
+        settings: crate::calibrate::label_of(&cfg),
+        learned_names: learned,
+    })
 }
 
 #[tauri::command]

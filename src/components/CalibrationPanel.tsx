@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { LearnFromSermon } from "./LearnFromSermon";
 import {
   calibrationScript,
   recordCalibrationLine,
@@ -143,6 +144,13 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
         </p>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <LearnFromSermon model={model} who={who} disabled={disabled || phase !== "idle"} />
+
+        <p className="text-sm text-[var(--muted)]">
+          Or read the lines below yourself — quicker, but a script read at a laptop is not
+          how anyone preaches.
+        </p>
 
         <ol className="space-y-1">
           {script.map((line) => (

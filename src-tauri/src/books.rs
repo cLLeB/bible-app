@@ -194,8 +194,26 @@ pub fn book_before(osis: &str) -> Option<&'static CanonicalBook> {
     BOOKS.iter().find(|x| x.order == b.order - 1)
 }
 
-/// Exact match first, then fuzzy recovery for near-misses from speech-to-text
-/// (e.g. "roman" → Romans, "mathew" → Matthew, "revelations" → Revelation).
+/// Book names learned from a recording of the speaker preaching today — "hemaiah"
+/// for Nehemiah, whatever their accent and microphone conspire to produce. Loaded
+/// when listening starts; empty otherwise.
+static LEARNED: std::sync::RwLock<Option<std::collections::HashMap<String, String>>> =
+    std::sync::RwLock::new(None);
+
+pub fn set_learned_names(names: std::collections::HashMap<String, String>) {
+    if let Ok(mut guard) = LEARNED.write() {
+        *guard = if names.is_empty() { None } else { Some(names) };
+    }
+}
+
+fn learned(word: &str) -> Option<&'static CanonicalBook> {
+    let guard = LEARNED.read().ok()?;
+    let osis = guard.as_ref()?.get(word)?;
+    book_by_osis(osis)
+}
+
+/// Exact match first, then anything learned from this speaker, then fuzzy recovery
+/// for near-misses from speech-to-text ("roman" → Romans, "mathew" → Matthew).
 pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
     if let Some(b) = resolve_book(input) {
         return Some(b);
@@ -203,6 +221,11 @@ pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
     let norm = input.trim().to_lowercase();
     if norm.len() < 3 {
         return None;
+    }
+    // What this speaker's book names actually get heard as beats any similarity score:
+    // "hemaiah" scores closest to Zephaniah, and is Nehemiah.
+    if let Some(b) = learned(&norm) {
+        return Some(b);
     }
     let mut best: Option<(&'static CanonicalBook, f64)> = None;
     for b in BOOKS {

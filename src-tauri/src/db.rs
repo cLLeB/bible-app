@@ -136,6 +136,19 @@ impl Db {
             .ok()
     }
 
+    /// All settings under a prefix — how a speaker's learned book names are read back.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Vec<(String, String)> {
+        let mut stmt = match self.conn.prepare("SELECT key, value FROM settings WHERE key LIKE ?1") {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = stmt.query_map([format!("{prefix}%")], |r| Ok((r.get(0)?, r.get(1)?)));
+        match rows {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2)

@@ -1,0 +1,359 @@
+//! Teach the app a preacher from a recording of them preaching.
+//!
+//! Calibration asks someone to read twelve lines at a laptop. That tunes the app for
+//! a voice reading a script into a microphone — not for a preacher, in a pulpit,
+//! through a sound desk, saying things the way they actually say them. This does the
+//! real thing: feed it a sermon and it learns from how that person preaches.
+//!
+//! Ground truth comes free, from how a service already works. The preacher names a
+//! reference, someone projects it, and the preacher reads it off the screen. So any
+//! passage read aloud in the recording is a verse that was correct that day — no
+//! annotation needed from anybody.
+//!
+//! From that the app learns two things, and both matter:
+//!
+//!   * DECODE SETTINGS — which recognizer settings recover the most scripture from
+//!     THIS voice on THIS signal path. The window setting alone has swung accuracy
+//!     from 10/12 to 3/12 between voices, so this is not a detail.
+//!
+//!   * BOOK NAMES AS THIS PERSON IS MISHEARD — whisper drops the leading consonant of
+//!     "Nehemiah" for one speaker and mangles "Philippians" for another. When a
+//!     reference fails but the verse read out immediately afterwards identifies the
+//!     book, the garbled word is worth remembering. Similarity matching cannot do
+//!     this: it scores "hemaiah" closest to Zephaniah.
+//!
+//! Everything stays on the machine, and everything is stored against one speaker, so
+//! learning a guest never disturbs the regular preacher.
+
+use crate::db::Db;
+use crate::stt::{Decode, Window};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+/// Settings tried against the recordings. Kept small: each one re-decodes every clip.
+/// Gain is swept too — it is forced on for everyone today, and nobody has ever checked
+/// whether it helps a particular voice on a particular feed.
+pub fn candidates() -> Vec<Decode> {
+    let mut out = Vec::new();
+    for window in [
+        Window::Full,
+        Window::Fit { margin: 1.2 },
+        Window::Fit { margin: 1.5 },
+        Window::Fit { margin: 2.0 },
+    ] {
+        for beam in [5, 1] {
+            out.push(Decode { beam, prompt: true, normalize: true, window });
+        }
+    }
+    // Same window and search, without the gain — a desk feed is often loud enough that
+    // normalising only lifts the room noise with it.
+    out.push(Decode { beam: 5, prompt: true, normalize: false, window: Window::Full });
+    out.push(Decode { beam: 5, prompt: true, normalize: false, window: Window::Fit { margin: 1.5 } });
+    out
+}
+
+/// How this speaker's audio actually behaves, learned from their recordings.
+///
+/// The listener decides "speaking" or "paused" against a single hardcoded loudness,
+/// which assumes every church sounds the same. A gated desk feed sits near silence
+/// between words; a hot one never gets that quiet. Get it wrong and the app either
+/// chops a sentence in half or never decides she has finished.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Room {
+    /// Loudness above which we call it speech.
+    pub speech_above: f32,
+}
+
+impl Default for Room {
+    fn default() -> Self {
+        Self { speech_above: 0.010 } // what the app has always used
+    }
+}
+
+/// Measure the room from the audio itself: find the quiet floor, and set the speech
+/// threshold above it — high enough to ignore the floor, low enough to catch the ends
+/// of words where the voice trails away.
+pub fn measure_room(samples: &[f32]) -> Room {
+    const FRAME: usize = 160; // 10 ms at 16 kHz
+    let mut levels: Vec<f32> = samples
+        .chunks(FRAME)
+        .map(|f| (f.iter().map(|s| s * s).sum::<f32>() / f.len().max(1) as f32).sqrt())
+        .collect();
+    if levels.len() < 100 {
+        return Room::default();
+    }
+    levels.sort_by(f32::total_cmp);
+    let floor = levels[levels.len() / 20]; // 5th percentile: the room between words
+    let speech = levels[levels.len() * 9 / 10]; // 90th: the voice itself
+
+    // Sit well clear of the floor but far below the voice. Clamped so a broken
+    // measurement can never make the app deaf or leave it hearing its own hiss.
+    let threshold = (floor * 4.0).max(speech * 0.06).clamp(0.002, 0.05);
+    Room { speech_above: threshold }
+}
+
+pub fn save_room(db: &Db, profile: &str, room: &Room) -> rusqlite::Result<()> {
+    db.set_setting(&format!("room:{profile}"), &format!("{}", room.speech_above))
+}
+
+pub fn load_room(db: &Db, profile: &str) -> Room {
+    db.get_setting(&format!("room:{profile}"))
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| (0.002..=0.05).contains(v))
+        .map(|speech_above| Room { speech_above })
+        .unwrap_or_default()
+}
+
+/// Which translation is this preacher reading from? The wording of a verse read aloud
+/// identifies the version, so a church that reads NKJV can have NKJV projected for
+/// them without anybody choosing it from a menu.
+pub fn save_translation(db: &Db, profile: &str, code: &str) -> rusqlite::Result<()> {
+    db.set_setting(&format!("version:{profile}"), code)
+}
+
+pub fn load_translation(db: &Db, profile: &str) -> Option<String> {
+    db.get_setting(&format!("version:{profile}"))
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub stage: String,
+    pub done: usize,
+    pub total: usize,
+    /// Whole job, 0..100 — listening and comparing are weighted by what they cost.
+    pub percent: u8,
+    /// Rough seconds left, from how fast it has actually been going.
+    pub seconds_left: u64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnResult {
+    pub profile: String,
+    pub recordings: usize,
+    pub minutes: f32,
+    /// The version they read from, if their readings agree on one.
+    pub translation: Option<String>,
+    /// The speech threshold measured from their audio.
+    pub speech_above: f32,
+    /// Verses the preacher read aloud — what a human operator got right that day.
+    pub references_found: usize,
+    /// How many of those the shipped defaults would have caught.
+    pub before: usize,
+    /// How many the settings we picked catch.
+    pub after: usize,
+    pub settings: String,
+    /// Book names this speaker gets misheard as, learned from the recording.
+    pub learned_names: Vec<String>,
+}
+
+/// Distinctive words of a verse — the ones that make it that verse and not another.
+fn key_words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 4)
+        .map(|w| w.to_lowercase())
+        .filter(|w| !crate::semantic::is_filler(w))
+        .collect()
+}
+
+/// Is this utterance the speaker *reading a verse out* — most of the verse's
+/// distinctive words present — rather than alluding to it? Returns the verse.
+pub fn reading_of(db: &Db, text: &str) -> Option<crate::db::VerseRecord> {
+    let (query, words) = crate::semantic::fts_query(text)?;
+    let hits = db.search_fts_any(&query, 8).ok()?;
+    let spoken: HashSet<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 4)
+        .map(|w| w.to_lowercase())
+        .collect();
+    let _ = words;
+    hits.into_iter().map(|(rec, _)| rec).find(|rec| {
+        let key = key_words(&rec.text);
+        if key.len() < 5 {
+            return false;
+        }
+        let said = key.iter().filter(|w| spoken.contains(*w)).count();
+        said >= 5 && said as f32 / key.len() as f32 >= 0.65
+    })
+}
+
+/// Does this transcript resolve to the verse (or at least the chapter) we expect?
+pub fn resolves_to(text: &str, osis: &str, chapter: u16) -> bool {
+    let mut ctx = crate::detect::RefContext::default();
+    crate::detect::detect_with_context(text, &mut ctx)
+        .iter()
+        .any(|h| h.reference.book_osis == osis && h.reference.chapter == chapter)
+}
+
+/// A word this speaker's book name gets heard as.
+///
+/// Only learned when the evidence is unambiguous: the utterance names a chapter that
+/// matches a passage the speaker went on to read out, the word where the book should
+/// be resolves to no book at all, and it is not an ordinary English word we would be
+/// reckless to bind to a book of the Bible.
+pub fn learn_book_name(text: &str, osis: &str, chapter: u16) -> Option<String> {
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    // Find "<word> chapter <chapter>" or "<word> <chapter>" where <word> is not a book.
+    for (i, tok) in tokens.iter().enumerate() {
+        let mut j = i + 1;
+        if tokens.get(j).map(|t| t == "chapter").unwrap_or(false) {
+            j += 1;
+        }
+        let names_chapter = tokens
+            .get(j)
+            .and_then(|t| t.parse::<u16>().ok())
+            .map(|n| n == chapter)
+            .unwrap_or(false);
+        if !names_chapter {
+            continue;
+        }
+        if tok.len() < 5 || tok.parse::<u16>().is_ok() {
+            continue;
+        }
+        if crate::books::resolve_book_fuzzy(tok).is_some() {
+            continue; // already understood
+        }
+        if COMMON_WORDS.contains(&tok.as_str()) {
+            continue; // never bind an everyday word to a book
+        }
+        let _ = osis;
+        return Some(tok.clone());
+    }
+    None
+}
+
+/// Words too ordinary to ever mean a book of the Bible, however they are heard.
+const COMMON_WORDS: &[&str] = &[
+    "chapter", "verse", "verses", "scripture", "scriptures", "bible", "reading", "read",
+    "these", "those", "which", "there", "their", "where", "about", "again", "brother",
+    "sister", "church", "today", "going", "would", "could", "should", "because", "before",
+    "after", "father", "spirit", "jesus", "christ", "please", "everyone", "somebody",
+];
+
+pub fn save_book_name(db: &Db, profile: &str, heard: &str, osis: &str) -> rusqlite::Result<()> {
+    db.set_setting(&format!("alias:{profile}:{heard}"), osis)
+}
+
+/// Book names learned for this speaker: heard word → OSIS.
+pub fn book_names(db: &Db, profile: &str) -> HashMap<String, String> {
+    db.settings_with_prefix(&format!("alias:{profile}:"))
+        .into_iter()
+        .filter_map(|(k, v)| k.rsplit(':').next().map(|w| (w.to_string(), v)))
+        .collect()
+}
+
+/// Winning settings for this speaker, in the same shape calibration stores.
+pub fn save_settings(db: &Db, model: &Path, profile: &str, d: &Decode) -> rusqlite::Result<()> {
+    crate::calibrate::save(db, model, profile, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn learns_a_book_name_only_when_the_chapter_confirms_it() {
+        // A mangling we do not know, said just before reading Nehemiah 8 — the chapter
+        // vouches for it, so it is worth remembering for this speaker.
+        assert_eq!(
+            learn_book_name("let's read nemayer chapter 8 verse 10", "Neh", 8),
+            Some("nemayer".into())
+        );
+        // The chapter does not match what was read: no evidence, learn nothing.
+        assert_eq!(learn_book_name("let's read nemayer chapter 3", "Neh", 8), None);
+        // Already understood — including manglings we have since learned the hard way,
+        // like "hemaiah" — so there is nothing to add.
+        assert_eq!(learn_book_name("let's read nehemiah chapter 8", "Neh", 8), None);
+        assert_eq!(learn_book_name("let's read hemaiah chapter 8", "Neh", 8), None);
+        // An everyday word must never become a book of the Bible.
+        assert_eq!(learn_book_name("look at these chapter 8", "Neh", 8), None);
+    }
+
+    #[test]
+    fn the_room_is_measured_between_the_words_not_guessed() {
+        // A quiet feed: a near-silent floor with speech well above it.
+        let quiet: Vec<f32> = (0..32_000)
+            .map(|i| if i % 100 < 40 { 0.3 } else { 0.0005 })
+            .collect();
+        let room = measure_room(&quiet);
+        assert!(room.speech_above > 0.002, "must sit above the floor");
+        assert!(room.speech_above < 0.3, "must sit below the voice");
+
+        // Too little audio to judge: keep what has always worked.
+        assert_eq!(measure_room(&[0.0; 10]), Room::default());
+    }
+
+    #[test]
+    fn a_transcript_resolves_to_its_chapter() {
+        assert!(resolves_to("romans chapter 8 verse 28", "Rom", 8));
+        assert!(!resolves_to("romans chapter 8 verse 28", "Ps", 23));
+    }
+}
+
+/// Decode a sermon recording (mp3, m4a, wav, flac) to the 16 kHz mono the recognizer
+/// wants. No ffmpeg, no internet, no tooling on the church's machine.
+pub fn decode_audio_file(path: &Path) -> Result<Vec<f32>, String> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file =
+        std::fs::File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| format!("unrecognized audio file: {e}"))?;
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .ok_or("no audio track in that file")?;
+    let track_id = track.id;
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| format!("cannot decode that audio: {e}"))?;
+
+    let mut samples: Vec<f32> = Vec::new();
+    let mut rate = 0u32;
+    let mut channels = 1usize;
+    let mut buf: Option<SampleBuffer<f32>> = None;
+
+    while let Ok(packet) = format.next_packet() {
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            // A corrupt frame in a long recording is not worth abandoning the sermon for.
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(e) => return Err(format!("decode failed: {e}")),
+        };
+        let spec = *decoded.spec();
+        rate = spec.rate;
+        channels = spec.channels.count();
+        let sb = buf.get_or_insert_with(|| SampleBuffer::new(decoded.capacity() as u64, spec));
+        sb.copy_interleaved_ref(decoded);
+        samples.extend_from_slice(sb.samples());
+    }
+    if samples.is_empty() || rate == 0 {
+        return Err("that file contains no audio".into());
+    }
+    // The same downmix and resample the microphone path uses, so a recording and a
+    // live feed are heard identically.
+    Ok(crate::audio::to_16k_mono(&samples, channels, rate as f32))
+}

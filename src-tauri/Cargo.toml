@@ -22,12 +22,17 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# Pick a sermon recording to learn from.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 thiserror = "1"
 cpal = "0.15"
 hound = "3.5"
+# Decode a sermon recording (mp3/m4a/wav/flac) without shipping ffmpeg, so a church
+# can teach the app a new preacher from a file, on any machine, offline.
+symphonia = { version = "0.5", features = ["mp3", "isomp4", "aac", "wav", "flac"] }
 strsim = "0.11"
 tiny_http = "0.12"
 ureq = { version = "2", features = ["json", "tls"] }
