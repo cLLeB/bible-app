@@ -236,6 +236,10 @@ fn book_alias(key: &str) -> Option<&'static str> {
         ("chronicals", "1Chr"), ("cronicles", "1Chr"), ("chronic als", "1Chr"),
         ("ezraw", "Ezra"), ("as raw", "Ezra"),
         ("nehemia", "Neh"), ("nehmiah", "Neh"), ("nia miah", "Neh"), ("the amiah", "Neh"), ("na hemiah", "Neh"),
+        // Heard from real speech. These must be listed, not left to fuzzy matching:
+        // similarity scores them closest to the WRONG book ("hemaiah" → Zephaniah,
+        // "nahimiah" → Nahum), so a looser threshold would confidently mis-project.
+        ("hemaiah", "Neh"), ("hemiah", "Neh"), ("nahimiah", "Neh"), ("nehimiah", "Neh"), ("nahemiah", "Neh"),
         ("ester", "Esth"), ("estha", "Esth"), ("esta", "Esth"),
         ("jobe", "Job"),
         // Poetry / wisdom

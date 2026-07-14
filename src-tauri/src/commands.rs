@@ -1019,23 +1019,28 @@ pub fn calibration_script() -> Vec<crate::calibrate::ScriptLine> {
     crate::calibrate::script()
 }
 
-/// Record one line of the script. Blocks until the speaker finishes (endpointed
-/// on silence, exactly as live listening does) or nobody speaks for `wait_secs`.
+/// Record one line of the script: waits for the speaker, endpoints on silence
+/// exactly as live listening does. Async, and the work runs off the main thread —
+/// a sync command would hold the UI thread for the length of the utterance and
+/// freeze the window.
 #[tauri::command]
-pub fn record_calibration_line(
+pub async fn record_calibration_line(
     app: tauri::AppHandle,
     index: usize,
 ) -> Result<CalibrationClip, String> {
     if state_is_listening(&app) {
         return Err("Stop listening before calibrating.".into());
     }
-    let audio = crate::audio::record_one_utterance(20)?
-        .ok_or("Didn't hear anything — check the microphone and try again.")?;
-
-    let dir = crate::capture::dir(&app).ok_or("no place to store the recording")?;
-    let path = dir.join(format!("calib_{index:02}.wav"));
-    crate::stt::write_wav_16k_mono(&path, &audio)?;
-    Ok(CalibrationClip { index, seconds: audio.len() as f32 / 16_000.0 })
+    tauri::async_runtime::spawn_blocking(move || {
+        let audio = crate::audio::record_one_utterance(20)?
+            .ok_or("Didn't hear anything — check the microphone and try again.")?;
+        let dir = crate::capture::dir(&app).ok_or("no place to store the recording")?;
+        let path = dir.join(format!("calib_{index:02}.wav"));
+        crate::stt::write_wav_16k_mono(&path, &audio)?;
+        Ok(CalibrationClip { index, seconds: audio.len() as f32 / 16_000.0 })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Serialize)]
@@ -1051,8 +1056,21 @@ fn state_is_listening(app: &tauri::AppHandle) -> bool {
 
 /// Replay the recorded lines through every candidate setting, score each on
 /// whether the right scripture resolved, and keep the winner for this model.
+///
+/// Minutes of decoding, so it runs off the main thread; progress is streamed as
+/// each setting finishes rather than leaving the operator staring at a frozen
+/// window.
 #[tauri::command]
-pub fn run_calibration(
+pub async fn run_calibration(
+    app: tauri::AppHandle,
+    model: Option<String>,
+) -> Result<crate::calibrate::CalibrationResult, String> {
+    tauri::async_runtime::spawn_blocking(move || calibration_sweep(app, model))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn calibration_sweep(
     app: tauri::AppHandle,
     model: Option<String>,
 ) -> Result<crate::calibrate::CalibrationResult, String> {

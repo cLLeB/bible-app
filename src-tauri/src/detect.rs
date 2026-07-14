@@ -107,14 +107,37 @@ fn tokenize(text: &str) -> Vec<String> {
 /// Read an optional "verse N" after a chapter has been consumed at index `j`.
 /// Returns (start_verse, glued_end, next_index) — a token like "16-18" yields a
 /// glued end of Some(18).
-fn read_trailing_verse(tokens: &[String], mut j: usize) -> (Option<u16>, Option<u16>, usize) {
-    if j < tokens.len() && (eq_ci(&tokens[j], "verse") || eq_ci(&tokens[j], "verses")) {
-        j += 1;
+///
+/// Preachers rarely say the bare form. "Matthew chapter 5 from verse 3",
+/// "starting at verse 3", "beginning in verse 3" all mean the same thing, and
+/// dropping the lead-in used to lose the verse entirely — the reference resolved
+/// to the chapter only, even when whisper had heard every word correctly.
+fn read_trailing_verse(tokens: &[String], j: usize) -> (Option<u16>, Option<u16>, usize) {
+    const LEAD_INS: &[&str] = &["from", "starting", "start", "beginning", "begin", "at", "in", "on"];
+    let mut k = j;
+    let mut saw_lead_in = false;
+    let mut saw_from = false;
+    while k < tokens.len() && LEAD_INS.contains(&tokens[k].to_lowercase().as_str()) {
+        saw_from |= eq_ci(&tokens[k], "from");
+        saw_lead_in = true;
+        k += 1;
     }
-    if let Some((v, end)) = tokens.get(j).and_then(|t| parse_num_token(t)) {
-        (Some(v), end, j + 1)
-    } else {
-        (None, None, j)
+    let mut saw_verse = false;
+    if k < tokens.len() && (eq_ci(&tokens[k], "verse") || eq_ci(&tokens[k], "verses")) {
+        saw_verse = true;
+        k += 1;
+    }
+    // "in"/"on"/"at" are ordinary words — "Romans 8 in the NIV", "Psalm 23 on
+    // Sunday" — so a bare number after them means nothing. Only "from 3" reads as
+    // a verse without the word "verse" following it.
+    if saw_lead_in && !saw_verse && !saw_from {
+        return (None, None, j);
+    }
+    // And only commit to the lead-in at all if a number actually follows, or
+    // "Matthew chapter 5 from the beginning" would eat tokens and find nothing.
+    match tokens.get(k).and_then(|t| parse_num_token(t)) {
+        Some((v, end)) => (Some(v), end, k + 1),
+        None => (None, None, j),
     }
 }
 
@@ -425,6 +448,54 @@ mod tests {
         assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Rom", 8, Some(28)));
         let b = one("revelations chapter 22 verse 20");
         assert_eq!(b.book_osis, "Rev");
+    }
+
+    /// Transcripts taken verbatim from real speech. Every one of these was heard
+    /// well enough to act on, and every one used to resolve to nothing.
+    #[test]
+    fn reads_a_verse_introduced_by_a_lead_in_word() {
+        for said in [
+            "turn with me to matthew chapter 5 from verse 3",
+            "matthew chapter 5 starting at verse 3",
+            "matthew chapter 5 beginning in verse 3",
+            "matthew chapter 5 at verse 3",
+            "matthew chapter 5 from 3",
+        ] {
+            let d = one(said);
+            assert_eq!(
+                (d.book_osis.as_str(), d.chapter, d.verse),
+                ("Matt", 5, Some(3)),
+                "failed on: {said}"
+            );
+        }
+    }
+
+    /// "in"/"on"/"at" are ordinary words. A number after them is not a verse
+    /// unless the speaker actually said "verse".
+    #[test]
+    fn ordinary_words_after_a_chapter_do_not_invent_a_verse() {
+        let a = one("romans 8 in the niv");
+        assert_eq!((a.chapter, a.verse), (8, None));
+        let b = one("let's read psalm 23 on sunday");
+        assert_eq!((b.chapter, b.verse), (23, None));
+    }
+
+    /// Whisper drops the leading consonant of Nehemiah constantly. Fuzzy matching
+    /// scores these closest to Zephaniah and Nahum, so they are listed explicitly.
+    #[test]
+    fn recovers_nehemiah_from_real_mishearings() {
+        for said in [
+            "hemaiah chapter 8 verse 10",
+            "nahimiah chapter 8 verse 10",
+            "nehimiah chapter 8 verse 10",
+        ] {
+            let d = one(said);
+            assert_eq!(
+                (d.book_osis.as_str(), d.chapter, d.verse),
+                ("Neh", 8, Some(10)),
+                "failed on: {said}"
+            );
+        }
     }
 
     #[test]
