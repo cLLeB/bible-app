@@ -240,9 +240,8 @@ export interface CalibrationResult {
 export interface AudioInputs {
   /** null = nothing chosen. There is no default: the app will not listen until one is. */
   chosen: string | null;
+  /** Desk feeds only — this machine's own microphone is not offered. */
   all: string[];
-  /** Inputs that look like this machine's own microphone — they hear the room. */
-  builtIn: string[];
 }
 
 export const audioInputs = (): Promise<AudioInputs> => invoke<AudioInputs>("audio_inputs");

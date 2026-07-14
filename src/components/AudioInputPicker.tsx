@@ -20,7 +20,6 @@ interface AudioInputPickerProps {
  */
 export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
   const [devices, setDevices] = useState<string[]>([]);
-  const [builtIn, setBuiltIn] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string>("");
   const [level, setLevel] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
@@ -30,7 +29,6 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
     try {
       const inputs = await audioInputs();
       setDevices(inputs.all);
-      setBuiltIn(inputs.builtIn);
       setChosen(inputs.chosen ?? "");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -76,8 +74,6 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
             ? "clipping — turn the send down"
             : "sound is arriving";
 
-  const isBuiltIn = chosen !== "" && builtIn.includes(chosen);
-
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -94,7 +90,6 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
           {devices.map((d) => (
             <option key={d} value={d}>
               {d}
-              {builtIn.includes(d) ? "  (this laptop's own microphone — hears the room)" : ""}
             </option>
           ))}
         </select>
@@ -139,16 +134,9 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
 
       {chosen === "" && (
         <p className="text-sm" style={{ color: "var(--danger)" }}>
-          Listening will not start until you pick an input. Plug the laptop into the sound
-          desk (a USB cable from the mixer, or a small USB audio interface off any spare
-          send) and choose it here.
-        </p>
-      )}
-
-      {isBuiltIn && (
-        <p className="text-sm" style={{ color: "var(--danger)" }}>
-          That is this laptop&apos;s own microphone. It hears the hall — the loudspeakers, the
-          congregation, the room — not the preacher&apos;s microphone. Use the sound-desk feed.
+          {devices.length === 0
+            ? "No sound-desk feed is connected. Plug the laptop into the mixer (a USB cable from the desk, or a small USB audio interface off any spare send) and press Rescan."
+            : "Listening will not start until you pick the feed from the sound desk."}
         </p>
       )}
 

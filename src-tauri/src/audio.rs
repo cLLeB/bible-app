@@ -842,17 +842,33 @@ pub fn segment_utterances(samples: &[f32]) -> Vec<(f32, Vec<f32>)> {
 /// Open the default microphone and stream 16 kHz mono frames down a channel.
 /// Shared by the listen loop and the calibration recorder, so both hear exactly
 /// the same audio path (same device, same resampling, same levels).
-/// Every audio input the machine offers — the built-in mic, but also a USB audio
-/// interface or line-in carrying the sound desk's feed.
+/// The audio inputs this app will accept: a USB audio interface, a mixer's USB output,
+/// a line-in — anything carrying the feed from the sound desk.
 ///
-/// The desk feed is worth reaching for: it is the preacher's microphone, already
-/// mixed, with no room, no reverb and no congregation in it. Everything this app was
-/// measured against is that kind of signal.
+/// The machine's own microphone is not among them, and is not offered. It hears the
+/// hall: the loudspeakers, the congregation, the room. Feeding the app that and calling
+/// it listening would look, from the operator's chair, exactly like it was working.
 pub fn input_devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
-        .map(|ds| ds.filter_map(|d| d.name().ok()).collect())
+        .map(|ds| {
+            ds.filter_map(|d| d.name().ok()).filter(|n| !is_machine_microphone(n)).collect()
+        })
         .unwrap_or_default()
+}
+
+/// Is this the machine's own microphone?
+///
+/// Deliberately narrow: it must actually be a *microphone* on the built-in sound
+/// hardware. "Line In (Realtek Audio)" is a perfectly good way to take a feed from the
+/// desk and must not be caught by this — only the laptop's own mic is.
+pub fn is_machine_microphone(name: &str) -> bool {
+    let n = name.to_lowercase();
+    let is_mic = n.contains("microphone") || n.contains("mic array");
+    let is_onboard = ["array", "internal", "built-in", "builtin", "smart sound", "realtek", "laptop", "webcam"]
+        .iter()
+        .any(|hint| n.contains(hint));
+    is_mic && is_onboard
 }
 
 /// The chosen input. There is deliberately no fallback.
@@ -866,6 +882,10 @@ fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     let want = name
         .filter(|n| !n.is_empty())
         .ok_or("No sound input chosen. Pick the sound-desk feed under Live listening → Sound input.")?;
+    // Not even if someone names it by hand: this app is fed from the desk.
+    if is_machine_microphone(want) {
+        return Err("This machine's own microphone hears the room, not the preacher. Use the feed from the sound desk.".to_string());
+    }
     let host = cpal::default_host();
     if let Ok(mut devices) = host.input_devices() {
         if let Some(d) = devices.find(|d| d.name().map(|n| n == want).unwrap_or(false)) {
@@ -875,14 +895,7 @@ fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     Err(format!("The sound input \"{want}\" is not connected."))
 }
 
-/// Does this look like the machine's own built-in microphone rather than a feed from
-/// the sound desk? Used to warn, not to forbid — the operator may have no choice.
-pub fn looks_like_built_in_mic(name: &str) -> bool {
-    let n = name.to_lowercase();
-    ["microphone array", "internal mic", "built-in", "realtek", "intel® smart sound", "smart sound"]
-        .iter()
-        .any(|hint| n.contains(hint))
-}
+
 
 /// Listen on `device` for a few moments and report the loudest level heard, so the
 /// operator can confirm the desk feed is actually arriving before the service.

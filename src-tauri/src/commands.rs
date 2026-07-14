@@ -1064,10 +1064,7 @@ pub fn audio_inputs(state: tauri::State<'_, AppState>) -> Result<AudioInputs, St
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_setting("input_device")
     };
-    let all = crate::audio::input_devices();
-    let built_in =
-        all.iter().filter(|d| crate::audio::looks_like_built_in_mic(d)).cloned().collect();
-    Ok(AudioInputs { chosen, all, built_in })
+    Ok(AudioInputs { chosen, all: crate::audio::input_devices() })
 }
 
 #[derive(serde::Serialize)]
@@ -1075,10 +1072,8 @@ pub fn audio_inputs(state: tauri::State<'_, AppState>) -> Result<AudioInputs, St
 pub struct AudioInputs {
     /// None = nothing chosen yet. There is no default: see `audio::pick_device`.
     pub chosen: Option<String>,
+    /// Desk feeds only. The machine's own microphone is not offered.
     pub all: Vec<String>,
-    /// Those that look like the machine's own microphone — flagged so the operator is
-    /// not handed the room by accident.
-    pub built_in: Vec<String>,
 }
 
 #[tauri::command]
