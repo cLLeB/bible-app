@@ -93,7 +93,7 @@ fn score_topic(t: &Topic, span: &str, stems: &std::collections::HashSet<String>)
         .iter()
         .map(|p| {
             if p.contains(' ') {
-                if span.contains(p.as_str()) { 2 } else { 0 }
+                if contains_phrase(span, p) { 2 } else { 0 }
             } else if stems.contains(&stem(p)) {
                 1
             } else {
@@ -234,6 +234,26 @@ fn word_set(text: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
+/// Does `hay` contain `needle` as whole words?
+///
+/// Plain substring matching finds "the magi" inside "the magistrates" — which it
+/// duly did, in a sermon about Paul and Silas being dragged before the
+/// magistrates, and threw the nativity story on the wall. Story phrases are short
+/// and common enough that they must match on word boundaries or not at all.
+fn contains_phrase(hay: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    hay.match_indices(needle).any(|(start, _)| {
+        let end = start + needle.len();
+        let before_ok = start == 0
+            || !hay[..start].chars().next_back().map(|c| c.is_alphanumeric()).unwrap_or(false);
+        let after_ok =
+            end == hay.len() || !hay[end..].chars().next().map(|c| c.is_alphanumeric()).unwrap_or(false);
+        before_ok && after_ok
+    })
+}
+
 /// A scored story/passage match. Higher score = stronger match.
 #[derive(Debug, Clone)]
 pub struct StoryHit {
@@ -257,7 +277,7 @@ pub fn detect_stories_scored(text: &str, min_keywords: usize) -> Vec<StoryHit> {
     let words = word_set(&lower);
     let mut hits: Vec<StoryHit> = Vec::new();
     for p in passages() {
-        let exact = p.phrases.iter().any(|phrase| lower.contains(phrase.as_str()));
+        let exact = p.phrases.iter().any(|phrase| contains_phrase(&lower, phrase));
         let matched = p.keywords.iter().filter(|k| words.contains(k.as_str())).count();
         let score = if exact {
             1000
@@ -286,6 +306,25 @@ pub fn detect_stories(text: &str) -> Vec<(String, u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// From a real sermon: Paul and Silas are dragged before the magistrates, and
+    /// "the magi" matched *inside* "the magistrates", projecting the nativity.
+    #[test]
+    fn story_phrases_match_whole_words_only() {
+        let sermon = "so they quickly took them to where the magistrates were";
+        assert!(detect_stories(sermon).is_empty(), "matched a story in: {sermon}");
+
+        let real = "he told us about the magi who followed the star of bethlehem to herod";
+        assert!(!detect_stories(real).is_empty(), "should still find the real story");
+    }
+
+    #[test]
+    fn phrase_boundaries() {
+        assert!(contains_phrase("the magi came", "the magi"));
+        assert!(contains_phrase("about the magi.", "the magi"));
+        assert!(!contains_phrase("the magistrates were", "the magi"));
+        assert!(!contains_phrase("supermarket", "market"));
+    }
 
     #[test]
     fn topic_requires_cue_plus_word() {

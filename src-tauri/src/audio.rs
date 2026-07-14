@@ -380,7 +380,16 @@ fn transcribe_detect(
     };
     if has_explicit {
         // Confident references: explicit / fuzzy / context / descriptive.
-        for d in detections.iter().filter(|d| d.source != DetectSource::Story) {
+        //
+        // Only the LAST one is projected. Preachers correct themselves mid-sentence
+        // — "when you read 2 Chronicles, 1 Chronicles chapter 20, verse 22" — and
+        // projecting every hit in turn threw three different verses on the wall in
+        // a second, two of them wrong. The final reference in an utterance is the
+        // one the speaker settled on; the earlier ones are offered as alternatives
+        // so nothing is lost if the guess is wrong.
+        let confident: Vec<&Detection> =
+            detections.iter().filter(|d| d.source != DetectSource::Story).collect();
+        for d in confident.iter().rev().take(1) {
             let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
             if last.as_ref() == Some(&key) {
@@ -412,6 +421,18 @@ fn transcribe_detect(
                     Candidate { verse: payload, confidence, source: source.to_string() },
                 );
                 *last = Some(key);
+
+                // The references the speaker passed through on the way here — the
+                // "2 Chronicles" of a "2 Chronicles, 1 Chronicles" correction — so
+                // the operator can still reach them in one click if we chose wrong.
+                let others: Vec<crate::events::VersePayload> = confident
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .filter_map(|o| db.find_verse(&tr, &o.reference).ok().flatten().map(build_payload))
+                    .take(4)
+                    .collect();
+                let _ = app.emit("verse-alternatives", others);
             }
         }
     } else {
@@ -463,6 +484,64 @@ fn transcribe_detect(
             }
         }
     }
+}
+
+/// Cut a recording into utterances the way the live loop cuts the microphone:
+/// same silence threshold, same endpoint delay, same minimum speech, same cap.
+/// Returns each utterance with the second it began, so a replay of a recorded
+/// sermon exercises the real path rather than an idealized one.
+///
+/// The streaming loop in `run_inner` is the twin of this; they must agree.
+pub fn segment_utterances(samples: &[f32]) -> Vec<(f32, Vec<f32>)> {
+    const FRAME: usize = (TARGET_RATE as usize) / 100; // 10 ms, as the mic delivers
+    let mut out = Vec::new();
+    let mut utter: Vec<f32> = Vec::new();
+    let mut preroll: Vec<f32> = Vec::new();
+    let mut speech_ms = 0f32;
+    let mut silence_ms = 0f32;
+    let mut start_sample = 0usize;
+
+    for (i, frame) in samples.chunks(FRAME).enumerate() {
+        let at = i * FRAME;
+        let dur = ms_of(frame.len());
+        if rms(frame) > SILENCE_RMS {
+            if utter.is_empty() {
+                start_sample = at.saturating_sub(preroll.len());
+                utter.extend_from_slice(&preroll);
+            }
+            utter.extend_from_slice(frame);
+            speech_ms += dur;
+            silence_ms = 0.0;
+        } else if utter.is_empty() {
+            preroll.extend_from_slice(frame);
+            if preroll.len() > PREROLL_SAMPLES {
+                let drop_n = preroll.len() - PREROLL_SAMPLES;
+                preroll.drain(0..drop_n);
+            }
+        } else {
+            utter.extend_from_slice(frame);
+            silence_ms += dur;
+        }
+
+        let ended = (silence_ms >= SILENCE_FLUSH_MS && !utter.is_empty())
+            || ms_of(utter.len()) >= MAX_UTTER_MS;
+        if ended {
+            if speech_ms >= MIN_SPEECH_MS {
+                out.push((
+                    start_sample as f32 / TARGET_RATE as f32,
+                    trim_trailing_silence(&utter),
+                ));
+            }
+            utter.clear();
+            preroll.clear();
+            speech_ms = 0.0;
+            silence_ms = 0.0;
+        }
+    }
+    if speech_ms >= MIN_SPEECH_MS && !utter.is_empty() {
+        out.push((start_sample as f32 / TARGET_RATE as f32, trim_trailing_silence(&utter)));
+    }
+    out
 }
 
 /// Open the default microphone and stream 16 kHz mono frames down a channel.

@@ -51,3 +51,6 @@ installers/
 
 # Per-flavor bundling staging dir (model + whisper binary copied in per build)
 bundled/
+
+# Sermon recordings used to test the detector (private, not ours to distribute)
+sermons/

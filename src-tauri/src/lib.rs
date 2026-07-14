@@ -1,4 +1,4 @@
-mod audio;
+pub mod audio;
 pub mod books;
 mod calibrate;
 mod capture;
