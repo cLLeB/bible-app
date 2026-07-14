@@ -63,24 +63,76 @@ fn trim_trailing_silence(audio: &[f32]) -> Vec<f32> {
     audio[..(end + keep).min(audio.len())].to_vec()
 }
 
+/// Collapse to mono, but only across channels that actually carry sound.
+///
+/// Desk feeds are routinely half-patched: a UCA202 with one RCA connected, a mixer
+/// sending program on the left and nothing on the right, a multichannel interface
+/// where one input is live and the rest are dead. Averaging every channel then
+/// halves the level (or worse), and a quiet feed is exactly what makes whisper start
+/// guessing. So silent channels are left out of the average.
+fn downmix(frame: &[f32], channels: usize) -> Vec<f32> {
+    if channels <= 1 {
+        return frame.to_vec();
+    }
+    let frames = frame.len() / channels;
+    if frames == 0 {
+        return Vec::new();
+    }
+    // Which channels have any signal in this buffer?
+    let mut energy = vec![0.0f32; channels];
+    for f in frame.chunks_exact(channels) {
+        for (c, s) in f.iter().enumerate() {
+            energy[c] += s * s;
+        }
+    }
+    let live: Vec<usize> = (0..channels)
+        .filter(|&c| (energy[c] / frames as f32).sqrt() > 1e-4) // ~ -80 dBFS
+        .collect();
+    // Everything is silent (or genuinely all channels are live): fall back to all.
+    let use_channels: Vec<usize> = if live.is_empty() { (0..channels).collect() } else { live };
+
+    frame
+        .chunks_exact(channels)
+        .map(|f| {
+            let sum: f32 = use_channels.iter().map(|&c| f[c]).sum();
+            sum / use_channels.len() as f32
+        })
+        .collect()
+}
+
 fn downmix_resample(data: &[f32], channels: usize, src_rate: f32) -> Vec<f32> {
-    let mono: Vec<f32> = if channels <= 1 {
-        data.to_vec()
-    } else {
-        data.chunks(channels)
-            .map(|c| c.iter().sum::<f32>() / channels as f32)
-            .collect()
-    };
+    let mono: Vec<f32> = downmix(data, channels);
     if (src_rate - TARGET_RATE as f32).abs() < 1.0 {
         return mono;
     }
-    let ratio = TARGET_RATE as f32 / src_rate;
-    let out_len = (mono.len() as f32 * ratio) as usize;
+    let step = src_rate / TARGET_RATE as f32;
+    let out_len = (mono.len() as f32 / step) as usize;
     let mut out = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let src_idx = (i as f32 / ratio) as usize;
-        if src_idx < mono.len() {
-            out.push(mono[src_idx]);
+    if step > 1.0 {
+        // Downsampling. Picking every Nth sample folds everything above 8 kHz back
+        // into the speech band as aliasing — which lands squarely on the consonants
+        // whisper needs. Average each source window instead: a crude low-pass, but
+        // it removes the fold-back that a bare decimation invites.
+        for i in 0..out_len {
+            let start = (i as f32 * step) as usize;
+            let end = (((i + 1) as f32 * step) as usize).min(mono.len()).max(start + 1);
+            let window = &mono[start.min(mono.len().saturating_sub(1))..end.min(mono.len())];
+            if window.is_empty() {
+                break;
+            }
+            out.push(window.iter().sum::<f32>() / window.len() as f32);
+        }
+    } else {
+        // Upsampling (a rare 8 kHz input): linear interpolation is plenty.
+        for i in 0..out_len {
+            let x = i as f32 * step;
+            let a = x as usize;
+            let b = (a + 1).min(mono.len().saturating_sub(1));
+            let t = x - a as f32;
+            match mono.get(a) {
+                Some(&s0) => out.push(s0 * (1.0 - t) + mono[b] * t),
+                None => break,
+            }
         }
     }
     out
@@ -277,6 +329,45 @@ fn read_along(
 
 #[cfg(test)]
 mod tests {
+    /// Half-patched desk feeds are the norm: one RCA connected, program on the left,
+    /// nothing on the right. Averaging the dead channel in would cost 6 dB, and a
+    /// quiet feed is what makes whisper start guessing.
+    #[test]
+    fn a_silent_channel_does_not_drag_the_level_down() {
+        use super::downmix;
+        // Left carries the sermon, right is unpatched.
+        let stereo: Vec<f32> = [0.8, 0.0, -0.8, 0.0, 0.8, 0.0].to_vec();
+        assert_eq!(downmix(&stereo, 2), vec![0.8, -0.8, 0.8]);
+
+        // Both live: a true average.
+        let both: Vec<f32> = [1.0, 0.0, 0.0, 1.0].to_vec();
+        assert_eq!(downmix(&both, 2), vec![0.5, 0.5]);
+    }
+
+    /// Sound desks and older interfaces run at 44.1 or 48 kHz, often in stereo.
+    /// Whisper wants 16 kHz mono, and getting there by picking every third sample
+    /// folds everything above 8 kHz back onto the consonants it needs.
+    #[test]
+    fn downsampling_averages_rather_than_decimates() {
+        use super::downmix_resample;
+
+        // A full-scale tone at the top of a 48 kHz band: alternating +1/-1 is 24 kHz,
+        // far above anything speech-shaped. Decimation would pass it straight through
+        // at full amplitude; averaging must knock it down.
+        let nyquist: Vec<f32> = (0..48_000).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let out = downmix_resample(&nyquist, 1, 48_000.0);
+        let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(peak < 0.5, "aliased tone survived at {peak}");
+        assert!((out.len() as i32 - 16_000).abs() < 10, "expected ~16k samples, got {}", out.len());
+
+        // Stereo collapses to mono — and a dead right channel is left out of it,
+        // rather than averaged in at the cost of 6 dB.
+        let one_side_patched = vec![1.0, 0.0, 1.0, 0.0];
+        assert_eq!(downmix_resample(&one_side_patched, 2, 16_000.0), vec![1.0, 1.0]);
+        let both_live = vec![1.0, 0.0, 0.0, 1.0];
+        assert_eq!(downmix_resample(&both_live, 2, 16_000.0), vec![0.5, 0.5]);
+    }
+
     /// Real sentences from real sermons. Each yields several references in one
     /// breath, and the app must land on the one the speaker actually meant.
     #[test]
@@ -784,31 +875,63 @@ fn open_mic(name: Option<&str>) -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>
     let src_rate = config.sample_rate.0 as f32;
 
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
-    let err_fn = |e| eprintln!("audio stream error: {e}");
 
-    let stream = match sample_format {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config,
-            move |data: &[f32], _: &_| {
-                let _ = tx.send(downmix_resample(data, channels, src_rate));
-            },
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config,
-            move |data: &[i16], _: &_| {
-                let f: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                let _ = tx.send(downmix_resample(&f, channels, src_rate));
-            },
-            err_fn,
-            None,
-        ),
-        other => return Err(format!("unsupported sample format {other:?}")),
-    }
-    .map_err(|e| e.to_string())?;
+    // Accept whatever the hardware presents. Sound desks and older interfaces are
+    // not all 16-bit or float: 24-bit gear usually arrives as i32, some USB mixers
+    // as unsigned. Refusing those meant a church would plug in a working interface
+    // and be told the format was unsupported.
+    let stream = build_stream(&device, &config, sample_format, channels, src_rate, tx)?;
     stream.play().map_err(|e| e.to_string())?;
     Ok((stream, rx))
+}
+
+fn build_stream(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: cpal::SampleFormat,
+    channels: usize,
+    src_rate: f32,
+    tx: mpsc::Sender<Vec<f32>>,
+) -> Result<cpal::Stream, String> {
+    use cpal::SampleFormat as F;
+
+    fn make<T>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        channels: usize,
+        src_rate: f32,
+        tx: mpsc::Sender<Vec<f32>>,
+    ) -> Result<cpal::Stream, cpal::BuildStreamError>
+    where
+        T: cpal::SizedSample + Send + 'static,
+        f32: cpal::FromSample<T>,
+    {
+        device.build_input_stream(
+            config,
+            move |data: &[T], _: &_| {
+                let f: Vec<f32> =
+                    data.iter().map(|&s| cpal::Sample::from_sample(s)).collect();
+                let _ = tx.send(downmix_resample(&f, channels, src_rate));
+            },
+            |e| eprintln!("audio stream error: {e}"),
+            None,
+        )
+    }
+
+    let stream = match format {
+        F::F32 => make::<f32>(device, config, channels, src_rate, tx),
+        F::F64 => make::<f64>(device, config, channels, src_rate, tx),
+        F::I8 => make::<i8>(device, config, channels, src_rate, tx),
+        F::I16 => make::<i16>(device, config, channels, src_rate, tx),
+        F::I32 => make::<i32>(device, config, channels, src_rate, tx),
+        F::I64 => make::<i64>(device, config, channels, src_rate, tx),
+        F::U8 => make::<u8>(device, config, channels, src_rate, tx),
+        F::U16 => make::<u16>(device, config, channels, src_rate, tx),
+        F::U32 => make::<u32>(device, config, channels, src_rate, tx),
+        F::U64 => make::<u64>(device, config, channels, src_rate, tx),
+        other => return Err(format!("this input uses an audio format we cannot read ({other:?})")),
+    };
+    stream.map_err(|e| format!("could not open the audio input: {e}"))
 }
 
 /// Record exactly one spoken utterance: wait for speech, then endpoint on
@@ -888,9 +1011,22 @@ fn run_inner(
     let mut pending: Option<crate::resolution::Pending> = None;
     let mut recent_words: VecDeque<String> = VecDeque::new();
     let mut last_activity = Instant::now();
+    let mut last_frame = Instant::now();
+    let mut warned_silent = false;
     let interim_enabled = model_is_fast(model);
 
     while flag.load(Ordering::SeqCst) {
+        // A dead cable and a quiet room look identical from here — no detections
+        // either way. They are not the same, and the operator needs to know which:
+        // frames stop arriving entirely when an interface is unplugged or the desk
+        // stops sending, whereas a quiet room still delivers a stream of near-silence.
+        if !warned_silent && last_frame.elapsed() > Duration::from_secs(20) {
+            warned_silent = true;
+            let _ = app.emit(
+                "listen-error",
+                "No sound is arriving from the audio input — check the cable and that the desk is still sending.",
+            );
+        }
         // A listening session left running transcribes room noise indefinitely,
         // which is pure CPU burn nobody asked for. Stand down after a long
         // silence; the operator can start it again in one click.
@@ -900,6 +1036,8 @@ fn run_inner(
         }
         match rx.recv_timeout(Duration::from_millis(150)) {
             Ok(frame) => {
+                last_frame = Instant::now();
+                warned_silent = false;
                 recent.extend_from_slice(&frame);
                 if recent.len() > PREROLL_SAMPLES {
                     let drop = recent.len() - PREROLL_SAMPLES;
