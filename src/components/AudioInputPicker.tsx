@@ -5,23 +5,23 @@ interface AudioInputPickerProps {
   disabled: boolean;
 }
 
-const DEFAULT = "__default__";
-
 /**
- * Choose where the app listens.
+ * Choose where the app listens — and it must be chosen.
  *
- * The laptop microphone hears the room — reverb, the congregation, whatever the PA
- * throws back. A feed from the sound desk carries the preacher's own microphone,
- * already mixed, with none of that in it. It is the same kind of signal the
- * recognizer was measured against, so plugging into the desk is worth more than any
- * setting in this app.
+ * The app is fed from the sound desk: the preacher's own microphone, already mixed,
+ * with no room, no congregation and no PA in it. That is the signal it was built and
+ * measured against.
  *
- * The test button exists because the worst way to discover the cable is dead is
- * halfway through a sermon.
+ * There is deliberately no "system default". Defaulting means defaulting to the
+ * laptop's own microphone, which would hear the hall instead of the preacher — and
+ * would look, from the operator's chair, exactly like it was working. Listening to the
+ * wrong thing is worse than not listening at all, so nothing is listened to until an
+ * input is picked, and the machine's own microphone is marked as what it is.
  */
 export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
   const [devices, setDevices] = useState<string[]>([]);
-  const [chosen, setChosen] = useState<string>(DEFAULT);
+  const [builtIn, setBuiltIn] = useState<string[]>([]);
+  const [chosen, setChosen] = useState<string>("");
   const [level, setLevel] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +30,8 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
     try {
       const inputs = await audioInputs();
       setDevices(inputs.all);
-      setChosen(inputs.chosen ?? DEFAULT);
+      setBuiltIn(inputs.builtIn);
+      setChosen(inputs.chosen ?? "");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -45,7 +46,7 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
     setLevel(null);
     setChosen(name);
     try {
-      await setAudioInput(name === DEFAULT ? null : name);
+      await setAudioInput(name === "" ? null : name);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -64,71 +65,94 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
     }
   }
 
-  // Anything above a whisper registers here; silence means nothing is arriving.
   const verdict =
     level === null
       ? null
       : level < 0.01
         ? "nothing arriving — check the cable and that the desk is sending"
         : level < 0.05
-          ? "very quiet — turn the send up if you can"
+          ? "very quiet — turn the send up at the desk"
           : level > 0.98
             ? "clipping — turn the send down"
             : "sound is arriving";
 
+  const isBuiltIn = chosen !== "" && builtIn.includes(chosen);
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-sm font-medium">Sound input:</span>
-      <select
-        className="select"
-        style={{ width: "auto", minWidth: "16rem" }}
-        value={chosen}
-        disabled={disabled}
-        onChange={(e) => void choose(e.target.value)}
-        title="Pick the sound desk feed if you have one — it hears the preacher's microphone, not the room."
-      >
-        <option value={DEFAULT}>System default (laptop microphone)</option>
-        {devices.map((d) => (
-          <option key={d} value={d}>
-            {d}
-          </option>
-        ))}
-      </select>
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">Sound input:</span>
+        <select
+          className="select"
+          style={{ width: "auto", minWidth: "18rem" }}
+          value={chosen}
+          disabled={disabled}
+          onChange={(e) => void choose(e.target.value)}
+          title="The feed from the sound desk — the preacher's microphone, not the room."
+        >
+          <option value="">— pick the sound-desk feed —</option>
+          {devices.map((d) => (
+            <option key={d} value={d}>
+              {d}
+              {builtIn.includes(d) ? "  (this laptop's own microphone — hears the room)" : ""}
+            </option>
+          ))}
+        </select>
 
-      <button className="btn" disabled={disabled || testing} onClick={() => void refresh()}>
-        Rescan
-      </button>
-      <button className="btn" disabled={disabled || testing} onClick={() => void test()}>
-        {testing ? "listening…" : "Test sound"}
-      </button>
+        <button className="btn" disabled={disabled || testing} onClick={() => void refresh()}>
+          Rescan
+        </button>
+        <button
+          className="btn"
+          disabled={disabled || testing || chosen === ""}
+          onClick={() => void test()}
+        >
+          {testing ? "listening…" : "Test sound"}
+        </button>
 
-      {level !== null && (
-        <span className="flex items-center gap-2 text-sm">
-          <span
-            aria-hidden
-            style={{
-              display: "inline-block",
-              width: "6rem",
-              height: "0.5rem",
-              borderRadius: "999px",
-              background: "var(--surface-2)",
-              overflow: "hidden",
-            }}
-          >
+        {level !== null && (
+          <span className="flex items-center gap-2 text-sm">
             <span
+              aria-hidden
               style={{
-                display: "block",
-                height: "100%",
-                width: `${Math.min(100, Math.round(level * 100))}%`,
-                background: level < 0.01 ? "var(--danger)" : "var(--live)",
+                display: "inline-block",
+                width: "6rem",
+                height: "0.5rem",
+                borderRadius: "999px",
+                background: "var(--surface-2)",
+                overflow: "hidden",
               }}
-            />
+            >
+              <span
+                style={{
+                  display: "block",
+                  height: "100%",
+                  width: `${Math.min(100, Math.round(level * 100))}%`,
+                  background: level < 0.01 ? "var(--danger)" : "var(--live)",
+                }}
+              />
+            </span>
+            <span className="text-[var(--muted)]">{verdict}</span>
           </span>
-          <span className="text-[var(--muted)]">{verdict}</span>
-        </span>
+        )}
+      </div>
+
+      {chosen === "" && (
+        <p className="text-sm" style={{ color: "var(--danger)" }}>
+          Listening will not start until you pick an input. Plug the laptop into the sound
+          desk (a USB cable from the mixer, or a small USB audio interface off any spare
+          send) and choose it here.
+        </p>
       )}
 
-      {error && <span className="text-sm text-red-500">{error}</span>}
+      {isBuiltIn && (
+        <p className="text-sm" style={{ color: "var(--danger)" }}>
+          That is this laptop&apos;s own microphone. It hears the hall — the loudspeakers, the
+          congregation, the room — not the preacher&apos;s microphone. Use the sound-desk feed.
+        </p>
+      )}
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
     </div>
   );
 }

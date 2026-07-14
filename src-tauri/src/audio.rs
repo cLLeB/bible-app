@@ -855,20 +855,33 @@ pub fn input_devices() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The chosen input, or the system default if none is set / it has been unplugged.
+/// The chosen input. There is deliberately no fallback.
+///
+/// Falling back to "whatever Windows calls the default" means falling back to the
+/// laptop's own microphone — which hears the room, the congregation and the PA, and
+/// none of what this app was built and measured against. Listening to the wrong thing
+/// is worse than not listening: it looks like it is working. So an input that is not
+/// chosen, or not connected, is an error the operator can see and fix.
 fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
+    let want = name
+        .filter(|n| !n.is_empty())
+        .ok_or("No sound input chosen. Pick the sound-desk feed under Live listening → Sound input.")?;
     let host = cpal::default_host();
-    if let Some(want) = name.filter(|n| !n.is_empty()) {
-        if let Ok(mut devices) = host.input_devices() {
-            if let Some(d) = devices.find(|d| d.name().map(|n| n == want).unwrap_or(false)) {
-                return Ok(d);
-            }
+    if let Ok(mut devices) = host.input_devices() {
+        if let Some(d) = devices.find(|d| d.name().map(|n| n == want).unwrap_or(false)) {
+            return Ok(d);
         }
-        // Named but absent: the interface is unplugged. Say so rather than quietly
-        // listening to the laptop's own microphone instead.
-        return Err(format!("audio input \"{want}\" is not connected"));
     }
-    host.default_input_device().ok_or_else(|| "no audio input found".to_string())
+    Err(format!("The sound input \"{want}\" is not connected."))
+}
+
+/// Does this look like the machine's own built-in microphone rather than a feed from
+/// the sound desk? Used to warn, not to forbid — the operator may have no choice.
+pub fn looks_like_built_in_mic(name: &str) -> bool {
+    let n = name.to_lowercase();
+    ["microphone array", "internal mic", "built-in", "realtek", "intel® smart sound", "smart sound"]
+        .iter()
+        .any(|hint| n.contains(hint))
 }
 
 /// Listen on `device` for a few moments and report the loudest level heard, so the

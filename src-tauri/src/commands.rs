@@ -1007,6 +1007,15 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_setting("input_device").filter(|s| !s.is_empty())
     };
+    // No input, no listening. Quietly opening the laptop's own microphone would hear
+    // the room instead of the preacher and look for all the world like it was working.
+    if device.is_none() {
+        return Err(
+            "Choose the sound input first — the feed from the sound desk, under Live \
+             listening → Sound input."
+                .into(),
+        );
+    }
     // Everything learned about this speaker, applied before a word is heard: the book
     // names they get misheard as, how loud their room is, and the version they read
     // from.
@@ -1055,15 +1064,21 @@ pub fn audio_inputs(state: tauri::State<'_, AppState>) -> Result<AudioInputs, St
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_setting("input_device")
     };
-    Ok(AudioInputs { chosen, all: crate::audio::input_devices() })
+    let all = crate::audio::input_devices();
+    let built_in =
+        all.iter().filter(|d| crate::audio::looks_like_built_in_mic(d)).cloned().collect();
+    Ok(AudioInputs { chosen, all, built_in })
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioInputs {
-    /// None = whatever Windows calls the default input.
+    /// None = nothing chosen yet. There is no default: see `audio::pick_device`.
     pub chosen: Option<String>,
     pub all: Vec<String>,
+    /// Those that look like the machine's own microphone — flagged so the operator is
+    /// not handed the room by accident.
+    pub built_in: Vec<String>,
 }
 
 #[tauri::command]
