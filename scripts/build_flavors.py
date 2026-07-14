@@ -58,6 +58,7 @@ MODELS_DIR = ROOT / "models"
 # Per-flavor installers collected here. NOT `dist/` — that is Vite's frontendDist,
 # which `vite build` empties at the start of every `tauri build`, wiping collections.
 DIST = ROOT / "installers"
+BIN_DIR = ROOT / "bin"        # whisper-cli.exe + its CPU backend DLLs
 # Staging dir that tauri.conf `resources` bundles: filled per-flavor with just
 # that flavor's whisper model(s) + the whisper binary, so shipped installers
 # carry STT and run fully offline on any machine.
@@ -123,17 +124,25 @@ def stage_runtime(models: list) -> None:
     bundle exactly what the flavor needs (and no other model). Cleared each build
     so flavors never leak assets into each other.
 
-    whisper.cpp is compiled into the binary (whisper-rs), so no whisper-cli.exe or
-    ggml DLLs are shipped any more — only the model itself."""
+    The whisper binary ships with per-CPU backend DLLs and picks an optimized one
+    at runtime; that dispatch is worth ~6x over a statically linked build, so the
+    whole bin/ dir goes along."""
     if BUNDLED.exists():
         shutil.rmtree(BUNDLED)
     (BUNDLED / "models").mkdir(parents=True, exist_ok=True)
+    (BUNDLED / "bin").mkdir(parents=True, exist_ok=True)
     for m in models:
         src = MODELS_DIR / f"ggml-{m}.en.bin"
         if src.exists():
             shutil.copy2(src, BUNDLED / "models" / src.name)
         else:
             print(f"  WARNING: model {src.name} missing — STT unavailable in this flavor", file=sys.stderr)
+    if BIN_DIR.is_dir():
+        for f in BIN_DIR.iterdir():
+            if f.is_file():
+                shutil.copy2(f, BUNDLED / "bin" / f.name)
+    else:
+        print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
 
 
 def build(name: str, spec: dict, reuse_data: bool = False) -> None:

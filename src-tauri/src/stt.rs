@@ -1,15 +1,24 @@
-//! Speech-to-text against a resident whisper model.
+//! Speech-to-text via the bundled whisper.cpp binary.
 //!
-//! The model is loaded once and kept in memory for the life of the process.
-//! The previous design shelled out to `whisper-cli.exe` per utterance, which
-//! re-read the model from disk every time (148 MB for base, 488 MB for small) —
-//! so latency was dominated by loading, not decoding, and the cheap models got
-//! no faster than the expensive ones. With the model resident there is enough
-//! headroom to decode with beam search, which is where accuracy lives.
+//! The binary ships with per-CPU backend DLLs and picks an optimized one at
+//! runtime (AVX2/FMA on anything modern). A statically linked build was tried and
+//! decoded ~6x slower — those runtime-dispatched kernels are the whole game — so
+//! the process spawn stays, and the cost that actually mattered gets fixed here
+//! instead: the encoder window.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows spawns a console window for a console-subsystem binary unless told
+/// not to. whisper runs once per interim pass and once per endpoint, so without
+/// this a black window flashes several times per spoken sentence.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Bias whisper toward scripture vocabulary. whisper only consumes the last
 // ~224 prompt tokens and weights later tokens most, so the hard-to-hear rare
@@ -23,58 +32,86 @@ Micah, Nahum, Habakkuk, Zephaniah, Haggai, Zechariah, Malachi, Ephesians, Philip
 2 Thessalonians, 1 Timothy, 2 Timothy, Philemon, 1 Peter, 2 Peter; and Nebuchadnezzar, Melchizedek, Zacchaeus, \
 Methuselah, Mephibosheth, Habakkuk, Nicodemus, Zerubbabel, Bartimaeus, Gethsemane, Zacchaeus, Philippians.";
 
-/// How to decode. Held apart from the model so the bench can sweep settings and
+/// How to decode. A struct rather than constants so the bench can sweep it and
 /// the calibration wizard can persist a per-speaker choice.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Decode {
-    /// 1 = greedy. Higher searches more candidate transcripts — slower, more accurate.
+    /// 1 = greedy. Higher searches more candidate transcripts. Measured cost on
+    /// base with a fitted window: ~66ms. Effectively free, so it defaults on.
     pub beam: i32,
-    /// Prime the decoder with scripture vocabulary. Helps a strong model; can
-    /// drag a weak one around, so it is a knob rather than a constant.
+    /// Prime the decoder with scripture vocabulary.
     pub prompt: bool,
-    /// Scale speech to a consistent level before decoding. A quiet mic hurts
-    /// the small models most.
+    /// Scale speech to a consistent level before decoding — a quiet mic hurts
+    /// the smaller models most.
     pub normalize: bool,
-    /// Shrink the encoder window to fit the clip. whisper always encodes a fixed
-    /// 30-second window, so a 3-second reference pays for 27 seconds of silence —
-    /// and encode dominates the cost (~3.7s vs ~70ms of decode on base here).
-    /// Sized from the clip with headroom; false = whisper's full 1500 frames.
-    pub fit_window: bool,
+    /// Encoder frames. whisper always encodes a 30s window (1500 frames) unless
+    /// told otherwise, so a 3s reference pays to encode 27s of silence: 2489ms
+    /// vs 392ms measured on base. `Fit` sizes the window to the clip.
+    pub window: Window,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Window {
+    /// whisper's default: the full 30 seconds.
+    Full,
+    /// Sized to the clip, with `frames_per_sec * margin` headroom. Too tight and
+    /// the decoder can loop on itself and repeat the phrase; too loose and the
+    /// encode cost comes back.
+    Fit { margin: f32 },
 }
 
 impl Default for Decode {
     fn default() -> Self {
-        Self { beam: 5, prompt: true, normalize: true, fit_window: true }
+        Self { beam: 5, prompt: true, normalize: true, window: Window::Fit { margin: 1.5 } }
     }
 }
 
-/// Encoder frames to use for `secs` of audio. whisper's encoder runs over 1500
-/// frames = 30s, so ~50 frames per second of speech; the margin covers whisper's
-/// need for some context past the end of the utterance.
-fn audio_ctx_for(secs: f32) -> std::os::raw::c_int {
-    const FRAMES_PER_SEC: f32 = 50.0;
-    const FULL: f32 = 1500.0;
-    let wanted = (secs * FRAMES_PER_SEC * 1.5).ceil().clamp(256.0, FULL);
-    wanted as std::os::raw::c_int
-}
-
 impl Decode {
-    /// Bench/dev override, e.g. `BIBLE_APP_DECODE=beam=1,prompt=0,normalize=1`.
+    /// Bench/dev override, e.g. `BIBLE_APP_DECODE=beam=1,prompt=0,window=full`.
     pub fn from_env_or_default() -> Self {
         let mut d = Self::default();
         let Ok(spec) = std::env::var("BIBLE_APP_DECODE") else { return d };
         for part in spec.split(',') {
             let Some((k, v)) = part.split_once('=') else { continue };
+            let v = v.trim();
             match k.trim() {
-                "beam" => d.beam = v.trim().parse().unwrap_or(d.beam),
-                "prompt" => d.prompt = v.trim() != "0",
-                "normalize" => d.normalize = v.trim() != "0",
-                "fit_window" => d.fit_window = v.trim() != "0",
+                "beam" => d.beam = v.parse().unwrap_or(d.beam),
+                "prompt" => d.prompt = v != "0",
+                "normalize" => d.normalize = v != "0",
+                "window" => {
+                    d.window = if v == "full" {
+                        Window::Full
+                    } else {
+                        Window::Fit { margin: v.parse().unwrap_or(1.5) }
+                    }
+                }
                 _ => {}
             }
         }
         d
     }
+
+    /// Encoder frames for `secs` of audio: whisper's encoder covers 30s in 1500
+    /// frames, so 50 frames per second of speech, plus margin.
+    fn audio_ctx(&self, secs: f32) -> Option<i32> {
+        const FRAMES_PER_SEC: f32 = 50.0;
+        const FULL: f32 = 1500.0;
+        match self.window {
+            Window::Full => None,
+            Window::Fit { margin } => {
+                Some((secs * FRAMES_PER_SEC * margin).ceil().clamp(192.0, FULL) as i32)
+            }
+        }
+    }
+}
+
+fn temp_base() -> PathBuf {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("bibleapp_utt_{ts}_{n}"))
 }
 
 /// Peak-normalize toward a consistent loudness, leaving headroom. Silence and
@@ -106,76 +143,120 @@ pub fn write_wav_16k_mono(path: &Path, samples: &[f32]) -> Result<(), String> {
     writer.finalize().map_err(|e| e.to_string())
 }
 
-/// The loaded model. Keyed by path so switching model tier reloads, and only then.
-static MODEL: Mutex<Option<(PathBuf, WhisperContext)>> = Mutex::new(None);
-
-fn threads() -> i32 {
-    std::thread::available_parallelism().map(|n| n.get().min(8)).unwrap_or(4) as i32
-}
-
-/// Load `model` if it isn't already resident, then run `f` against it.
-fn with_model<T>(
+/// Transcribe 16 kHz mono f32 samples by invoking the whisper.cpp binary.
+pub fn transcribe(
+    samples16k: &[f32],
     model: &Path,
-    f: impl FnOnce(&WhisperContext) -> Result<T, String>,
-) -> Result<T, String> {
-    let mut guard = MODEL.lock().map_err(|e| e.to_string())?;
-    let stale = guard.as_ref().map(|(p, _)| p != model).unwrap_or(true);
-    if stale {
-        let path = model.to_str().ok_or("bad model path")?;
-        let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
-            .map_err(|e| format!("could not load whisper model {}: {e}", model.display()))?;
-        *guard = Some((model.to_path_buf(), ctx));
+    binary: &Path,
+    decode: Decode,
+) -> Result<String, String> {
+    let audio = if decode.normalize { normalize(samples16k) } else { samples16k.to_vec() };
+    let base = temp_base();
+    let wav_path = base.with_extension("wav");
+    write_wav_16k_mono(&wav_path, &audio)?;
+
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .to_string();
+    let beam = decode.beam.to_string();
+    let secs = audio.len() as f32 / 16_000.0;
+
+    let mut cmd = Command::new(binary);
+    cmd.args([
+        "-m",
+        model.to_str().ok_or("bad model path")?,
+        "-f",
+        wav_path.to_str().ok_or("bad wav path")?,
+        "-l",
+        "en",
+        "-t",
+        &threads,
+        "-bs",
+        &beam,
+        "-bo",
+        &beam,
+        "-nt",
+        "-otxt",
+        "-of",
+        base.to_str().ok_or("bad out path")?,
+    ]);
+    if let Some(ctx) = decode.audio_ctx(secs) {
+        cmd.args(["-ac", &ctx.to_string()]);
     }
-    let (_, ctx) = guard.as_ref().expect("model just loaded");
-    f(ctx)
+    if decode.prompt {
+        cmd.args(["--prompt", BIBLE_PROMPT]);
+    }
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let out = cmd.output().map_err(|e| format!("failed to run whisper binary: {e}"))?;
+
+    let txt_path = base.with_extension("txt");
+    let result = std::fs::read_to_string(&txt_path).map(|t| t.trim().to_string());
+
+    let _ = std::fs::remove_file(&wav_path);
+    let _ = std::fs::remove_file(&txt_path);
+
+    match result {
+        Ok(text) => Ok(dedupe_repeats(&text)),
+        Err(_) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            Err(format!("whisper produced no output: {stderr}"))
+        }
+    }
 }
 
-/// Load the model ahead of first speech, so the first utterance isn't slowed by
-/// a cold load. Safe to call repeatedly.
-pub fn preload(model: &Path) -> Result<(), String> {
-    with_model(model, |_| Ok(()))
+/// A tight encoder window can make the decoder loop, emitting the same phrase
+/// twice ("John chapter 3 verse 16 John chapter 3 verse 16"). Harmless to the
+/// reference parser, but it pollutes the transcript and the quote matcher, so
+/// collapse an immediately repeated tail.
+fn dedupe_repeats(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let n = words.len();
+    if n < 4 {
+        return text.trim().to_string();
+    }
+    // Longest repeated suffix: if the last half equals the half before it, drop it.
+    for len in (2..=n / 2).rev() {
+        let (a, b) = (&words[n - 2 * len..n - len], &words[n - len..]);
+        let same = a
+            .iter()
+            .zip(b.iter())
+            .all(|(x, y)| x.trim_matches(|c: char| !c.is_alphanumeric()).eq_ignore_ascii_case(
+                y.trim_matches(|c: char| !c.is_alphanumeric()),
+            ));
+        if same {
+            return words[..n - len].join(" ");
+        }
+    }
+    text.trim().to_string()
 }
 
-/// Transcribe 16 kHz mono f32 samples.
-pub fn transcribe(samples16k: &[f32], model: &Path, decode: Decode) -> Result<String, String> {
-    let audio =
-        if decode.normalize { normalize(samples16k) } else { samples16k.to_vec() };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    with_model(model, |ctx| {
-        let mut state = ctx.create_state().map_err(|e| e.to_string())?;
+    #[test]
+    fn collapses_a_repeated_phrase() {
+        assert_eq!(
+            dedupe_repeats("John chapter 3 verse 16 John chapter 3 verse 16"),
+            "John chapter 3 verse 16"
+        );
+    }
 
-        let strategy = if decode.beam > 1 {
-            SamplingStrategy::BeamSearch { beam_size: decode.beam, patience: -1.0 }
-        } else {
-            SamplingStrategy::Greedy { best_of: 1 }
-        };
-        let mut params = FullParams::new(strategy);
-        params.set_n_threads(threads());
-        params.set_language(Some("en"));
-        params.set_translate(false);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_suppress_blank(true);
-        params.set_no_context(true);
-        if decode.fit_window {
-            params.set_audio_ctx(audio_ctx_for(audio.len() as f32 / 16_000.0));
-        }
-        if decode.prompt {
-            params.set_initial_prompt(BIBLE_PROMPT);
-        }
+    #[test]
+    fn leaves_normal_speech_alone() {
+        let s = "Turn with me to Habakkuk chapter 2 verse 4";
+        assert_eq!(dedupe_repeats(s), s);
+    }
 
-        state.full(params, &audio).map_err(|e| format!("whisper failed: {e}"))?;
-
-        let n = state.full_n_segments().map_err(|e| e.to_string())?;
-        let mut text = String::new();
-        for i in 0..n {
-            if let Ok(seg) = state.full_get_segment_text(i) {
-                text.push_str(&seg);
-                text.push(' ');
-            }
-        }
-        Ok(text.trim().to_string())
-    })
+    #[test]
+    fn window_fits_the_clip_and_has_a_floor() {
+        let d = Decode::default();
+        assert_eq!(d.audio_ctx(3.0), Some(225));
+        assert_eq!(d.audio_ctx(0.5), Some(192)); // floor
+        assert_eq!(d.audio_ctx(60.0), Some(1500)); // never exceeds whisper's window
+        assert_eq!(Decode { window: Window::Full, ..d }.audio_ctx(3.0), None);
+    }
 }

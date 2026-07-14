@@ -938,12 +938,14 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
         .find(|p| p.exists())
 }
 
-/// Locate the whisper model. Searched in order: the packaged app's resource dir
-/// (`<res>/models` — how shipped installers carry it), then the dev project's
-/// `models/` dir. `kind` selects the flavor's model: "base" (normal), "small"
-/// (best), or "tiny" (low-end PCs). The model is decoded in-process, so there is
-/// no longer any whisper binary to find.
-fn resolve_model(res_dir: Option<&Path>, kind: &str) -> Result<PathBuf, String> {
+/// Locate the whisper model + binary. Searched in order: the packaged app's
+/// resource dir (`<res>/models`, `<res>/bin` — how shipped installers carry
+/// them), then the dev project's `models/` and `bin/` dirs. `kind` selects the
+/// flavor's model: "base" (normal), "small" (best), or "tiny" (low-end PCs).
+fn resolve_model_and_binary(
+    res_dir: Option<&Path>,
+    kind: &str,
+) -> Result<(PathBuf, PathBuf), String> {
     let dev_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().map(Path::to_path_buf);
 
     let mut model_dirs: Vec<PathBuf> = Vec::new();
@@ -956,16 +958,27 @@ fn resolve_model(res_dir: Option<&Path>, kind: &str) -> Result<PathBuf, String> 
 
     let named = format!("ggml-{kind}.en.bin");
     let fallbacks = ["ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin", "ggml-medium.en.bin"];
-    model_dirs
+    let model = model_dirs
         .iter()
         .find_map(|d| {
             let exact = d.join(&named);
             if exact.exists() { Some(exact) } else { first_existing(d, &fallbacks) }
         })
-        .ok_or_else(|| {
-            "No whisper model found (looked in bundled resources and the project 'models' folder)."
-                .to_string()
-        })
+        .ok_or("No whisper model found (looked in bundled resources and the project 'models' folder).")?;
+
+    let mut bin_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(r) = res_dir {
+        bin_dirs.push(r.join("bin"));
+    }
+    if let Some(root) = &dev_root {
+        bin_dirs.push(root.join("bin"));
+    }
+    let binary = bin_dirs
+        .iter()
+        .find_map(|d| first_existing(d, &["whisper-cli.exe", "main.exe", "whisper.exe"]))
+        .unwrap_or_else(|| PathBuf::from("whisper-cli")); // else rely on PATH
+
+    Ok((model, binary))
 }
 
 #[tauri::command]
@@ -979,11 +992,11 @@ pub fn start_listening(
     }
     let kind = model.unwrap_or_else(|| "base".to_string());
     let res_dir = app.path().resource_dir().ok();
-    let model = resolve_model(res_dir.as_deref(), &kind)?;
+    let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
-    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model));
+    std::thread::spawn(move || crate::audio::run_listen_loop(app2, flag, model, binary));
     Ok(())
 }
 
@@ -1070,6 +1083,7 @@ mod tests {
             current: Mutex::new(ProjectionState::Blank),
             settings: Mutex::new(ProjectionSettings::default()),
             stage: Mutex::new(StageInfo::default()),
+            ready: Arc::new(AtomicBool::new(true)),
             listening: Arc::new(AtomicBool::new(false)),
             remote_running: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),

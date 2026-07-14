@@ -140,6 +140,11 @@ fn main() {
     let n = wavs.len().min(expected.len());
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let binary = root.join("bin").join("whisper-cli.exe");
+    if !binary.exists() {
+        eprintln!("no whisper binary at {}", binary.display());
+        std::process::exit(2);
+    }
     let models: Vec<(&str, PathBuf)> = ["base", "small"]
         .iter()
         .map(|m| (*m, root.join("models").join(format!("ggml-{m}.en.bin"))))
@@ -148,26 +153,47 @@ fn main() {
 
     // Encode dominates runtime, so fit_window is swept first-class alongside the
     // accuracy knobs — it is the setting that decides whether beam search is
-    // affordable at all.
+    // affordable at all. BENCH_GRID=quick trims to the four that matter when the
+    // point is speed rather than an accuracy shoot-out.
+    // The window margin is the knob that trades encode time against decoder
+    // loops/accuracy, so it is swept as a value rather than a flag.
+    let quick = std::env::var("BENCH_GRID").map(|v| v == "quick").unwrap_or(false);
+    let windows = if quick {
+        vec![stt::Window::Fit { margin: 1.5 }, stt::Window::Full]
+    } else {
+        vec![
+            stt::Window::Fit { margin: 1.2 },
+            stt::Window::Fit { margin: 1.5 },
+            stt::Window::Fit { margin: 2.0 },
+            stt::Window::Fit { margin: 3.0 },
+            stt::Window::Full,
+        ]
+    };
     let mut configs: Vec<stt::Decode> = Vec::new();
     for beam in [1, 5] {
-        for prompt in [true, false] {
-            for fit_window in [true, false] {
-                configs.push(stt::Decode { beam, prompt, normalize: true, fit_window });
-            }
+        for window in &windows {
+            configs.push(stt::Decode { beam, prompt: true, normalize: true, window: *window });
         }
     }
-    // One unnormalized control, to show whether gain matters at all.
-    configs.push(stt::Decode { beam: 5, prompt: true, normalize: false, fit_window: true });
+    if !quick {
+        // Controls: is the scripture prompt earning its keep, and does gain matter?
+        let base = stt::Decode { beam: 5, window: stt::Window::Fit { margin: 1.5 }, ..Default::default() };
+        configs.push(stt::Decode { prompt: false, ..base });
+        configs.push(stt::Decode { normalize: false, ..base });
+    }
 
     println!("{n} clips · {} models · {} configs\n", models.len(), configs.len());
 
     let mut summary: Vec<(String, usize, f32)> = Vec::new();
     for (name, model) in &models {
         for cfg in &configs {
+            let win = match cfg.window {
+                stt::Window::Full => "full".to_string(),
+                stt::Window::Fit { margin } => format!("fit{margin}"),
+            };
             let label = format!(
-                "{name} beam={} prompt={} norm={} fit={}",
-                cfg.beam, cfg.prompt as u8, cfg.normalize as u8, cfg.fit_window as u8
+                "{name} beam={} prompt={} norm={} win={win}",
+                cfg.beam, cfg.prompt as u8, cfg.normalize as u8
             );
             let mut correct = 0usize;
             let mut secs = 0.0f32;
@@ -181,7 +207,7 @@ fn main() {
                     }
                 };
                 let t0 = Instant::now();
-                let raw = match stt::transcribe(&audio, model, *cfg) {
+                let raw = match stt::transcribe(&audio, model, &binary, *cfg) {
                     Ok(t) => t,
                     Err(e) => {
                         eprintln!("  {i:>2} FAILED: {e}");

@@ -42,7 +42,8 @@
     "targets": "all",
     "resources": {
       "../data/*.canonical.json": "data/",
-      "../bundled/models/*.bin": "models/"
+      "../bundled/models/*.bin": "models/",
+      "../bundled/bin/*": "bin/"
     },
     "icon": [
       "icons/32x32.png",
