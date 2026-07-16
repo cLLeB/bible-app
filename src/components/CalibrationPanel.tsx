@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { LearnFromSermon } from "./LearnFromSermon";
 import {
   PROTECTED_PROFILES,
+  forgetRecordings,
+  recordingConsent,
   removeVoiceProfile,
+  setRecordingConsent,
   setVoiceProfile,
   voiceProfiles,
   type SttModel,
@@ -11,6 +14,8 @@ import {
 interface CalibrationPanelProps {
   model: SttModel;
   disabled: boolean;
+  /** Told whenever the speaker, or what they have agreed to, changes. */
+  onProfileChange?: () => void;
 }
 
 /**
@@ -18,9 +23,10 @@ interface CalibrationPanelProps {
  * are stored per speaker, so each is tuned on their own. The President and
  * Vice-President are baked in and can't be removed.
  */
-export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
+export function CalibrationPanel({ model, disabled, onProfileChange }: CalibrationPanelProps) {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [who, setWho] = useState<string>("");
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function load(): void {
@@ -30,6 +36,7 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
         setWho(p.active);
       })
       .catch(() => undefined);
+    void recordingConsent().then(setConsent).catch(() => undefined);
   }
 
   useEffect(load, []);
@@ -41,6 +48,41 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
       await setVoiceProfile(name);
       setWho(name);
       if (!profiles.includes(name)) setProfiles([...profiles, name]);
+      // Consent belongs to the person, so it has to be re-read for whoever this is.
+      setConsent(await recordingConsent());
+      onProfileChange?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function changeConsent(on: boolean): Promise<void> {
+    setError(null);
+    try {
+      await setRecordingConsent(on);
+      setConsent(on);
+      onProfileChange?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function forgetAll(): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete every recording of ${who} from this machine? This cannot be undone, and it also turns recording off for them.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      const gone = await forgetRecordings();
+      setConsent(false);
+      onProfileChange?.();
+      window.alert(
+        gone === 0 ? `There was nothing recorded for ${who}.` : `Deleted ${gone} recording${gone === 1 ? "" : "s"} of ${who}.`,
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -105,6 +147,36 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
           Each speaker is tuned on their own — teaching one never affects the others.
           Everything stays on this machine.
         </p>
+
+        {/* Recording a preacher is their call, not the app's. Off until asked for,
+            asked per speaker, and undoable — including the recordings themselves. */}
+        <div className="rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={consent}
+              disabled={disabled || !who}
+              onChange={(e) => void changeConsent(e.target.checked)}
+            />
+            <span>
+              Record services to improve {who || "this speaker"}
+              <span className="block text-xs text-[var(--muted)]">
+                Keeps the last few services on this machine so the app can learn {who || "them"}’s
+                voice. Nothing leaves this machine, nothing is uploaded, and you can delete it all
+                at any time.
+              </span>
+            </span>
+          </label>
+          <button
+            className="btn btn-sm mt-1.5"
+            disabled={disabled || !who}
+            onClick={() => void forgetAll()}
+            title="Delete every recording of this speaker"
+          >
+            Delete {who || "this speaker"}’s recordings
+          </button>
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 

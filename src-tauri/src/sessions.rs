@@ -301,6 +301,45 @@ impl Recorder {
     }
 }
 
+// ---- consent ----------------------------------------------------------------------
+//
+// Recording a preacher is a knowing choice somebody makes about a person, so it is
+// asked per speaker and it is off until asked for. Nothing about it is inferred: the
+// operator having recorded the President says nothing about a visiting preacher.
+
+fn consent_key(profile: &str) -> String {
+    format!("consent:{profile}")
+}
+
+/// Has this speaker been opted in to having their services recorded? Off unless it
+/// was deliberately turned on — the default answer about a person is always no.
+pub fn consented(db: &Db, profile: &str) -> bool {
+    db.get_setting(&consent_key(profile)).as_deref() == Some("1")
+}
+
+/// Opt a speaker in or out. Turning it off leaves their recordings in place: throwing
+/// away what is already recorded is a separate, explicit act (`forget`), because the
+/// operator may be stopping recording for a hundred reasons that are not "destroy it".
+pub fn set_consent(db: &Db, profile: &str, on: bool) -> rusqlite::Result<()> {
+    if on {
+        db.set_setting(&consent_key(profile), "1")
+    } else {
+        db.delete_setting(&consent_key(profile))
+    }
+}
+
+/// Delete every recorded service for a speaker, and forget that they were ever opted
+/// in. What a church asks for when a preacher, or they, change their mind.
+pub fn forget(db: &Db, dir: &Path, profile: &str) -> rusqlite::Result<usize> {
+    let removed = list_audio(dir);
+    for audio in &removed {
+        discard(audio);
+    }
+    let _ = std::fs::remove_dir(dir); // only if now empty; an error here is not interesting
+    set_consent(db, profile, false)?;
+    Ok(removed.len())
+}
+
 /// How many services the operator keeps per speaker — clamped to [2, 5], default 5.
 pub fn window_size(db: &Db) -> usize {
     db.get_setting("session_window")
@@ -463,6 +502,48 @@ mod tests {
             assert!(audio_named(&dir, bad).is_none(), "{bad} must be rejected");
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_speaker_is_not_recorded_until_somebody_says_so_and_never_on_another_s_say_so() {
+        let db = crate::db::open_at(Path::new(":memory:")).unwrap();
+        db.migrate().unwrap();
+        // The default answer about recording a person is no.
+        assert!(!consented(&db, "President"));
+        assert!(!consented(&db, "Guest — Pastor Mensah"));
+
+        set_consent(&db, "President", true).unwrap();
+        assert!(consented(&db, "President"));
+        // Consent is about a person: the President's does not extend to a visitor.
+        assert!(!consented(&db, "Guest — Pastor Mensah"));
+
+        set_consent(&db, "President", false).unwrap();
+        assert!(!consented(&db, "President"));
+    }
+
+    #[test]
+    fn opting_out_keeps_the_recordings_but_forgetting_destroys_them() {
+        let base = std::env::temp_dir().join(format!("nb-consent-{}", std::process::id()));
+        let db = crate::db::open_at(Path::new(":memory:")).unwrap();
+        db.migrate().unwrap();
+        let dir = dir_for(&base, "President");
+        set_consent(&db, "President", true).unwrap();
+        let samples = vec![0.0f32; 1600];
+        for i in 0..2 {
+            save_session(&dir, &format!("{:013}", 1_000_000 + i), &samples, "{}", MAX_KEEP).unwrap();
+        }
+
+        // Merely stopping recording is not a demand to destroy what exists.
+        set_consent(&db, "President", false).unwrap();
+        assert_eq!(list_audio(&dir).len(), 2);
+
+        // Forgetting is: audio, sidecars and the opt-in all go.
+        set_consent(&db, "President", true).unwrap();
+        assert_eq!(forget(&db, &dir, "President").unwrap(), 2);
+        assert!(list_audio(&dir).is_empty());
+        assert!(!consented(&db, "President"), "forgetting withdraws the opt-in too");
+        assert_eq!(forget(&db, &dir, "President").unwrap(), 0, "and is safe to repeat");
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

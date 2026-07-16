@@ -1041,11 +1041,22 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     // If recording is on, capture this whole service to the active speaker's rolling
     // folder so it can be learned from later. On-device only.
     let record = if state.recording.load(Ordering::SeqCst) {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let who = crate::calibrate::active_profile(&db);
+        // The last word on whether a preacher is recorded, checked against the speaker
+        // who is actually about to preach — not whoever was selected when the switch
+        // was flipped.
+        if !crate::sessions::consented(&db, &who) {
+            drop(db);
+            state.recording.store(false, Ordering::SeqCst);
+            return Err(format!(
+                "{who} has not been opted in to being recorded, so this service will not be \
+                 recorded. Start listening again to go ahead without it."
+            ));
+        }
         if let Ok(mut m) = state.moments.lock() {
             m.clear(); // fresh log for this service
         }
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        let who = crate::calibrate::active_profile(&db);
         let keep = crate::sessions::window_size(&db);
         app.path().app_data_dir().ok().map(|base| crate::sessions::RecordTarget {
             dir: crate::sessions::dir_for(&base, &who),
@@ -1066,9 +1077,62 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
 
 /// Turn recording of services on or off (for learning). Off by default; stays on until
 /// switched off. Nothing is uploaded — recordings live only on this machine.
+///
+/// Recording is refused for a speaker who has not been opted in. The console does not
+/// offer the switch in that case, so this is the guard behind the guard: whatever
+/// route arrives here, an un-consented preacher is not recorded.
 #[tauri::command]
-pub fn set_recording(on: bool, state: tauri::State<'_, AppState>) {
+pub fn set_recording(on: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if on {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let who = crate::calibrate::active_profile(&db);
+        if !crate::sessions::consented(&db, &who) {
+            return Err(format!(
+                "Turn on “Record services to improve {who}” first — recording a preacher is \
+                 their call to make."
+            ));
+        }
+    }
     state.recording.store(on, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Whether the speaker preaching today has been opted in to being recorded.
+#[tauri::command]
+pub fn recording_consent(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let who = crate::calibrate::active_profile(&db);
+    Ok(crate::sessions::consented(&db, &who))
+}
+
+/// Opt today's speaker in or out of having their services recorded. Opting out also
+/// switches off any recording armed for them — the answer takes effect at once.
+#[tauri::command]
+pub fn set_recording_consent(on: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let who = crate::calibrate::active_profile(&db);
+    crate::sessions::set_consent(&db, &who, on).map_err(|e| e.to_string())?;
+    if !on {
+        state.recording.store(false, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+/// Delete every recording of today's speaker and forget they were opted in. Returns
+/// how many services were thrown away.
+#[tauri::command]
+pub fn forget_recordings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    let dir = session_dir(&app, &state)?;
+    state.recording.store(false, Ordering::SeqCst);
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let who = crate::calibrate::active_profile(&db);
+    let gone = crate::sessions::forget(&db, &dir, &who).map_err(|e| e.to_string())?;
+    // A proposal drawn from recordings that no longer exist has no evidence behind it.
+    crate::relearn::drop_proposal(&db, &who).map_err(|e| e.to_string())?;
+    Ok(gone)
 }
 
 #[tauri::command]
@@ -1636,17 +1700,35 @@ pub fn set_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Res
         return Err("Give the voice a name.".into());
     }
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())
+    crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())?;
+    // Recording is armed for a person, not for the app. A guest stepping up must never
+    // inherit the consent the regular preacher gave.
+    if !crate::sessions::consented(&db, name) {
+        state.recording.store(false, Ordering::SeqCst);
+    }
+    Ok(())
 }
 
 /// Remove an added speaker. The President and Vice-President are baked in and protected.
+/// Removing a speaker takes everything of theirs with it — their recordings above all.
+/// A church that deletes a guest preacher has every right to expect the recordings of
+/// that guest to be gone, not orphaned in a folder nothing points at any more.
 #[tauri::command]
-pub fn remove_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub fn remove_voice_profile(
+    app: tauri::AppHandle,
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let name = name.trim();
     if crate::calibrate::is_protected(name) {
         return Err("The President and Vice-President profiles can't be removed.".into());
     }
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let dir = crate::sessions::dir_for(&base, name);
+    let _ = crate::sessions::forget(&db, &dir, name);
+    let _ = crate::relearn::drop_proposal(&db, name);
+    let _ = crate::profile_seed::clear(&db, name);
     crate::calibrate::remove_profile(&db, name).map_err(|e| e.to_string())
 }
 

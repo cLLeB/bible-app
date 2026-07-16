@@ -9,6 +9,7 @@ import {
   blankProjection,
   recordChoice,
   recordMoment,
+  recordingConsent,
   recordingEnabled,
   setRecording,
   startListening,
@@ -74,12 +75,31 @@ export function ListenPanel() {
   }, []);
 
   const [recording, setRecordingState] = useState(false);
-  useEffect(() => {
+  // Whether today's speaker has agreed to be recorded at all. Without that there is
+  // no switch to offer: the app does not ask the operator to decide for the preacher.
+  const [consent, setConsent] = useState(false);
+  const [reviewKey, setReviewKey] = useState(0);
+
+  function loadRecording(): void {
     void recordingEnabled().then(setRecordingState).catch(() => undefined);
-  }, []);
+    void recordingConsent().then(setConsent).catch(() => undefined);
+  }
+  useEffect(loadRecording, []);
+
+  // The speaker (or their answer) changed: re-read both, and rebuild the panels that
+  // are about that speaker's recordings.
+  function profileChanged(): void {
+    loadRecording();
+    setReviewKey((k) => k + 1);
+  }
+
   function changeRecording(v: boolean): void {
     setRecordingState(v);
-    void setRecording(v);
+    setRecording(v).catch((err: unknown) => {
+      // Refused — almost certainly consent was withdrawn elsewhere. Show the truth.
+      setRecordingState(false);
+      setError(err instanceof Error ? err.message : String(err));
+    });
   }
 
   // Refs so the once-registered event listener sees current values.
@@ -264,31 +284,34 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop listening" : "● Start listening"}
         </button>
-        <label
-          className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          title="Record this service to improve the profile — stays on this machine. Set before starting."
-        >
-          <input
-            type="checkbox"
-            checked={recording}
-            disabled={listening}
-            onChange={(e) => changeRecording(e.target.checked)}
-          />
-          Record service
-        </label>
+        {consent && (
+          <label
+            className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
+            title="Record this service to improve the profile — stays on this machine. Set before starting."
+          >
+            <input
+              type="checkbox"
+              checked={recording}
+              disabled={listening}
+              onChange={(e) => changeRecording(e.target.checked)}
+            />
+            Record service
+          </label>
+        )}
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}
 
       <AudioInputPicker disabled={listening} />
 
-      <CalibrationPanel model={model} disabled={listening} />
+      <CalibrationPanel model={model} disabled={listening} onProfileChange={profileChanged} />
 
-      {/* Only after the service, when there is something to look back on. */}
+      {/* Only after the service, when there is something to look back on. Keyed on the
+          speaker so switching preacher never shows the previous one's services. */}
       {!listening && (
         <>
-          <ServiceReview />
-          <LearningPanel />
+          <ServiceReview key={`review-${reviewKey}`} />
+          <LearningPanel key={`learning-${reviewKey}`} />
         </>
       )}
 

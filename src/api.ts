@@ -206,8 +206,19 @@ export const startListening = (model: SttModel): Promise<void> =>
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");
 
 // Record the live service (for on-device learning). Off by default; set before Start.
+// Refused for a speaker who hasn't been opted in.
 export const setRecording = (on: boolean): Promise<void> => invoke<void>("set_recording", { on });
 export const recordingEnabled = (): Promise<boolean> => invoke<boolean>("recording_enabled");
+
+/** Has today's speaker been opted in to having their services recorded? */
+export const recordingConsent = (): Promise<boolean> => invoke<boolean>("recording_consent");
+
+/** Opt today's speaker in or out. Opting out disarms recording immediately. */
+export const setRecordingConsent = (on: boolean): Promise<void> =>
+  invoke<void>("set_recording_consent", { on });
+
+/** Delete every recording of today's speaker and withdraw the opt-in. Returns how many went. */
+export const forgetRecordings = (): Promise<number> => invoke<number>("forget_recordings");
 
 /** One thing that happened during a recorded service. `kind` decides how much the
  *  learner trusts it: "confirmed" (speaker read it aloud) > "operator" (the operator
