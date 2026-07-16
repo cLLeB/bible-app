@@ -415,6 +415,10 @@ pub struct Learned {
     pub before: usize,
     /// How many the winning settings recover.
     pub after: usize,
+    /// How many the settings already in force for this speaker recover — the honest
+    /// comparison when re-learning someone the app is already tuned for. `None` when
+    /// there was no incumbent to measure (a speaker being learned for the first time).
+    pub incumbent: Option<usize>,
     pub minutes: f32,
     pub recordings: usize,
 }
@@ -430,11 +434,17 @@ pub struct Learned {
 /// the database lock, so the app can hold the lock only for each brief lookup rather
 /// than for the whole hours-long pass. `say(stage, done, total, base, share)` reports
 /// progress: `base` is the fraction already complete, `share` this stage's slice.
+///
+/// `incumbent` is the settings this speaker is already tuned with, if any. They are
+/// scored alongside the candidates on the same audio, so a re-learn can answer the
+/// only question that matters — is this actually better than what we have? — rather
+/// than only comparing against the shipped defaults.
 pub fn run(
     scout_model: &Path,
     target_model: &Path,
     binary: &Path,
     paths: &[String],
+    incumbent: Option<Decode>,
     mut reading: impl FnMut(&str) -> Option<crate::db::VerseRecord>,
     mut say: impl FnMut(&str, usize, usize, f32, f32),
 ) -> Result<Learned, String> {
@@ -530,9 +540,17 @@ pub fn run(
 
     // ---- pass two: which settings recover the most of it? ------------------------
     let baseline = Decode::for_model(target_model);
-    let configs = candidates();
+    let mut configs = candidates();
+    // The settings in force get measured on this audio too, even if they are not one of
+    // the usual candidates — otherwise "better than what we have" would be a guess.
+    if let Some(inc) = incumbent {
+        if !configs.contains(&inc) {
+            configs.push(inc);
+        }
+    }
     let mut best: Option<(Decode, usize)> = None;
     let mut before = 0usize;
+    let mut incumbent_score: Option<usize> = None;
 
     for (ci, cfg) in configs.iter().enumerate() {
         say(
@@ -557,6 +575,9 @@ pub fn run(
             .count();
         if *cfg == baseline {
             before = found;
+        }
+        if Some(*cfg) == incumbent {
+            incumbent_score = Some(found);
         }
         if best.as_ref().map(|(_, b)| found > *b).unwrap_or(true) {
             best = Some((*cfg, found));
@@ -589,6 +610,7 @@ pub fn run(
         references_found: truth.len(),
         before,
         after,
+        incumbent: incumbent_score,
         minutes,
         recordings: used,
     })

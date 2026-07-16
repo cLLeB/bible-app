@@ -84,7 +84,9 @@ fn main() {
     };
     let reading = |text: &str| learn::reading_of(&db, text);
 
-    let learned = match learn::run(&scout_model, &target_model, &binary, &recordings, reading, say) {
+    // Baking a profile from scratch: there is nothing already in force to measure against.
+    let learned = match learn::run(&scout_model, &target_model, &binary, &recordings, None, reading, say)
+    {
         Ok(l) => l,
         Err(e) => {
             eprintln!("\n{e}");

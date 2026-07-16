@@ -1283,7 +1283,15 @@ fn learn_sermons(
     let learned = {
         let state = app.state::<AppState>();
         let reading = |text: &str| state.db.lock().ok().and_then(|db| learn::reading_of(&db, text));
-        learn::run(&scout_model, &target_model, &binary, &paths, reading, say)?
+        // The wizard is the operator asking for this speaker to be learned from these
+        // recordings, so it applies what it finds; the incumbent is scored only to
+        // report how the settings in force did on the same audio.
+        let incumbent = state
+            .db
+            .lock()
+            .ok()
+            .map(|db| crate::calibrate::load(&db, &target_model, &profile));
+        learn::run(&scout_model, &target_model, &binary, &paths, incumbent, reading, say)?
     };
 
     {

@@ -29,7 +29,7 @@ pub struct Seed {
     pub entries: BTreeMap<String, SeedEntry>,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct SeedEntry {
     /// Misheard word -> OSIS book id, learned from this speaker's own recordings.
     #[serde(default)]
