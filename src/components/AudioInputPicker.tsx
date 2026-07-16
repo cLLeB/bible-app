@@ -84,7 +84,7 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
           value={chosen}
           disabled={disabled}
           onChange={(e) => void choose(e.target.value)}
-          title="The feed from the sound desk — the preacher's microphone, not the room."
+          title="The sound-desk feed, not the room"
         >
           <option value="">— pick the sound-desk feed —</option>
           {devices.map((d) => (
@@ -133,10 +133,10 @@ export function AudioInputPicker({ disabled }: AudioInputPickerProps) {
       </div>
 
       {chosen === "" && (
-        <p className="text-sm" style={{ color: "var(--danger)" }}>
+        <p className="text-sm text-[var(--muted)]">
           {devices.length === 0
-            ? "No sound-desk feed is connected. Plug the laptop into the mixer (a USB cable from the desk, or a small USB audio interface off any spare send) and press Rescan."
-            : "Listening will not start until you pick the feed from the sound desk."}
+            ? "No input yet — connect the sound-desk feed (USB from the mixer, or a USB audio interface) and press Rescan."
+            : "Pick the sound-desk feed to start listening."}
         </p>
       )}
 

@@ -18,7 +18,14 @@ export default function App() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ background: "color-mix(in srgb, var(--bg) 85%, transparent)", borderColor: "var(--border)" }}>
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 lg:px-6">
-          <h1 className="text-lg font-bold tracking-tight">Bible <span className="text-[var(--muted)] font-medium">· Operator Console</span></h1>
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/newbreed_logo.png"
+              alt="New Breed"
+              style={{ height: "34px", width: "auto", borderRadius: "5px", background: "#fff", padding: "2px" }}
+            />
+            <span className="text-lg font-medium tracking-tight text-[var(--muted)]">Operator Console</span>
+          </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <TranslationPicker />
             <TranslationManager />

@@ -1256,6 +1256,17 @@ pub fn set_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Res
     crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())
 }
 
+/// Remove an added speaker. The President and Vice-President are baked in and protected.
+#[tauri::command]
+pub fn remove_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let name = name.trim();
+    if crate::calibrate::is_protected(name) {
+        return Err("The President and Vice-President profiles can't be removed.".into());
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    crate::calibrate::remove_profile(&db, name).map_err(|e| e.to_string())
+}
+
 /// Record one line of the script: waits for the speaker, endpoints on silence
 /// exactly as live listening does. Async, and the work runs off the main thread —
 /// a sync command would hold the UI thread for the length of the utterance and

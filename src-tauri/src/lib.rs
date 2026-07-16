@@ -234,6 +234,7 @@ pub fn run() {
             commands::calibration_script,
             commands::voice_profiles,
             commands::set_voice_profile,
+            commands::remove_voice_profile,
             commands::record_calibration_line,
             commands::run_calibration,
             commands::start_remote,

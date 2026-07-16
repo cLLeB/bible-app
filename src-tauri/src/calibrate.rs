@@ -127,11 +127,29 @@ pub fn resolves_to(text: &str, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Voices the app knows about. Settings are stored per speaker, not just per model:
-/// a guest calibrating on a Sunday must not overwrite the tuning of whoever normally
-/// preaches, and a voice tuned through the sound desk is not the same voice tuned
-/// close to the laptop.
-pub const DEFAULT_PROFILES: &[&str] = &["Miss Hilda", "Vice-President", "Guest"];
+/// The church's own preachers, baked in and always present. Settings are stored per
+/// speaker, so learning a guest never disturbs these two. They cannot be removed.
+pub const DEFAULT_PROFILES: &[&str] = &["President", "Vice-President"];
+
+/// One of the baked-in preachers, which the operator must not be able to delete.
+pub fn is_protected(name: &str) -> bool {
+    DEFAULT_PROFILES.iter().any(|p| *p == name)
+}
+
+/// Remove an added speaker. The two baked-in preachers are protected. If the one being
+/// removed was active, fall back to the President.
+pub fn remove_profile(db: &Db, name: &str) -> rusqlite::Result<()> {
+    if is_protected(name) {
+        return Ok(());
+    }
+    let mut all = profiles(db);
+    all.retain(|p| p != name);
+    db.set_setting("voice_profiles", &serde_json::to_string(&all).unwrap_or_default())?;
+    if active_profile(db) == name {
+        db.set_setting("voice_profile", DEFAULT_PROFILES[0])?;
+    }
+    Ok(())
+}
 
 pub fn profiles(db: &Db) -> Vec<String> {
     let stored = db
@@ -261,11 +279,17 @@ mod tests {
     fn the_regular_preacher_is_the_default_voice() {
         let db = crate::db::open_at(Path::new(":memory:")).unwrap();
         db.migrate().unwrap();
-        assert_eq!(active_profile(&db), "Miss Hilda");
+        assert_eq!(active_profile(&db), "President");
         assert!(profiles(&db).contains(&"Vice-President".to_string()));
 
         set_active_profile(&db, "Pastor Visiting").unwrap();
         assert_eq!(active_profile(&db), "Pastor Visiting");
         assert!(profiles(&db).contains(&"Pastor Visiting".to_string()));
+
+        // Added speakers can be removed; the baked-in preachers cannot.
+        remove_profile(&db, "Pastor Visiting").unwrap();
+        assert!(!profiles(&db).contains(&"Pastor Visiting".to_string()));
+        remove_profile(&db, "President").unwrap();
+        assert!(profiles(&db).contains(&"President".to_string()), "President is protected");
     }
 }

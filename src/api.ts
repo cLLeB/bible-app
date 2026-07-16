@@ -264,6 +264,12 @@ export const voiceProfiles = (): Promise<VoiceProfiles> => invoke<VoiceProfiles>
 export const setVoiceProfile = (name: string): Promise<void> =>
   invoke<void>("set_voice_profile", { name });
 
+export const removeVoiceProfile = (name: string): Promise<void> =>
+  invoke<void>("remove_voice_profile", { name });
+
+/// The baked-in preachers that can't be removed.
+export const PROTECTED_PROFILES = ["President", "Vice-President"];
+
 // ---- Learning from a sermon recording ----
 // Twelve read lines tune the app for someone reading a script at a laptop. A sermon
 // tunes it for a preacher: their pace, their accent, how they name references, and the

@@ -15,13 +15,6 @@ import {
 import { present } from "../present";
 import { useServiceStore, type Cue } from "../services";
 
-const MODEL_LABELS: Record<SttModel, string> = {
-  tiny: "Tiny (low-end PCs)",
-  base: "Base (normal)",
-  small: "Small (accurate, stronger PC)",
-  medium: "Medium (best · GPU recommended)",
-};
-
 // A medium-confidence hearing that lands on a chapter already on the run sheet is
 // certain enough to project on its own: the expectation resolves the doubt. Below this
 // floor the hearing itself was too weak to trust, even with that corroboration — so we
@@ -39,10 +32,8 @@ function onRunSheet(cues: Cue[], v: { bookOsis: string; chapter: number }): bool
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
-  const [model, setModel] = useState<SttModel>(
-    () => (localStorage.getItem("stt-model") as SttModel) || "base",
-  );
-  const [availableModels, setAvailableModels] = useState<SttModel[]>(["base", "small", "medium"]);
+  // Fixed by this build's flavor (base-personal / small-personal), not operator-switchable.
+  const [model, setModel] = useState<SttModel>("base");
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -57,10 +48,6 @@ export function ListenPanel() {
   const cues = useServiceStore((s) => s.cues);
   const runSheetVerses = cues.filter((c) => c.type === "verse").length;
 
-  function changeModel(m: SttModel): void {
-    setModel(m);
-    localStorage.setItem("stt-model", m);
-  }
   function changeAuto(v: boolean): void {
     setAutoProject(v);
     localStorage.setItem("auto-project", v ? "1" : "0");
@@ -75,12 +62,9 @@ export function ListenPanel() {
     localStorage.setItem("auto-threshold", String(v));
   }
 
-  // This build's flavor decides which whisper models are available.
+  // This build's flavor decides the model; the operator doesn't choose it.
   useEffect(() => {
-    void appFlavor().then((f) => {
-      setAvailableModels(f.models);
-      setModel((m) => (f.models.includes(m) ? m : f.defaultModel));
-    });
+    void appFlavor().then((f) => setModel(f.defaultModel));
   }, []);
 
   // Refs so the once-registered event listener sees current values.
@@ -179,7 +163,7 @@ export function ListenPanel() {
         )}
         <label
           className="ml-auto flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          title="When on, a medium-confidence detection that lands on a chapter already on the run sheet is projected automatically — the run sheet removes the doubt. Detections that aren't on the run sheet are never affected, and a weak hearing still only shows as a suggestion."
+          title="Auto-project a medium match when its chapter is on the run sheet"
         >
           <input
             type="checkbox"
@@ -191,7 +175,7 @@ export function ListenPanel() {
         </label>
         <label
           className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          title="Automatically project detections at or above this confidence"
+          title="Auto-project at or above this confidence"
         >
           <input type="checkbox" checked={autoProject} onChange={(e) => changeAuto(e.target.checked)} />
           Auto-project ≥
@@ -216,20 +200,6 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop listening" : "● Start listening"}
         </button>
-        <select
-          value={model}
-          onChange={(e) => changeModel(e.target.value as SttModel)}
-          disabled={listening}
-          className="select"
-          style={{ width: "auto", minWidth: "12rem" }}
-          title="Tiny = fastest/low-end · Base = normal · Small = accurate, stronger PC · Medium = most accurate, GPU (CUDA) recommended"
-        >
-          {availableModels.map((m) => (
-            <option key={m} value={m}>
-              {MODEL_LABELS[m]}
-            </option>
-          ))}
-        </select>
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}

@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { LearnFromSermon } from "./LearnFromSermon";
 import {
-  calibrationScript,
-  recordCalibrationLine,
-  runCalibration,
+  PROTECTED_PROFILES,
+  removeVoiceProfile,
   setVoiceProfile,
   voiceProfiles,
-  type CalibrationResult,
-  type ConfigScore,
-  type ScriptLine,
   type SttModel,
 } from "../api";
 
@@ -18,68 +13,34 @@ interface CalibrationPanelProps {
   disabled: boolean;
 }
 
-type Phase = "idle" | "recording" | "scoring" | "done";
-
 /**
- * Read a short script aloud; the app then replays those recordings through every
- * candidate recognizer setting and keeps whichever one finds the most scripture.
- * What suits one voice suits another badly — accent, pace, mic and room all move
- * the answer — so this is measured per speaker rather than guessed once for all.
+ * Pick who is preaching, and teach the app new speakers from their sermons. Settings
+ * are stored per speaker, so each is tuned on their own. The President and
+ * Vice-President are baked in and can't be removed.
  */
 export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
-  const [script, setScript] = useState<ScriptLine[]>([]);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [who, setWho] = useState<string>("");
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [current, setCurrent] = useState(0);
-  const [recorded, setRecorded] = useState<Set<number>>(new Set());
-  const [progress, setProgress] = useState<ConfigScore[]>([]);
-  const [result, setResult] = useState<CalibrationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void calibrationScript().then(setScript).catch(() => setScript([]));
+  function load(): void {
     void voiceProfiles()
       .then((p) => {
         setProfiles(p.all);
         setWho(p.active);
       })
       .catch(() => undefined);
-    const un = listen<ConfigScore>("calibration-progress", (e) =>
-      setProgress((prev) => [...prev, e.payload]),
-    );
-    return () => {
-      void un.then((f) => f());
-    };
-  }, []);
-
-  async function recordLine(index: number): Promise<void> {
-    setError(null);
-    setPhase("recording");
-    setCurrent(index);
-    try {
-      await recordCalibrationLine(index);
-      setRecorded((prev) => new Set(prev).add(index));
-      // Walk to the next unrecorded line so a full pass is just click, speak, click.
-      const next = script.findIndex((l) => l.index > index && !recorded.has(l.index));
-      setCurrent(next === -1 ? index : next);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPhase("idle");
-    }
   }
+
+  useEffect(load, []);
 
   async function changeWho(name: string): Promise<void> {
     if (!name) return;
+    setError(null);
     try {
       await setVoiceProfile(name);
       setWho(name);
       if (!profiles.includes(name)) setProfiles([...profiles, name]);
-      // Another speaker means other recordings and another result.
-      setRecorded(new Set());
-      setResult(null);
-      setProgress([]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -90,29 +51,24 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
     if (name) await changeWho(name);
   }
 
-  async function score(): Promise<void> {
+  async function removeWho(): Promise<void> {
+    if (PROTECTED_PROFILES.includes(who)) return;
+    if (!window.confirm(`Remove the “${who}” profile and its learned settings?`)) return;
     setError(null);
-    setProgress([]);
-    setPhase("scoring");
     try {
-      setResult(await runCalibration(model));
-      setPhase("done");
+      await removeVoiceProfile(who);
+      load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
-      setPhase("idle");
     }
   }
 
-  const done = recorded.size;
-  const total = script.length;
+  const protectedProfile = PROTECTED_PROFILES.includes(who);
 
   return (
     <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-        Voice calibration{" "}
-        <span className="text-[var(--muted)]">
-          — {who || "speaker"} ({done}/{total} lines recorded)
-        </span>
+        Voice profiles <span className="text-[var(--muted)]">— {who || "speaker"}</span>
       </summary>
 
       <div className="space-y-3 px-3 pb-3">
@@ -122,8 +78,9 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
             className="select"
             style={{ width: "auto", minWidth: "12rem" }}
             value={who}
-            disabled={disabled || phase !== "idle"}
+            disabled={disabled}
             onChange={(e) => void changeWho(e.target.value)}
+            title="Whose voice the app is tuned for"
           >
             {profiles.map((p) => (
               <option key={p} value={p}>
@@ -131,88 +88,27 @@ export function CalibrationPanel({ model, disabled }: CalibrationPanelProps) {
               </option>
             ))}
           </select>
-          <button className="btn" disabled={disabled || phase !== "idle"} onClick={() => void addWho()}>
-            + Add speaker
+          <button className="btn" disabled={disabled} onClick={() => void addWho()}>
+            + Add
+          </button>
+          <button
+            className="btn"
+            disabled={disabled || protectedProfile}
+            onClick={() => void removeWho()}
+            title={protectedProfile ? "Baked-in preachers can't be removed" : "Remove this profile"}
+          >
+            Remove
           </button>
         </div>
 
         <p className="text-sm text-[var(--muted)]">
-          Each speaker is tuned separately, so calibrating a guest never disturbs anyone
-          else's settings. Have them read the lines the way they'd actually preach —
-          through the same microphone or desk feed the service will use, since that is the
-          sound the app has to work with. Nothing leaves this machine.
+          Each speaker is tuned on their own — teaching one never affects the others.
+          Everything stays on this machine.
         </p>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
-        <LearnFromSermon model={model} who={who} disabled={disabled || phase !== "idle"} />
-
-        <p className="text-sm text-[var(--muted)]">
-          Or read the lines below yourself — quicker, but a script read at a laptop is not
-          how anyone preaches.
-        </p>
-
-        <ol className="space-y-1">
-          {script.map((line) => (
-            <li
-              key={line.index}
-              className="flex items-center gap-2 text-sm"
-              style={{ opacity: line.index === current || recorded.has(line.index) ? 1 : 0.65 }}
-            >
-              <span className="w-5 text-right text-[var(--muted)]">{line.index + 1}.</span>
-              <span className="flex-1">“{line.say}”</span>
-              {recorded.has(line.index) && <span style={{ color: "var(--live)" }}>✓</span>}
-              <button
-                className="btn"
-                disabled={disabled || phase !== "idle"}
-                onClick={() => void recordLine(line.index)}
-              >
-                {phase === "recording" && current === line.index
-                  ? "listening…"
-                  : recorded.has(line.index)
-                    ? "redo"
-                    : "record"}
-              </button>
-            </li>
-          ))}
-        </ol>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            className="btn btn-primary"
-            disabled={disabled || done === 0 || phase !== "idle"}
-            onClick={() => void score()}
-          >
-            {phase === "scoring" ? "Comparing settings…" : `Tune ${model} for ${who || "this speaker"}`}
-          </button>
-          {disabled && (
-            <span className="text-sm text-[var(--muted)]">Stop listening first.</span>
-          )}
-        </div>
-
-        {phase === "scoring" && progress.length > 0 && (
-          <ul className="space-y-1 text-sm text-[var(--muted)]">
-            {progress.map((p) => (
-              <li key={p.label}>
-                {p.label}: {p.resolved}/{p.total} found · {p.secondsPerClip.toFixed(1)}s
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {result && phase === "done" && (
-          <div className="space-y-1 text-sm">
-            <p>
-              <strong>Now using: {result.best.label}</strong> — found{" "}
-              {result.best.resolved} of {result.best.total} references,{" "}
-              {result.best.secondsPerClip.toFixed(1)}s each.
-            </p>
-            <p className="text-[var(--muted)]">
-              The shipped default ({result.baseline.label}) found {result.baseline.resolved} of{" "}
-              {result.baseline.total} on this voice. Only {who}'s settings changed.
-            </p>
-          </div>
-        )}
+        <LearnFromSermon model={model} who={who} disabled={disabled} />
       </div>
     </details>
   );

@@ -80,12 +80,9 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
       </div>
 
       <p className="text-sm text-[var(--muted)]">
-        Pick one or more recordings of {who || "this speaker"} — MP3, M4A, WAV, FLAC, any
-        length, as many as you have. More sermons make a better profile. The app listens to
-        all of it, finds the scripture they read out (which is what a human operator got
-        right that day), and works out what suits this voice: the recognizer settings, how
-        their book names get misheard, which Bible version they read from, and how loud
-        their sound feed runs. It takes a while, and nothing leaves this machine.
+        Pick any recordings of {who || "this speaker"} preaching (MP3, M4A, WAV, FLAC) — the
+        more, the better. The app learns their voice from the scriptures they read aloud.
+        Takes a while; stays on this machine.
       </p>
 
       {running && progress && (

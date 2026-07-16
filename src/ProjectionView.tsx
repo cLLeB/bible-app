@@ -88,7 +88,20 @@ export function ProjectionView() {
           </>
         );
       case "logo":
-        return <p style={{ fontSize: `${2.5 * scale}rem`, opacity: 0.85 }}>✝ Bible</p>;
+        return (
+          <img
+            src="/newbreed_logo.png"
+            alt="New Breed"
+            style={{
+              width: `${45 * scale}vw`,
+              maxWidth: "40rem",
+              height: "auto",
+              background: "#fff",
+              borderRadius: "1rem",
+              padding: "1.5rem",
+            }}
+          />
+        );
       case "blackout":
         return null;
       case "blank":
