@@ -1162,10 +1162,16 @@ fn run_inner(
         }
     }
     drop(stream);
-    // Finalize the service recording (kept only if it ran long enough). Labels are the
-    // empty set for now; the review step fills them in.
+    // Finalize the service recording (kept only if it ran long enough), writing the
+    // moments captured during it into the sidecar.
     if let Some(r) = recorder {
-        r.finish("{\"moments\":[]}");
+        let moments = tauri::Manager::state::<crate::commands::AppState>(app)
+            .moments
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_default();
+        let labels = serde_json::json!({ "moments": moments, "savedAt": crate::sessions::now_stamp() });
+        r.finish(&serde_json::to_string(&labels).unwrap_or_else(|_| "{\"moments\":[]}".into()));
     }
     Ok(())
 }

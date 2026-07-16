@@ -23,6 +23,8 @@ pub struct AppState {
     // Operator corrections: description signature -> chosen verse, so a repeated
     // paraphrase is ranked toward what the operator picked last time.
     pub learned: Mutex<std::collections::HashMap<String, (String, u16, u16)>>,
+    // Moments captured during a recorded service, written to the session on stop.
+    pub moments: Mutex<Vec<crate::sessions::Moment>>,
 }
 
 /// The scripture currently on screen, for fast verse/chapter navigation.
@@ -1037,6 +1039,9 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     // If recording is on, capture this whole service to the active speaker's rolling
     // folder so it can be learned from later. On-device only.
     let record = if state.recording.load(Ordering::SeqCst) {
+        if let Ok(mut m) = state.moments.lock() {
+            m.clear(); // fresh log for this service
+        }
         let db = state.db.lock().map_err(|e| e.to_string())?;
         let who = crate::calibrate::active_profile(&db);
         let keep = crate::sessions::window_size(&db);
@@ -1067,6 +1072,15 @@ pub fn set_recording(on: bool, state: tauri::State<'_, AppState>) {
 #[tauri::command]
 pub fn recording_enabled(state: tauri::State<'_, AppState>) -> bool {
     state.recording.load(Ordering::SeqCst)
+}
+
+/// Log one moment from the live service (auto-projected, operator-corrected, confirmed).
+/// Kept in memory and written into the session recording when listening stops.
+#[tauri::command]
+pub fn record_moment(moment: crate::sessions::Moment, state: tauri::State<'_, AppState>) {
+    if let Ok(mut m) = state.moments.lock() {
+        m.push(moment);
+    }
 }
 
 #[tauri::command]
@@ -1532,6 +1546,7 @@ mod tests {
             remote_running: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),
             learned: Mutex::new(std::collections::HashMap::new()),
+            moments: Mutex::new(Vec::new()),
         }
     }
 

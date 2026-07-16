@@ -9,7 +9,37 @@
 //! `2026-07-16T15-30-05.wav` / `.json`.
 
 use crate::db::Db;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// One thing that happened during a recorded service — the raw material the review step
+/// and learning use. The trust tier is derived from `kind`:
+///   * "confirmed" — auto-projected AND the speaker read the verse aloud (Gold)
+///   * "operator"  — the operator projected/picked it themselves (Silver)
+///   * "auto"      — auto-projected, no confirmation yet (Bronze)
+///   * "corrected" — auto-projected, then the operator swapped it out (Negative: a
+///                   labelled mistake — what was heard -> the wrong guess -> the right one)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Moment {
+    pub kind: String,
+    pub reference: String,
+    pub book_osis: String,
+    pub chapter: u16,
+    pub verse: u16,
+    /// The recogniser's confidence, when the app chose it.
+    #[serde(default)]
+    pub confidence: f32,
+    /// How it was recognised ("explicit", "fuzzy", "quote", …).
+    #[serde(default)]
+    pub source: String,
+    /// What the speaker was heard to say around this moment.
+    #[serde(default)]
+    pub spoken: String,
+    /// For a correction: the wrong reference the operator replaced.
+    #[serde(default)]
+    pub replaced: String,
+}
 
 /// Most services we keep per speaker. More would waste the church's disk for little gain.
 pub const MAX_KEEP: usize = 5;

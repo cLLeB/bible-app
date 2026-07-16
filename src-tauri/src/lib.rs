@@ -142,6 +142,7 @@ pub fn run() {
                 remote_running: Arc::new(AtomicBool::new(false)),
                 cursor: Mutex::new(None),
                 learned: Mutex::new(std::collections::HashMap::new()),
+                moments: Mutex::new(Vec::new()),
             });
 
             let handle = app.handle().clone();
@@ -231,6 +232,7 @@ pub fn run() {
             commands::stop_listening,
             commands::set_recording,
             commands::recording_enabled,
+            commands::record_moment,
             commands::audio_inputs,
             commands::set_audio_input,
             commands::test_audio_input,
