@@ -209,6 +209,31 @@ export const stopListening = (): Promise<void> => invoke<void>("stop_listening")
 export const setRecording = (on: boolean): Promise<void> => invoke<void>("set_recording", { on });
 export const recordingEnabled = (): Promise<boolean> => invoke<boolean>("recording_enabled");
 
+/** One thing that happened during a recorded service. `kind` decides how much the
+ *  learner trusts it: "confirmed" (speaker read it aloud) > "operator" (the operator
+ *  chose it) > "auto" (the app chose it, unconfirmed); "corrected" is a labelled
+ *  mistake — the app projected `replaced` and the operator swapped in this verse. */
+export interface Moment {
+  kind: "auto" | "operator" | "confirmed" | "corrected";
+  reference: string;
+  bookOsis: string;
+  chapter: number;
+  verse: number;
+  /** The recognizer's confidence, when the app chose it. */
+  confidence: number;
+  /** How it was recognized ("explicit", "fuzzy", "quote", …). */
+  source: string;
+  /** What the speaker was heard to say around this moment. */
+  spoken: string;
+  /** For a correction: the wrong reference the operator replaced. */
+  replaced: string;
+}
+
+/** Log a moment against the service being recorded. Only meaningful while recording;
+ *  the backend keeps them in memory and writes them into the session on stop. */
+export const recordMoment = (moment: Moment): Promise<void> =>
+  invoke<void>("record_moment", { moment });
+
 // ---- Voice calibration ----
 // Tunes the recognizer to this speaker's voice, mic and room. Everything stays
 // on the machine: the recordings, the comparison and the result.

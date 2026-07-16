@@ -6,11 +6,13 @@ import {
   appFlavor,
   blankProjection,
   recordChoice,
+  recordMoment,
   recordingEnabled,
   setRecording,
   startListening,
   stopListening,
   type Candidate,
+  type Moment,
   type SttModel,
   type VersePayload,
 } from "../api";
@@ -85,10 +87,38 @@ export function ListenPanel() {
   thresholdRef.current = threshold;
   const runSheetRef = useRef(false);
   runSheetRef.current = useRunSheet;
+  const recordingRef = useRef(false);
+  recordingRef.current = recording;
+  // Latest hearing, so a moment can say what the speaker was saying at the time.
+  const spokenRef = useRef("");
+
+  // The last verse the app projected on its own. If the operator then picks a
+  // different one, that pick is a correction of this — the most valuable label we
+  // can collect, because it names both the mistake and the right answer.
+  const lastAutoRef = useRef<{ reference: string; spoken: string } | null>(null);
+
+  // Moments are only meaningful for a service that is being recorded; with the
+  // toggle off nothing about the service is kept, and this must keep that promise.
+  function logMoment(kind: Moment["kind"], v: VersePayload, extra: Partial<Moment> = {}): void {
+    if (!recordingRef.current) return;
+    void recordMoment({
+      kind,
+      reference: v.reference,
+      bookOsis: v.bookOsis,
+      chapter: v.chapter,
+      verse: v.verse,
+      confidence: 0,
+      source: "",
+      spoken: spokenRef.current,
+      replaced: "",
+      ...extra,
+    }).catch(() => undefined); // a lost label must never disturb the service
+  }
 
   useEffect(() => {
     const unlisteners = [
       listen<string>("transcript", (e) => {
+        spokenRef.current = e.payload;
         setLines((prev) => [e.payload, ...prev].slice(0, 6));
       }),
       listen<Candidate>("verse-candidate", (e) => {
@@ -97,7 +127,7 @@ export function ListenPanel() {
         if (!autoRef.current || c.source === "voice-nav") return;
         // Confident enough on its own → project.
         if (c.confidence >= thresholdRef.current) {
-          void present(c.verse);
+          autoProjected(c);
           return;
         }
         // Not sure enough on the hearing alone — but if it lands on a chapter the
@@ -110,7 +140,7 @@ export function ListenPanel() {
           c.confidence >= RUN_SHEET_ASSIST_FLOOR &&
           onRunSheet(useServiceStore.getState().cues, c.verse)
         ) {
-          void present(c.verse);
+          autoProjected(c);
         }
       }),
       // The speaker confirmed a suggested verse (said "yes"/"amen" or read it
@@ -118,6 +148,10 @@ export function ListenPanel() {
       listen<VersePayload>("verse-confirmed", (e) => {
         setConfirmed(e.payload.reference);
         void present(e.payload);
+        // The speaker himself vouched for this one, so it is no longer an
+        // unconfirmed guess the operator might be about to correct.
+        logMoment("confirmed", e.payload, { spoken: lastAutoRef.current?.spoken ?? spokenRef.current });
+        lastAutoRef.current = null;
       }),
       // Standby alternatives for the current best guess — operator can pick one.
       listen<VersePayload[]>("verse-alternatives", (e) => {
@@ -139,6 +173,14 @@ export function ListenPanel() {
     };
   }, []);
 
+  // The app decided this one by itself. Remember it: if the operator overrides it in
+  // a moment, that override is a labelled mistake worth more than the guess.
+  function autoProjected(c: Candidate): void {
+    void present(c.verse);
+    logMoment("auto", c.verse, { confidence: c.confidence, source: c.source });
+    lastAutoRef.current = { reference: c.verse.reference, spoken: spokenRef.current };
+  }
+
   // Present a verse and teach the ranker which one the operator chose for the
   // current spoken description.
   function pick(v: VersePayload): void {
@@ -146,6 +188,15 @@ export function ListenPanel() {
     if (lines[0]) {
       void recordChoice(lines[0], v.bookOsis, v.chapter, v.verse);
     }
+    // Replacing what the app had just put on screen is a correction; anything else
+    // is the operator simply driving.
+    const auto = lastAutoRef.current;
+    if (auto && auto.reference !== v.reference) {
+      logMoment("corrected", v, { replaced: auto.reference, spoken: auto.spoken });
+    } else {
+      logMoment("operator", v);
+    }
+    lastAutoRef.current = null;
   }
 
   async function toggle(): Promise<void> {
