@@ -6,6 +6,8 @@ import {
   appFlavor,
   blankProjection,
   recordChoice,
+  recordingEnabled,
+  setRecording,
   startListening,
   stopListening,
   type Candidate,
@@ -66,6 +68,15 @@ export function ListenPanel() {
   useEffect(() => {
     void appFlavor().then((f) => setModel(f.defaultModel));
   }, []);
+
+  const [recording, setRecordingState] = useState(false);
+  useEffect(() => {
+    void recordingEnabled().then(setRecordingState).catch(() => undefined);
+  }, []);
+  function changeRecording(v: boolean): void {
+    setRecordingState(v);
+    void setRecording(v);
+  }
 
   // Refs so the once-registered event listener sees current values.
   const autoRef = useRef(false);
@@ -200,6 +211,18 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop listening" : "● Start listening"}
         </button>
+        <label
+          className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
+          title="Record this service to improve the profile — stays on this machine. Set before starting."
+        >
+          <input
+            type="checkbox"
+            checked={recording}
+            disabled={listening}
+            onChange={(e) => changeRecording(e.target.checked)}
+          />
+          Record service
+        </label>
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}

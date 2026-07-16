@@ -1047,6 +1047,7 @@ fn run_inner(
     binary: &Path,
     decode: stt::Decode,
     device: Option<&str>,
+    mut recorder: Option<crate::sessions::Recorder>,
 ) -> Result<(), String> {
     let (stream, rx) = open_mic(device)?;
     let _ = app.emit("listen-started", ());
@@ -1088,6 +1089,9 @@ fn run_inner(
             Ok(frame) => {
                 last_frame = Instant::now();
                 warned_silent = false;
+                if let Some(r) = recorder.as_mut() {
+                    r.push(&frame); // tee the live feed to this service's recording
+                }
                 recent.extend_from_slice(&frame);
                 if recent.len() > PREROLL_SAMPLES {
                     let drop = recent.len() - PREROLL_SAMPLES;
@@ -1158,6 +1162,11 @@ fn run_inner(
         }
     }
     drop(stream);
+    // Finalize the service recording (kept only if it ran long enough). Labels are the
+    // empty set for now; the review step fills them in.
+    if let Some(r) = recorder {
+        r.finish("{\"moments\":[]}");
+    }
     Ok(())
 }
 
@@ -1169,6 +1178,7 @@ pub fn run_listen_loop(
     decode: stt::Decode,
     device: Option<String>,
     room: crate::learn::Room,
+    record: Option<crate::sessions::RecordTarget>,
 ) {
     // How loud counts as speech, measured from this speaker's own recordings rather
     // than assumed to be the same in every church.
@@ -1178,7 +1188,16 @@ pub fn run_listen_loop(
         Ok(_) => stt::Decode::from_env_or_model(&model),
         Err(_) => decode,
     };
-    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode, device.as_deref()) {
+    // If recording is on, open the service recording. A failure here (e.g. disk) must not
+    // stop the operator listening — just skip the recording.
+    let recorder = record.and_then(|t| match crate::sessions::Recorder::start(t) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            let _ = app.emit("listen-error", format!("Could not start recording: {e}"));
+            None
+        }
+    });
+    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode, device.as_deref(), recorder) {
         let _ = app.emit("listen-error", e);
     }
     flag.store(false, Ordering::SeqCst);

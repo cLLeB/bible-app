@@ -17,6 +17,7 @@ pub struct AppState {
     // as long as it takes), so the UI can tell "still installing" from "ready".
     pub ready: Arc<AtomicBool>,
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
+    pub recording: Arc<AtomicBool>,      // record this service for learning?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
     // Operator corrections: description signature -> chosen verse, so a repeated
@@ -1033,13 +1034,39 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
         }
         crate::learn::load_room(&db, &who)
     };
+    // If recording is on, capture this whole service to the active speaker's rolling
+    // folder so it can be learned from later. On-device only.
+    let record = if state.recording.load(Ordering::SeqCst) {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let who = crate::calibrate::active_profile(&db);
+        let keep = crate::sessions::window_size(&db);
+        app.path().app_data_dir().ok().map(|base| crate::sessions::RecordTarget {
+            dir: crate::sessions::dir_for(&base, &who),
+            name: crate::sessions::now_stamp(),
+            keep,
+        })
+    } else {
+        None
+    };
     state.listening.store(true, Ordering::SeqCst);
     let flag = state.listening.clone();
     let app2 = app.clone();
     std::thread::spawn(move || {
-        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device, room)
+        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device, room, record)
     });
     Ok(())
+}
+
+/// Turn recording of services on or off (for learning). Off by default; stays on until
+/// switched off. Nothing is uploaded — recordings live only on this machine.
+#[tauri::command]
+pub fn set_recording(on: bool, state: tauri::State<'_, AppState>) {
+    state.recording.store(on, Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn recording_enabled(state: tauri::State<'_, AppState>) -> bool {
+    state.recording.load(Ordering::SeqCst)
 }
 
 #[tauri::command]
@@ -1501,6 +1528,7 @@ mod tests {
             stage: Mutex::new(StageInfo::default()),
             ready: Arc::new(AtomicBool::new(true)),
             listening: Arc::new(AtomicBool::new(false)),
+            recording: Arc::new(AtomicBool::new(false)),
             remote_running: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),
             learned: Mutex::new(std::collections::HashMap::new()),

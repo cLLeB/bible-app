@@ -205,6 +205,10 @@ export const startListening = (model: SttModel): Promise<void> =>
   invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");
 
+// Record the live service (for on-device learning). Off by default; set before Start.
+export const setRecording = (on: boolean): Promise<void> => invoke<void>("set_recording", { on });
+export const recordingEnabled = (): Promise<boolean> => invoke<boolean>("recording_enabled");
+
 // ---- Voice calibration ----
 // Tunes the recognizer to this speaker's voice, mic and room. Everything stays
 // on the machine: the recordings, the comparison and the result.

@@ -121,6 +121,71 @@ pub fn save_session(
     Ok(audio)
 }
 
+/// Where a live recording is written: the speaker's folder, the service's name, and how
+/// many services to keep afterwards.
+#[derive(Clone, Debug)]
+pub struct RecordTarget {
+    pub dir: PathBuf,
+    pub name: String,
+    pub keep: usize,
+}
+
+/// Streams the live 16 kHz mono feed straight to a WAV as the service happens, so a whole
+/// sermon never has to sit in memory. On `finish` it writes the labels sidecar and trims
+/// the speaker's folder to the rolling window.
+pub struct Recorder {
+    writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
+    target: RecordTarget,
+    written: usize,
+}
+
+/// Below this much audio a recording is not a service — a mis-click, a soundcheck — and
+/// keeping it would only push a real sermon out of the rolling window.
+const MIN_RECORDING_SAMPLES: usize = 16_000 * 20; // 20 seconds
+
+impl Recorder {
+    pub fn start(target: RecordTarget) -> std::io::Result<Recorder> {
+        std::fs::create_dir_all(&target.dir)?;
+        let path = target.dir.join(format!("{}.wav", target.name));
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let writer = hound::WavWriter::create(&path, spec).map_err(io_err)?;
+        Ok(Recorder { writer: Some(writer), target, written: 0 })
+    }
+
+    /// Append one captured frame (16 kHz mono float). Errors are swallowed: a dropped
+    /// sample must never take down the live listening loop.
+    pub fn push(&mut self, frame: &[f32]) {
+        if let Some(w) = self.writer.as_mut() {
+            for &s in frame {
+                let _ = w.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16);
+            }
+            self.written += frame.len();
+        }
+    }
+
+    /// Finalize the audio. If it is long enough to be a real service, save the labels
+    /// sidecar and enforce the rolling window; otherwise discard it so a mis-click can't
+    /// evict a real sermon. Returns the saved audio path, if kept.
+    pub fn finish(mut self, labels_json: &str) -> Option<PathBuf> {
+        if let Some(w) = self.writer.take() {
+            let _ = w.finalize();
+        }
+        let audio = self.target.dir.join(format!("{}.wav", self.target.name));
+        if self.written < MIN_RECORDING_SAMPLES {
+            let _ = std::fs::remove_file(&audio);
+            return None;
+        }
+        let _ = std::fs::write(self.target.dir.join(format!("{}.json", self.target.name)), labels_json);
+        enforce_window(&self.target.dir, self.target.keep);
+        Some(audio)
+    }
+}
+
 /// How many services the operator keeps per speaker — clamped to [2, 5], default 5.
 pub fn window_size(db: &Db) -> usize {
     db.get_setting("session_window")
