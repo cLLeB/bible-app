@@ -149,6 +149,13 @@ impl Db {
         }
     }
 
+    /// Forget one setting. Used when a locally learned layer is stripped back to what
+    /// the app shipped with, where leaving the old value would be worse than no value.
+    pub fn delete_setting(&self, key: &str) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2)

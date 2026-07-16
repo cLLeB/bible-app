@@ -49,3 +49,9 @@ pub fn models() -> Vec<&'static str> {
 pub fn default_model() -> &'static str {
     models().first().copied().unwrap_or("base")
 }
+
+/// The whisper file a model kind ("base") is kept under. Settings are stored per
+/// model file, so anything reasoning about a speaker's settings needs this name.
+pub fn model_file(kind: &str) -> String {
+    format!("ggml-{kind}.en.bin")
+}

@@ -75,6 +75,78 @@ impl DecodeSeed {
     }
 }
 
+/// The seed baked into this build. Also the immutable floor every profile can be
+/// reset back to: whatever a church's own machine learns, the shipped tuning for the
+/// President and Vice-President is always one click away.
+pub const BAKED: &str = include_str!("../profiles.seed.json");
+
+/// The baked seed, parsed. A malformed seed reads as an empty one rather than
+/// panicking a church's app on launch.
+pub fn baked() -> Seed {
+    serde_json::from_str(BAKED).unwrap_or_default()
+}
+
+/// What this build ships knowing about one speaker, if anything.
+pub fn baked_entry(profile: &str) -> Option<SeedEntry> {
+    let mut seed = baked();
+    seed.entries.remove(profile)
+}
+
+/// Write one speaker's settings into `db`, overwriting whatever is there for the
+/// models the entry mentions. Shared by first-run seeding, rollback, and reset —
+/// there is one way to install a profile, so all three land identically.
+pub fn apply_entry(db: &Db, name: &str, entry: &SeedEntry) -> rusqlite::Result<()> {
+    for (heard, osis) in &entry.aliases {
+        crate::learn::save_book_name(db, name, heard, osis)?;
+    }
+    if let Some(room) = entry.room {
+        crate::learn::save_room(db, name, &crate::learn::Room { speech_above: room })?;
+    }
+    if let Some(code) = &entry.translation {
+        crate::learn::save_translation(db, name, code)?;
+    }
+    for (model_file, d) in &entry.decode {
+        crate::calibrate::save(db, Path::new(model_file), name, &d.to_decode())?;
+    }
+    Ok(())
+}
+
+/// Everything `db` currently holds about one speaker, in the same shape the seed
+/// stores — so a live profile and a baked one are the same kind of thing, and one
+/// can be swapped for the other.
+pub fn capture(db: &Db, name: &str) -> SeedEntry {
+    let decode = crate::flavor::models()
+        .iter()
+        .map(|kind| {
+            let file = crate::flavor::model_file(kind);
+            let d = crate::calibrate::load(db, Path::new(&file), name);
+            (file, DecodeSeed::from_decode(&d))
+        })
+        .collect();
+    SeedEntry {
+        aliases: crate::learn::book_names(db, name).into_iter().collect(),
+        room: Some(crate::learn::load_room(db, name).speech_above),
+        translation: crate::learn::load_translation(db, name),
+        decode,
+    }
+}
+
+/// Strip everything this machine has learned about a speaker, leaving no local layer
+/// at all. On its own this is a reset to the shipped defaults; followed by
+/// `apply_entry` it is a replacement rather than a merge — which matters for aliases,
+/// where a wrong one learned locally has to actually go away.
+pub fn clear(db: &Db, name: &str) -> rusqlite::Result<()> {
+    for (key, _) in db.settings_with_prefix(&format!("alias:{name}:")) {
+        db.delete_setting(&key)?;
+    }
+    db.delete_setting(&format!("room:{name}"))?;
+    db.delete_setting(&format!("version:{name}"))?;
+    for kind in crate::flavor::models() {
+        db.delete_setting(&format!("decode:{}:{name}", crate::flavor::model_file(kind)))?;
+    }
+    Ok(())
+}
+
 /// Apply the baked seed to `db`, unless it has been seeded before or a church has
 /// already started calibrating. Returns whether anything was written. Never errors
 /// the caller out of starting: a malformed or empty seed just does nothing.
@@ -93,18 +165,7 @@ pub fn apply(db: &Db, json: &str) -> rusqlite::Result<bool> {
     }
 
     for (name, entry) in &seed.entries {
-        for (heard, osis) in &entry.aliases {
-            crate::learn::save_book_name(db, name, heard, osis)?;
-        }
-        if let Some(room) = entry.room {
-            crate::learn::save_room(db, name, &crate::learn::Room { speech_above: room })?;
-        }
-        if let Some(code) = &entry.translation {
-            crate::learn::save_translation(db, name, code)?;
-        }
-        for (model_file, d) in &entry.decode {
-            crate::calibrate::save(db, Path::new(model_file), name, &d.to_decode())?;
-        }
+        apply_entry(db, name, entry)?;
     }
 
     // Make the seeded speakers selectable: the default roster, plus any extra name
