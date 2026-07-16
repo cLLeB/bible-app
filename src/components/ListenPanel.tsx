@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AudioInputPicker } from "./AudioInputPicker";
 import { CalibrationPanel } from "./CalibrationPanel";
+import { ServiceReview } from "./ServiceReview";
 import {
   appFlavor,
   blankProjection,
@@ -281,6 +282,9 @@ export function ListenPanel() {
       <AudioInputPicker disabled={listening} />
 
       <CalibrationPanel model={model} disabled={listening} />
+
+      {/* Only after the service, when there is something to look back on. */}
+      {!listening && <ServiceReview />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>

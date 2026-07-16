@@ -1074,6 +1074,56 @@ pub fn recording_enabled(state: tauri::State<'_, AppState>) -> bool {
     state.recording.load(Ordering::SeqCst)
 }
 
+/// The folder of recorded services for the speaker preaching today.
+fn session_dir(app: &tauri::AppHandle, state: &AppState) -> Result<std::path::PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let who = crate::calibrate::active_profile(&db);
+    Ok(crate::sessions::dir_for(&base, &who))
+}
+
+/// The recorded services for today's speaker, newest first, with what happened in each.
+/// This is what the end-of-service review reads.
+#[tauri::command]
+pub fn review_sessions(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::sessions::SessionSummary>, String> {
+    Ok(crate::sessions::summaries(&session_dir(&app, &state)?))
+}
+
+/// Approve a reviewed service, keeping only the moments the operator left in place.
+/// Until this happens the service sits on disk and teaches the app nothing.
+#[tauri::command]
+pub fn approve_session(
+    name: String,
+    moments: Vec<crate::sessions::Moment>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let dir = session_dir(&app, &state)?;
+    let audio = crate::sessions::audio_named(&dir, &name)
+        .ok_or_else(|| format!("That recording is no longer here ({name})."))?;
+    let mut labels = crate::sessions::read_labels(&audio);
+    labels.moments = moments;
+    labels.approved = true;
+    crate::sessions::write_labels(&audio, &labels).map_err(|e| e.to_string())
+}
+
+/// Throw a recorded service away — the operator's answer to "don't keep this one".
+#[tauri::command]
+pub fn discard_session(
+    name: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let dir = session_dir(&app, &state)?;
+    let audio = crate::sessions::audio_named(&dir, &name)
+        .ok_or_else(|| format!("That recording is no longer here ({name})."))?;
+    crate::sessions::discard(&audio);
+    Ok(())
+}
+
 /// Log one moment from the live service (auto-projected, operator-corrected, confirmed).
 /// Kept in memory and written into the session recording when listening stops.
 #[tauri::command]

@@ -41,6 +41,32 @@ pub struct Moment {
     pub replaced: String,
 }
 
+/// The sidecar written beside a recorded service's audio: what happened during it, and
+/// whether the operator has since looked at it. Nothing is ever learned from a service
+/// the operator has not approved — review, not silent auto-learning.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Labels {
+    #[serde(default)]
+    pub moments: Vec<Moment>,
+    #[serde(default)]
+    pub saved_at: String,
+    #[serde(default)]
+    pub approved: bool,
+}
+
+/// One recorded service as the end-of-service review sees it.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    /// The timestamp name, which is also how the review addresses this service.
+    pub name: String,
+    pub saved_at: String,
+    pub minutes: f32,
+    pub approved: bool,
+    pub moments: Vec<Moment>,
+}
+
 /// Most services we keep per speaker. More would waste the church's disk for little gain.
 pub const MAX_KEEP: usize = 5;
 /// Fewer than this and there is not enough to tune a voice on.
@@ -97,6 +123,65 @@ pub fn enforce_window(dir: &Path, keep: usize) -> Vec<PathBuf> {
         }
     }
     removed
+}
+
+/// The labels beside a recorded service. A missing or unreadable sidecar reads as an
+/// empty, unapproved service rather than an error: the audio is still the useful part.
+pub fn read_labels(audio: &Path) -> Labels {
+    std::fs::read_to_string(audio.with_extension("json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn write_labels(audio: &Path, labels: &Labels) -> std::io::Result<()> {
+    let json = serde_json::to_string(labels)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    std::fs::write(audio.with_extension("json"), json)
+}
+
+/// How long a recorded service runs, from the WAV header.
+pub fn minutes(audio: &Path) -> f32 {
+    hound::WavReader::open(audio)
+        .map(|r| {
+            let rate = r.spec().sample_rate.max(1) as f32;
+            r.duration() as f32 / rate / 60.0
+        })
+        .unwrap_or(0.0)
+}
+
+/// Delete one recorded service — audio and labels together, so no orphan sidecar is
+/// left behind claiming a service that no longer exists.
+pub fn discard(audio: &Path) {
+    let _ = std::fs::remove_file(audio.with_extension("json"));
+    let _ = std::fs::remove_file(audio);
+}
+
+/// Every recorded service for one speaker, newest first.
+pub fn summaries(dir: &Path) -> Vec<SessionSummary> {
+    list_audio(dir)
+        .into_iter()
+        .map(|audio| {
+            let labels = read_labels(&audio);
+            SessionSummary {
+                name: audio.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                saved_at: labels.saved_at,
+                minutes: minutes(&audio),
+                approved: labels.approved,
+                moments: labels.moments,
+            }
+        })
+        .collect()
+}
+
+/// The audio for one named service in `dir`. `None` when the name isn't a plain service
+/// name — a name arriving from the UI must never be able to reach outside this folder.
+pub fn audio_named(dir: &Path, name: &str) -> Option<PathBuf> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let audio = dir.join(format!("{name}.wav"));
+    audio.exists().then_some(audio)
 }
 
 /// The per-speaker session folder under the app's data directory.
@@ -301,6 +386,83 @@ mod tests {
         assert!(!dir.join("0001000000.wav").exists()); // wrong width, never existed
         assert!(!dir.join(format!("{:013}.json", 1_000_000)).exists()); // oldest sidecar gone
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    fn moment(kind: &str, reference: &str) -> Moment {
+        Moment {
+            kind: kind.into(),
+            reference: reference.into(),
+            book_osis: "John".into(),
+            chapter: 3,
+            verse: 16,
+            confidence: 0.9,
+            source: "explicit".into(),
+            spoken: "john chapter three verse sixteen".into(),
+            replaced: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_service_is_unapproved_until_the_operator_says_otherwise() {
+        let base = std::env::temp_dir().join(format!("nb-review-{}", std::process::id()));
+        let dir = dir_for(&base, "President");
+        let samples = vec![0.0f32; 1600];
+        let labels = Labels {
+            moments: vec![moment("auto", "John 3:16"), moment("corrected", "Rom 8:28")],
+            saved_at: now_stamp(),
+            approved: false,
+        };
+        let audio =
+            save_session(&dir, "0000000000001", &samples, &serde_json::to_string(&labels).unwrap(), MAX_KEEP)
+                .unwrap();
+
+        let seen = summaries(&dir);
+        assert_eq!(seen.len(), 1);
+        assert!(!seen[0].approved, "a fresh recording must not count as reviewed");
+        assert_eq!(seen[0].moments.len(), 2);
+        assert_eq!(seen[0].name, "0000000000001");
+
+        // Approving keeps only what the operator left in place.
+        let mut kept = read_labels(&audio);
+        kept.moments.truncate(1);
+        kept.approved = true;
+        write_labels(&audio, &kept).unwrap();
+
+        let seen = summaries(&dir);
+        assert!(seen[0].approved);
+        assert_eq!(seen[0].moments.len(), 1);
+
+        discard(&audio);
+        assert!(!audio.exists() && !audio.with_extension("json").exists());
+        assert!(summaries(&dir).is_empty());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_missing_sidecar_reads_as_an_empty_unapproved_service() {
+        let dir = std::env::temp_dir().join(format!("nb-bare-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("0000000000002.wav");
+        std::fs::write(&audio, b"not really audio").unwrap();
+        let labels = read_labels(&audio);
+        assert!(!labels.approved);
+        assert!(labels.moments.is_empty());
+        assert_eq!(minutes(&audio), 0.0, "an unreadable WAV must not report a length");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_service_name_cannot_reach_outside_the_speakers_folder() {
+        let dir = std::env::temp_dir().join(format!("nb-name-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("0000000000003.wav"), b"a").unwrap();
+
+        assert!(audio_named(&dir, "0000000000003").is_some());
+        assert!(audio_named(&dir, "0000000000004").is_none(), "no such service");
+        for bad in ["..\\..\\secrets", "../../secrets", "a/b", "", "with space", "dot.dot"] {
+            assert!(audio_named(&dir, bad).is_none(), "{bad} must be rejected");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -234,6 +234,28 @@ export interface Moment {
 export const recordMoment = (moment: Moment): Promise<void> =>
   invoke<void>("record_moment", { moment });
 
+/** One recorded service belonging to the speaker preaching today. */
+export interface SessionSummary {
+  /** Timestamp name — also how approve/discard address this service. */
+  name: string;
+  savedAt: string;
+  minutes: number;
+  /** Nothing is learned from a service until the operator has approved it. */
+  approved: boolean;
+  moments: Moment[];
+}
+
+/** Recorded services for today's speaker, newest first. */
+export const reviewSessions = (): Promise<SessionSummary[]> =>
+  invoke<SessionSummary[]>("review_sessions");
+
+/** Approve a reviewed service, keeping only the moments the operator left in. */
+export const approveSession = (name: string, moments: Moment[]): Promise<void> =>
+  invoke<void>("approve_session", { name, moments });
+
+export const discardSession = (name: string): Promise<void> =>
+  invoke<void>("discard_session", { name });
+
 // ---- Voice calibration ----
 // Tunes the recognizer to this speaker's voice, mic and room. Everything stays
 // on the machine: the recordings, the comparison and the result.

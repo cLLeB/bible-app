@@ -1170,7 +1170,12 @@ fn run_inner(
             .lock()
             .map(|m| m.clone())
             .unwrap_or_default();
-        let labels = serde_json::json!({ "moments": moments, "savedAt": crate::sessions::now_stamp() });
+        // Unapproved: the operator reviews the service before anything is learned from it.
+        let labels = crate::sessions::Labels {
+            moments,
+            saved_at: crate::sessions::now_stamp(),
+            approved: false,
+        };
         r.finish(&serde_json::to_string(&labels).unwrap_or_else(|_| "{\"moments\":[]}".into()));
     }
     Ok(())
