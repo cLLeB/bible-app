@@ -92,7 +92,13 @@ export function ScripturePresenter() {
   if (!current) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-green-600 bg-green-50 p-2.5">
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-xl border p-2.5"
+      style={{
+        borderColor: "var(--primary)",
+        background: "color-mix(in srgb, var(--primary) 16%, transparent)",
+      }}
+    >
       <span className="chip" style={{ color: "var(--live)" }}>Presenting</span>
       <span className="font-semibold">{current.reference}</span>
       <span className="hidden flex-1 truncate text-xs text-gray-500 lg:inline">— {current.text}</span>

@@ -157,8 +157,16 @@ export function ServicePanel() {
               <button
                 onClick={() => projectItem(i)}
                 className={`flex-1 rounded border px-2 py-1 text-left ${
-                  i === item ? "border-green-600 bg-green-50" : "hover:bg-gray-50"
+                  i === item ? "" : "hover:bg-gray-50"
                 }`}
+                style={
+                  i === item
+                    ? {
+                        borderColor: "var(--primary)",
+                        background: "color-mix(in srgb, var(--primary) 16%, transparent)",
+                      }
+                    : undefined
+                }
               >
                 <span className="mr-2 text-xs text-gray-400">{i + 1}</span>
                 {cue.type === "verse" ? (
