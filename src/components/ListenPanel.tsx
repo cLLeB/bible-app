@@ -6,6 +6,7 @@ import { LearningPanel } from "./LearningPanel";
 import { ServiceReview } from "./ServiceReview";
 import {
   appFlavor,
+  audioInputs,
   blankProjection,
   recordChoice,
   recordMoment,
@@ -73,6 +74,21 @@ export function ListenPanel() {
   useEffect(() => {
     void appFlavor().then((f) => setModel(f.defaultModel));
   }, []);
+
+  // Until a sound input is chosen the app will not listen at all, so that setting is
+  // not something to hide behind a fold — it is the whole job.
+  const [needsInput, setNeedsInput] = useState(false);
+  useEffect(() => {
+    void audioInputs()
+      .then((i) => setNeedsInput(i.chosen === null))
+      .catch(() => undefined);
+  }, [listening]);
+
+  // The folded-away auto-project rules still decide whether verses appear by
+  // themselves, so the header says where they stand without being asked.
+  const autoSummary = !autoProject
+    ? "You project everything"
+    : `Projects by itself at ${Math.round(threshold * 100)}%${useRunSheet ? " · run sheet trusted" : ""}`;
 
   const [recording, setRecordingState] = useState(false);
   // Whether today's speaker has agreed to be recorded at all. Without that there is
@@ -238,6 +254,8 @@ export function ListenPanel() {
 
   return (
     <section className="space-y-3">
+      {/* What is happening right now, and the one button that changes it. Everything
+          the operator only touches before or after a service lives further down. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h2 className="panel-title">Live listening</h2>
         {listening && (
@@ -245,35 +263,7 @@ export function ListenPanel() {
             ● listening…
           </span>
         )}
-        <label
-          className="ml-auto flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          title="Auto-project a medium match when its chapter is on the run sheet"
-        >
-          <input
-            type="checkbox"
-            checked={useRunSheet}
-            disabled={!autoProject}
-            onChange={(e) => changeRunSheet(e.target.checked)}
-          />
-          Use run sheet{runSheetVerses > 0 ? ` (${runSheetVerses})` : ""}
-        </label>
-        <label
-          className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          title="Auto-project at or above this confidence"
-        >
-          <input type="checkbox" checked={autoProject} onChange={(e) => changeAuto(e.target.checked)} />
-          Auto-project ≥
-          <input
-            type="number"
-            min={50}
-            max={100}
-            value={Math.round(threshold * 100)}
-            onChange={(e) => changeThreshold(Number(e.target.value))}
-            disabled={!autoProject}
-            className="input w-16 px-2 text-center"
-          />
-          %
-        </label>
+        <span className="ml-auto text-xs text-[var(--muted)]">{autoSummary}</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -300,30 +290,18 @@ export function ListenPanel() {
         )}
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</p>}
-
-      <AudioInputPicker disabled={listening} />
-
-      <CalibrationPanel model={model} disabled={listening} onProfileChange={profileChanged} />
-
-      {/* Only after the service, when there is something to look back on. Keyed on the
-          speaker so switching preacher never shows the previous one's services. */}
-      {!listening && (
-        <>
-          <ServiceReview key={`review-${reviewKey}`} />
-          <LearningPanel key={`learning-${reviewKey}`} />
-        </>
-      )}
+      {error && <p className="tint tint-bad rounded-lg p-2 text-sm">{error}</p>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <div className="panel-title mb-1.5">Transcript</div>
           <div className="min-h-24 space-y-1 rounded-lg border p-2.5 text-sm" style={{ background: "var(--surface-2)" }}>
             {lines.length === 0 ? (
-              <span className="text-gray-400">Speak a reference, e.g. “John chapter 3 verse 16”.</span>
+              <span className="text-[var(--faint)]">Speak a reference, e.g. “John chapter 3 verse 16”.</span>
             ) : (
+              // The newest line is the one being acted on; the rest have had their turn.
               lines.map((l, i) => (
-                <p key={i} className={i === 0 ? "text-black" : "text-gray-400"}>
+                <p key={i} className={i === 0 ? "text-[var(--text)]" : "text-[var(--faint)]"}>
                   {l}
                 </p>
               ))
@@ -339,19 +317,19 @@ export function ListenPanel() {
             </button>
           </div>
           {confirmed && (
-            <p className="mb-1 rounded bg-green-50 px-2 py-1 text-xs text-green-700">
+            <p className="tint tint-good mb-1 rounded px-2 py-1 text-xs">
               ✓ Confirmed by speaker: {confirmed}
             </p>
           )}
           {alternatives.length > 0 && (
-            <div className="mb-1 rounded border border-dashed border-gray-300 p-1.5">
-              <div className="mb-1 text-[10px] uppercase text-gray-400">Or did you mean…</div>
+            <div className="mb-1 rounded border border-dashed p-1.5" style={{ borderColor: "var(--border)" }}>
+              <div className="mb-1 text-[10px] uppercase text-[var(--faint)]">Or did you mean…</div>
               <div className="flex flex-wrap gap-1">
                 {alternatives.map((alt, i) => (
                   <button
                     key={`${alt.reference}-${i}`}
                     onClick={() => pick(alt)}
-                    className="rounded bg-gray-100 px-2 py-0.5 text-xs hover:bg-green-100"
+                    className="tint tint-neutral pick-hover rounded px-2 py-0.5 text-xs"
                     title={alt.text}
                   >
                     {alt.reference}
@@ -362,32 +340,33 @@ export function ListenPanel() {
           )}
           <div className="min-h-24 space-y-1">
             {candidates.length === 0 ? (
-              <span className="text-sm text-gray-400">Detected references appear here.</span>
+              <span className="text-sm text-[var(--faint)]">Detected references appear here.</span>
             ) : (
               candidates.map((c, i) => (
                 <button
                   key={`${c.verse.reference}-${i}`}
                   onClick={() => pick(c.verse)}
-                  className="block w-full rounded border p-2 text-left hover:bg-green-50"
+                  className="pick-hover block w-full rounded border p-2 text-left"
+                  style={{ borderColor: "var(--border)" }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{c.verse.reference}</span>
                     <span className="flex items-center gap-1">
                       {onRunSheet(cues, c.verse) && (
                         <span
-                          className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700"
+                          className="tint-strong tint-info rounded px-1.5 py-0.5 text-[10px]"
                           title="This chapter is on the run sheet"
                         >
                           on run sheet
                         </span>
                       )}
                       <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${
                           c.confidence >= 0.9
-                            ? "bg-green-100 text-green-700"
+                            ? "tint-good"
                             : c.confidence >= 0.8
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-gray-100 text-gray-600"
+                              ? "tint-warn"
+                              : "tint-neutral"
                         }`}
                         title={`${c.source} match`}
                       >
@@ -395,13 +374,77 @@ export function ListenPanel() {
                       </span>
                     </span>
                   </div>
-                  <div className="line-clamp-2 text-xs text-gray-600">{c.verse.text}</div>
+                  <div className="line-clamp-2 text-xs text-[var(--muted)]">{c.verse.text}</div>
                 </button>
               ))
             )}
           </div>
         </div>
       </div>
+
+      {/* Everything below is set once and left alone. It opens itself when it is the
+          thing standing between the operator and a working service — an unchosen
+          sound input — and stays out of the way the rest of the time. */}
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }} open={needsInput}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Before the service
+          <span className="text-[var(--muted)]">
+            {needsInput ? " — choose the sound input" : " — sound input, auto-project"}
+          </span>
+        </summary>
+        <div className="space-y-3 px-3 pb-3">
+          <AudioInputPicker disabled={listening} />
+
+          <div className="space-y-1.5">
+            <div className="panel-title">When to project by itself</div>
+            <label
+              className="flex items-center gap-1.5 text-sm"
+              title="Auto-project at or above this confidence"
+            >
+              <input
+                type="checkbox"
+                checked={autoProject}
+                onChange={(e) => changeAuto(e.target.checked)}
+              />
+              Project a verse on its own when the app is at least
+              <input
+                type="number"
+                min={50}
+                max={100}
+                value={Math.round(threshold * 100)}
+                onChange={(e) => changeThreshold(Number(e.target.value))}
+                disabled={!autoProject}
+                className="input w-16 px-2 text-center"
+              />
+              % sure
+            </label>
+            <label
+              className="flex items-center gap-1.5 text-sm"
+              title="Auto-project a medium match when its chapter is on the run sheet"
+            >
+              <input
+                type="checkbox"
+                checked={useRunSheet}
+                disabled={!autoProject}
+                onChange={(e) => changeRunSheet(e.target.checked)}
+              />
+              Trust a fair match when its chapter is on the run sheet
+              {runSheetVerses > 0 ? ` (${runSheetVerses} queued)` : ""}
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <CalibrationPanel model={model} disabled={listening} onProfileChange={profileChanged} />
+
+      {/* Only after the service, when there is something to look back on. Keyed on the
+          speaker so switching preacher never shows the previous one's services. */}
+      {!listening && (
+        <>
+          <ServiceReview key={`review-${reviewKey}`} />
+          <LearningPanel key={`learning-${reviewKey}`} />
+        </>
+      )}
     </section>
   );
 }

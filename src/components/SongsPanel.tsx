@@ -97,11 +97,11 @@ export function SongsPanel() {
       <button
         onClick={() => setSelected(s)}
         className={`flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm ${
-          selected?.id === s.id ? "bg-gray-200" : "hover:bg-gray-100"
+          selected?.id === s.id ? "tint tint-current" : "tint-neutral tint-hover"
         }`}
       >
         {s.title}
-        {s.author ? <span className="text-gray-500"> — {s.author}</span> : null}
+        {s.author ? <span className="text-[var(--muted)]"> — {s.author}</span> : null}
       </button>
       <button onClick={() => addSongCue(s.id, s.title)} className="icon-btn" title="Add to service order">
         ＋

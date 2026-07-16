@@ -140,14 +140,14 @@ export function ServicePanel() {
         )}
       </div>
 
-      {error && <p className="rounded bg-red-50 px-2 py-1 text-sm text-red-700">{error}</p>}
+      {error && <p className="tint tint-bad rounded px-2 py-1 text-sm">{error}</p>}
 
       {cues.length > 0 && nextCue && (
-        <p className="text-xs text-gray-500">Next up: {cueLabel(nextCue)}</p>
+        <p className="text-xs text-[var(--muted)]">Next up: {cueLabel(nextCue)}</p>
       )}
 
       {cues.length === 0 ? (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-[var(--faint)]">
           Add verses (from Scripture) and songs (from Songs) to build a run order.
         </p>
       ) : (
@@ -157,18 +157,10 @@ export function ServicePanel() {
               <button
                 onClick={() => projectItem(i)}
                 className={`flex-1 rounded border px-2 py-1 text-left ${
-                  i === item ? "" : "hover:bg-gray-50"
+                  i === item ? "tint tint-current" : "tint-neutral tint-hover"
                 }`}
-                style={
-                  i === item
-                    ? {
-                        borderColor: "var(--primary)",
-                        background: "color-mix(in srgb, var(--primary) 16%, transparent)",
-                      }
-                    : undefined
-                }
               >
-                <span className="mr-2 text-xs text-gray-400">{i + 1}</span>
+                <span className="mr-2 text-xs text-[var(--faint)]">{i + 1}</span>
                 {cue.type === "verse" ? (
                   <span>📖 {cue.verse.reference}</span>
                 ) : (

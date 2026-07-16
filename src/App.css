@@ -55,6 +55,61 @@ body {
   color: var(--primary-fg);
 }
 
+/* ============================================================
+   Tints — highlights that stay readable in both themes.
+
+   A highlight is a background AND the text on it. Tailwind's bg-*-50/100 are
+   light-theme colours: in dark mode they paint a near-white box while the text
+   stays light, and the operator is left reading white on white. Every tint here
+   sets both halves, mixed from the theme's own colours, so it follows the theme
+   instead of fighting it. Reach for these instead of a palette utility.
+   ============================================================ */
+.tint {
+  background: color-mix(in srgb, var(--tint-color) 14%, var(--surface));
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--tint-color) 45%, var(--border));
+}
+/* The strong form, for small badges where the tint has to read at a glance. */
+.tint-strong {
+  background: color-mix(in srgb, var(--tint-color) 26%, var(--surface));
+  color: color-mix(in srgb, var(--tint-color) 72%, var(--text));
+  border-color: color-mix(in srgb, var(--tint-color) 45%, var(--border));
+}
+/* Only on hover — the resting state stays as it is. */
+.tint-hover:hover {
+  background: color-mix(in srgb, var(--tint-color) 14%, var(--surface));
+}
+/* "Click this to put it on the screen" — the hover the operator sees all service. */
+.pick-hover:hover {
+  background: color-mix(in srgb, var(--primary) 18%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+.tint-primary,
+.tint-current {
+  --tint-color: var(--primary);
+}
+.tint-good {
+  --tint-color: var(--live);
+}
+.tint-warn {
+  --tint-color: #d97706;
+}
+html.dark .tint-warn {
+  --tint-color: #f59e0b;
+}
+.tint-bad {
+  --tint-color: var(--danger);
+}
+.tint-info {
+  --tint-color: #2563eb;
+}
+html.dark .tint-info {
+  --tint-color: #60a5fa;
+}
+.tint-neutral {
+  --tint-color: var(--faint);
+}
+
 /* Slim, theme-aware scrollbars */
 * {
   scrollbar-width: thin;

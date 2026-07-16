@@ -122,18 +122,10 @@ export function SongLive({ song }: SongLiveProps) {
             key={slide.orderIndex}
             onClick={() => projectAt(slide.orderIndex)}
             className={`block w-full rounded border p-2 text-left ${
-              slide.orderIndex === index ? "" : "hover:bg-gray-50"
+              slide.orderIndex === index ? "tint tint-current" : "tint-neutral tint-hover"
             }`}
-            style={
-              slide.orderIndex === index
-                ? {
-                    borderColor: "var(--primary)",
-                    background: "color-mix(in srgb, var(--primary) 16%, transparent)",
-                  }
-                : undefined
-            }
           >
-            <div className="text-[10px] text-gray-400">Slide {slide.orderIndex + 1}</div>
+            <div className="text-[10px] text-[var(--faint)]">Slide {slide.orderIndex + 1}</div>
             <p className="whitespace-pre-line text-sm">{slide.text}</p>
           </button>
         ))}

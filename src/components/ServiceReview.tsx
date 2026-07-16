@@ -14,22 +14,22 @@ const KINDS: Record<Moment["kind"], { label: string; hint: string; tone: string 
   confirmed: {
     label: "confirmed",
     hint: "The app found it and the preacher read it aloud — the strongest lesson.",
-    tone: "bg-green-100 text-green-800",
+    tone: "tint-good",
   },
   corrected: {
     label: "corrected",
     hint: "The app got it wrong and you fixed it — it learns most from these.",
-    tone: "bg-amber-100 text-amber-800",
+    tone: "tint-warn",
   },
   operator: {
     label: "you chose",
     hint: "You projected this yourself.",
-    tone: "bg-blue-100 text-blue-800",
+    tone: "tint-info",
   },
   auto: {
     label: "auto",
     hint: "The app projected this on its own and nothing confirmed it.",
-    tone: "bg-gray-100 text-gray-600",
+    tone: "tint-neutral",
   },
 };
 
@@ -131,7 +131,7 @@ export function ServiceReview() {
       <div className="flex flex-wrap items-center gap-x-2">
         <h3 className="panel-title">Recorded services</h3>
         {pending.length > 0 && (
-          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+          <span className="tint-strong tint-warn rounded px-1.5 py-0.5 text-[10px]">
             {pending.length} to review
           </span>
         )}
@@ -140,7 +140,7 @@ export function ServiceReview() {
         </span>
       </div>
 
-      {error && <p className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="tint tint-bad rounded p-2 text-sm">{error}</p>}
 
       {sessions.map((s) => {
         const kept = keptMoments(s).length;
@@ -159,7 +159,7 @@ export function ServiceReview() {
                 {s.moments.length} moments
               </span>
               {s.approved ? (
-                <span className="ml-auto rounded bg-green-100 px-1.5 py-0.5 text-[10px] text-green-700">
+                <span className="tint-strong tint-good ml-auto rounded px-1.5 py-0.5 text-[10px]">
                   ✓ approved
                 </span>
               ) : (
@@ -200,7 +200,10 @@ export function ServiceReview() {
                         key={key}
                         className={`flex items-start gap-2 rounded p-1.5 text-xs ${out ? "opacity-40" : ""}`}
                       >
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${kind.tone}`} title={kind.hint}>
+                        <span
+                          className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${kind.tone}`}
+                          title={kind.hint}
+                        >
                           {kind.label}
                         </span>
                         <span className="min-w-0 flex-1">

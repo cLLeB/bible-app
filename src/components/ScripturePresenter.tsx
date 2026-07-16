@@ -92,16 +92,10 @@ export function ScripturePresenter() {
   if (!current) return null;
 
   return (
-    <div
-      className="flex flex-wrap items-center gap-2 rounded-xl border p-2.5"
-      style={{
-        borderColor: "var(--primary)",
-        background: "color-mix(in srgb, var(--primary) 16%, transparent)",
-      }}
-    >
+    <div className="tint tint-current flex flex-wrap items-center gap-2 rounded-xl border p-2.5">
       <span className="chip" style={{ color: "var(--live)" }}>Presenting</span>
       <span className="font-semibold">{current.reference}</span>
-      <span className="hidden flex-1 truncate text-xs text-gray-500 lg:inline">— {current.text}</span>
+      <span className="hidden flex-1 truncate text-xs text-[var(--muted)] lg:inline">— {current.text}</span>
       <div className="ml-auto flex items-center gap-1">
         <button onClick={() => go("prev-chapter")} className="btn btn-sm" title="Previous chapter (PageUp)">⏮ ch</button>
         <button onClick={() => go("prev-verse")} className="icon-btn" title="Previous verse (←)">◀</button>

@@ -106,7 +106,7 @@ export function LearningPanel() {
         </span>
       </div>
 
-      {error && <p className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="tint tint-bad rounded p-2 text-sm">{error}</p>}
       {note && <p className="text-xs text-[var(--muted)]">{note}</p>}
 
       {status.running ? (

@@ -49,20 +49,20 @@ export function TranslationManager() {
           className="absolute right-0 z-30 mt-2 w-80 rounded-xl border p-2 shadow-lg"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}
         >
-          <p className="mb-2 text-xs text-gray-500">
+          <p className="mb-2 text-xs text-[var(--muted)]">
             Free & public-domain translations. Downloading needs internet once, then
             works fully offline.
           </p>
-          {error && <p className="mb-2 rounded bg-red-50 p-1 text-xs text-red-700">{error}</p>}
+          {error && <p className="tint tint-bad mb-2 rounded p-1 text-xs">{error}</p>}
           <ul className="space-y-1">
             {catalog.map((t) => (
               <li key={t.code} className="flex items-center justify-between gap-2">
                 <span className="truncate" title={t.name}>
                   <span className="font-semibold">{t.code}</span>{" "}
-                  <span className="text-gray-500">{t.name}</span>
+                  <span className="text-[var(--muted)]">{t.name}</span>
                   {t.licensed && (
                     <span
-                      className="ml-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700"
+                      className="tint-strong tint-warn ml-1 rounded px-1 text-[10px]"
                       title="Copyrighted — for your personal use only, not for distribution"
                     >
                       personal
