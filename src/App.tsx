@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import "./App.css";
+import { appFlavor } from "./api";
 import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
@@ -14,6 +16,13 @@ import { TranslationPicker } from "./components/TranslationPicker";
 import { TranslationManager } from "./components/TranslationManager";
 
 export default function App() {
+  // Personal builds ship every translation, so the "add translations" manager is
+  // pointless there — show it only on distribution builds. Default hidden until known.
+  const [tier, setTier] = useState<"personal" | "distribution">("personal");
+  useEffect(() => {
+    void appFlavor().then((f) => setTier(f.tier)).catch(() => undefined);
+  }, []);
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ background: "color-mix(in srgb, var(--bg) 85%, transparent)", borderColor: "var(--border)" }}>
@@ -28,7 +37,7 @@ export default function App() {
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <TranslationPicker />
-            <TranslationManager />
+            {tier !== "personal" && <TranslationManager />}
             <ThemeToggle />
           </div>
         </div>

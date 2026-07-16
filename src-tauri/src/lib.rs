@@ -14,6 +14,7 @@ pub mod profile_seed;
 pub mod reference;
 mod remote;
 mod resolution;
+pub mod sessions;
 mod translations;
 pub mod semantic;
 mod slides;

@@ -52,9 +52,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": {
-      "wix": { "licenseFile": "../EULA.rtf" },
-      "nsis": { "licenseFile": "../EULA.rtf" }
-    }
+    "licenseFile": "../EULA.rtf"
   }
 }

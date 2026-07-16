@@ -290,3 +290,16 @@ html.dark .bg-green-100 {
 html.dark .text-green-700 {
   color: #63c088;
 }
+/* Hover variants must theme too, or a near-white hover bg hides the light text. */
+html.dark .hover\:bg-green-50:hover {
+  background-color: #122a1b;
+}
+html.dark .hover\:bg-green-100:hover {
+  background-color: #16371f;
+}
+html.dark .bg-blue-100 {
+  background-color: #14273e;
+}
+html.dark .text-blue-700 {
+  color: #6fa8e6;
+}
