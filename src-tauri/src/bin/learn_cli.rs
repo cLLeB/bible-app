@@ -84,9 +84,18 @@ fn main() {
     };
     let reading = |text: &str| learn::reading_of(&db, text);
 
-    // Baking a profile from scratch: there is nothing already in force to measure against.
-    let learned = match learn::run(&scout_model, &target_model, &binary, &recordings, None, reading, say)
-    {
+    // Baking a profile from scratch: there is nothing already in force to measure
+    // against, and nobody to interrupt it — it runs to the end or it fails.
+    let learned = match learn::run(
+        &scout_model,
+        &target_model,
+        &binary,
+        &recordings,
+        None,
+        || true,
+        reading,
+        say,
+    ) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("\n{e}");

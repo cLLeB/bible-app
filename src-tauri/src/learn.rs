@@ -423,6 +423,10 @@ pub struct Learned {
     pub recordings: usize,
 }
 
+/// A pass that stopped because it was asked to, not because anything went wrong. The
+/// caller can try again later; nothing has been changed either way.
+pub const CANCELLED: &str = "cancelled";
+
 /// The one learning pass, shared by the in-app wizard and the offline `learn_cli`,
 /// so a profile baked into the installer is the same profile the app would derive
 /// from the same audio. There is deliberately no second copy of this logic.
@@ -439,12 +443,18 @@ pub struct Learned {
 /// scored alongside the candidates on the same audio, so a re-learn can answer the
 /// only question that matters — is this actually better than what we have? — rather
 /// than only comparing against the shipped defaults.
+///
+/// `keep_going()` is checked between clips: when it turns false the pass abandons what
+/// it was doing and returns [`CANCELLED`]. Learning in the background must get out of
+/// the way the moment the operator wants the machine, and "between clips" is soon
+/// enough that they will not notice the difference.
 pub fn run(
     scout_model: &Path,
     target_model: &Path,
     binary: &Path,
     paths: &[String],
     incumbent: Option<Decode>,
+    keep_going: impl Fn() -> bool,
     mut reading: impl FnMut(&str) -> Option<crate::db::VerseRecord>,
     mut say: impl FnMut(&str, usize, usize, f32, f32),
 ) -> Result<Learned, String> {
@@ -488,6 +498,9 @@ pub fn run(
     for (name, utterances) in &decoded {
         let mut transcripts: Vec<(usize, String)> = Vec::new();
         for (i, (_at, clip)) in utterances.iter().enumerate() {
+            if !keep_going() {
+                return Err(CANCELLED.into());
+            }
             heard += 1;
             if heard % 5 == 0 {
                 say(&format!("Listening to {name}"), heard, total_utterances, 0.05, LISTEN_SHARE);
@@ -562,6 +575,9 @@ pub fn run(
         );
         let mut texts: HashMap<usize, String> = HashMap::new();
         for (k, clip) in clips.iter().enumerate() {
+            if !keep_going() {
+                return Err(CANCELLED.into());
+            }
             if let Ok(raw) = crate::stt::transcribe(clip, target_model, binary, *cfg) {
                 texts.insert(k, crate::corrections::correct(raw.trim()));
             }

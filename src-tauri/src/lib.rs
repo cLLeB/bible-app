@@ -8,6 +8,7 @@ mod flavor;
 pub mod db;
 pub mod detect;
 mod events;
+pub mod idle;
 pub mod knowledge;
 pub mod learn;
 pub mod profile_seed;
@@ -144,6 +145,7 @@ pub fn run() {
                 cursor: Mutex::new(None),
                 learned: Mutex::new(std::collections::HashMap::new()),
                 moments: Mutex::new(Vec::new()),
+                learning: Arc::new(AtomicBool::new(false)),
             });
 
             let handle = app.handle().clone();
@@ -235,6 +237,13 @@ pub fn run() {
             commands::recording_enabled,
             commands::record_moment,
             commands::review_sessions,
+            commands::learning_status,
+            commands::learn_now,
+            commands::stop_learning,
+            commands::accept_proposal,
+            commands::reject_proposal,
+            commands::rollback_profile,
+            commands::reset_profile_to_baked,
             commands::approve_session,
             commands::discard_session,
             commands::audio_inputs,

@@ -25,6 +25,8 @@ pub struct AppState {
     pub learned: Mutex<std::collections::HashMap<String, (String, u16, u16)>>,
     // Moments captured during a recorded service, written to the session on stop.
     pub moments: Mutex<Vec<crate::sessions::Moment>>,
+    // A background learning pass is running. Clearing it stops the pass.
+    pub learning: Arc<AtomicBool>,
 }
 
 /// The scripture currently on screen, for fast verse/chapter navigation.
@@ -1124,6 +1126,287 @@ pub fn discard_session(
     Ok(())
 }
 
+// ---- learning from the church's own approved services -----------------------------
+
+/// The services this speaker has recorded and approved, newest first, as paths.
+fn approved_audio(dir: &Path) -> Vec<(String, std::path::PathBuf)> {
+    crate::sessions::list_audio(dir)
+        .into_iter()
+        .filter(|a| crate::sessions::read_labels(a).approved)
+        .map(|a| {
+            let name = a.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            (name, a)
+        })
+        .collect()
+}
+
+/// What the console needs to show about learning: whether it could run now, what it
+/// is waiting for if not, and anything it has to say for itself.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearningStatus {
+    pub profile: String,
+    /// Approved services available for this speaker.
+    pub approved: usize,
+    pub running: bool,
+    /// Why learning would not start right now; null when it could.
+    pub blocked: Option<String>,
+    pub proposal: Option<crate::relearn::Proposal>,
+    /// Is there a version to go back to, and a shipped one to fall back on?
+    pub can_rollback: bool,
+    pub can_reset: bool,
+}
+
+fn last_learn_key(profile: &str) -> String {
+    format!("last_learn:{profile}")
+}
+
+/// Milliseconds since this speaker was last learned from.
+fn since_last_learn(db: &Db, profile: &str) -> Option<u64> {
+    let then: u64 = db.get_setting(&last_learn_key(profile))?.parse().ok()?;
+    let now: u64 = crate::sessions::now_stamp().parse().ok()?;
+    Some(now.saturating_sub(then))
+}
+
+/// Everything the console needs to decide what to offer the operator.
+#[tauri::command]
+pub fn learning_status(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<LearningStatus, String> {
+    let dir = session_dir(&app, &state)?;
+    let approved = approved_audio(&dir).len();
+    let (profile, proposal, since, can_rollback) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let profile = crate::calibrate::active_profile(&db);
+        (
+            profile.clone(),
+            crate::relearn::load_proposal(&db, &profile),
+            since_last_learn(&db, &profile),
+            crate::relearn::has_previous(&db, &profile),
+        )
+    };
+    let projecting = state
+        .current
+        .lock()
+        .map(|c| crate::idle::is_projecting(&c))
+        .unwrap_or(false);
+    let now = crate::idle::Now {
+        listening: state.listening.load(Ordering::SeqCst),
+        projecting,
+        on_mains: crate::idle::on_mains(),
+        learning: state.learning.load(Ordering::SeqCst),
+        approved,
+        since_last_ms: since,
+    };
+    Ok(LearningStatus {
+        can_reset: crate::relearn::has_baked(&profile),
+        profile,
+        approved,
+        running: now.learning,
+        blocked: crate::idle::blocked(&now).map(|b| b.message().to_string()),
+        proposal,
+        can_rollback,
+    })
+}
+
+/// Learn from this speaker's approved services, in the background, and leave a proposal
+/// for the operator. Nothing about the app changes until they accept it.
+#[tauri::command]
+pub fn learn_now(app: tauri::AppHandle) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let dir = session_dir(&app, &state)?;
+        let approved = approved_audio(&dir).len();
+        let projecting =
+            state.current.lock().map(|c| crate::idle::is_projecting(&c)).unwrap_or(false);
+        let since = {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            let who = crate::calibrate::active_profile(&db);
+            since_last_learn(&db, &who)
+        };
+        // The operator asking for it now is reason enough to ignore the cooldown; the
+        // rest of the gate still stands, because it is about the machine, not the timing.
+        let now = crate::idle::Now {
+            listening: state.listening.load(Ordering::SeqCst),
+            projecting,
+            on_mains: crate::idle::on_mains(),
+            learning: state.learning.load(Ordering::SeqCst),
+            approved,
+            since_last_ms: since,
+        };
+        if let Some(b) = crate::idle::blocked(&now) {
+            if b != crate::idle::Blocked::TooSoon {
+                return Err(b.message().to_string());
+            }
+        }
+        state.learning.store(true, Ordering::SeqCst);
+    }
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let outcome = learn_from_approved(&app2);
+        app2.state::<AppState>().learning.store(false, Ordering::SeqCst);
+        match outcome {
+            Ok(Some(p)) => {
+                let _ = app2.emit("learn-proposal", p);
+            }
+            Ok(None) => {
+                let _ = app2.emit("learn-idle-done", "Nothing new to learn from those services.");
+            }
+            Err(e) if e == crate::learn::CANCELLED => {
+                let _ = app2.emit("learn-idle-done", "Stopped — the machine was needed.");
+            }
+            Err(e) => {
+                let _ = app2.emit("learn-error", e);
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Stop a background pass. Also what the app does to itself the moment the operator
+/// starts a service: nothing is worth interrupting that.
+#[tauri::command]
+pub fn stop_learning(state: tauri::State<'_, AppState>) {
+    state.learning.store(false, Ordering::SeqCst);
+}
+
+/// The pass itself: learn from the approved services and work out what, if anything,
+/// is worth proposing. Runs on a background thread and holds no lock while decoding.
+fn learn_from_approved(app: &tauri::AppHandle) -> Result<Option<crate::relearn::Proposal>, String> {
+    use crate::learn::Progress;
+    let state = app.state::<AppState>();
+    let dir = session_dir(app, &state)?;
+    let approved = approved_audio(&dir);
+    if approved.is_empty() {
+        return Ok(None);
+    }
+    let names: Vec<String> = approved.iter().map(|(n, _)| n.clone()).collect();
+    let paths: Vec<String> = approved.iter().map(|(_, p)| p.to_string_lossy().into_owned()).collect();
+
+    let profile = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        crate::calibrate::active_profile(&db)
+    };
+    let res_dir = app.path().resource_dir().ok();
+    let kind = crate::flavor::default_model().to_string();
+    let (target_model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
+    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), "base")
+        .unwrap_or_else(|_| (target_model.clone(), binary.clone()));
+    let incumbent = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        Some(crate::calibrate::load(&db, &target_model, &profile))
+    };
+
+    // Give the machine back the instant the church wants it — a service starting, or
+    // anything going up on the screen, outranks learning without discussion.
+    let keep_going = {
+        let app = app.clone();
+        move || {
+            let s = app.state::<AppState>();
+            s.learning.load(Ordering::SeqCst)
+                && !s.listening.load(Ordering::SeqCst)
+                && !s.current.lock().map(|c| crate::idle::is_projecting(&c)).unwrap_or(false)
+        }
+    };
+    let say = {
+        let app = app.clone();
+        move |stage: &str, done: usize, total: usize, base: f32, share: f32| {
+            let frac = if total == 0 { 0.0 } else { done as f32 / total as f32 };
+            let overall = (base + share * frac).clamp(0.0, 1.0);
+            let _ = app.emit(
+                "learn-idle-progress",
+                Progress {
+                    stage: stage.to_string(),
+                    done,
+                    total,
+                    percent: (overall * 100.0) as u8,
+                    seconds_left: 0,
+                },
+            );
+        }
+    };
+    let reading = |text: &str| state.db.lock().ok().and_then(|db| crate::learn::reading_of(&db, text));
+    let learned =
+        crate::learn::run(&scout_model, &target_model, &binary, &paths, incumbent, keep_going, reading, say)?;
+
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    // Mark the attempt however it turns out: a pass that found nothing worth proposing
+    // should not be repeated on the same services tomorrow morning.
+    db.set_setting(&last_learn_key(&profile), &crate::sessions::now_stamp())
+        .map_err(|e| e.to_string())?;
+    let model_file = target_model
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::flavor::model_file(&kind));
+    let Some(p) = crate::relearn::propose(&db, &profile, &model_file, &learned, names) else {
+        crate::relearn::drop_proposal(&db, &profile).map_err(|e| e.to_string())?;
+        return Ok(None);
+    };
+    crate::relearn::save_proposal(&db, &p).map_err(|e| e.to_string())?;
+    Ok(Some(p))
+}
+
+/// Take up what the last pass proposed. What it replaces is kept, so this is safe to
+/// try: `rollback_profile` puts it straight back.
+#[tauri::command]
+pub fn accept_proposal(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let profile = crate::calibrate::active_profile(&db);
+    let took = crate::relearn::accept(&db, &profile).map_err(|e| e.to_string())?;
+    if took {
+        // In force straight away, without waiting for the next listen.
+        crate::books::set_learned_names(crate::learn::book_names(&db, &profile));
+        let _ = app.emit("profile-changed", &profile);
+    }
+    Ok(took)
+}
+
+/// Turn down what the last pass proposed. The services stay; only the suggestion goes.
+#[tauri::command]
+pub fn reject_proposal(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let profile = crate::calibrate::active_profile(&db);
+    crate::relearn::drop_proposal(&db, &profile).map_err(|e| e.to_string())
+}
+
+/// Put back the tuning in force before the last change.
+#[tauri::command]
+pub fn rollback_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let profile = crate::calibrate::active_profile(&db);
+    let done = crate::relearn::rollback(&db, &profile).map_err(|e| e.to_string())?;
+    if done {
+        crate::books::set_learned_names(crate::learn::book_names(&db, &profile));
+        let _ = app.emit("profile-changed", &profile);
+    }
+    Ok(done)
+}
+
+/// Put this speaker back exactly as the app shipped them, discarding everything this
+/// machine has learned. The floor under all of it.
+#[tauri::command]
+pub fn reset_profile_to_baked(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let profile = crate::calibrate::active_profile(&db);
+    let done = crate::relearn::reset_to_baked(&db, &profile).map_err(|e| e.to_string())?;
+    if done {
+        crate::relearn::drop_proposal(&db, &profile).map_err(|e| e.to_string())?;
+        crate::books::set_learned_names(crate::learn::book_names(&db, &profile));
+        let _ = app.emit("profile-changed", &profile);
+    }
+    Ok(done)
+}
+
 /// Log one moment from the live service (auto-projected, operator-corrected, confirmed).
 /// Kept in memory and written into the session recording when listening stops.
 #[tauri::command]
@@ -1291,7 +1574,8 @@ fn learn_sermons(
             .lock()
             .ok()
             .map(|db| crate::calibrate::load(&db, &target_model, &profile));
-        learn::run(&scout_model, &target_model, &binary, &paths, incumbent, reading, say)?
+        // The operator is sitting in front of the wizard waiting for it; it runs to the end.
+        learn::run(&scout_model, &target_model, &binary, &paths, incumbent, || true, reading, say)?
     };
 
     {
@@ -1605,6 +1889,7 @@ mod tests {
             cursor: Mutex::new(None),
             learned: Mutex::new(std::collections::HashMap::new()),
             moments: Mutex::new(Vec::new()),
+            learning: Arc::new(AtomicBool::new(false)),
         }
     }
 

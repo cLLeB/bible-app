@@ -256,6 +256,62 @@ export const approveSession = (name: string, moments: Moment[]): Promise<void> =
 export const discardSession = (name: string): Promise<void> =>
   invoke<void>("discard_session", { name });
 
+// ---- Learning from the church's own services ----
+// The app can tune itself on the services it recorded — but only ones the operator
+// approved, only when the machine is plainly not needed, and never without asking.
+
+/** What a learning pass would like to change, and the evidence for it. */
+export interface Proposal {
+  profile: string;
+  /** The tuning itself. Opaque to the console: it is shown by its numbers, not its innards. */
+  next: unknown;
+  modelFile: string;
+  /** Plain-language name of the proposed settings. */
+  settings: string;
+  /** Passages read aloud across the services — the marks available. */
+  references: number;
+  /** How many of them the settings in force recover. */
+  incumbentScore: number;
+  /** How many the proposed settings recover. */
+  newScore: number;
+  /** Misheard book names the pass found that the speaker didn't already have. */
+  newAliases: string[];
+  minutes: number;
+  sessions: string[];
+  at: string;
+}
+
+export interface LearningStatus {
+  profile: string;
+  approved: number;
+  running: boolean;
+  /** Why learning won't start right now; null when it could. */
+  blocked: string | null;
+  proposal: Proposal | null;
+  canRollback: boolean;
+  canReset: boolean;
+}
+
+export const learningStatus = (): Promise<LearningStatus> =>
+  invoke<LearningStatus>("learning_status");
+
+/** Start a background pass over the approved services. Leaves a proposal, changes nothing. */
+export const learnNow = (): Promise<void> => invoke<void>("learn_now");
+
+export const stopLearning = (): Promise<void> => invoke<void>("stop_learning");
+
+/** Take up the proposal. Reversible: what it replaces is kept. */
+export const acceptProposal = (): Promise<boolean> => invoke<boolean>("accept_proposal");
+
+export const rejectProposal = (): Promise<void> => invoke<void>("reject_proposal");
+
+/** Put back the tuning in force before the last change. */
+export const rollbackProfile = (): Promise<boolean> => invoke<boolean>("rollback_profile");
+
+/** Put this speaker back exactly as the app shipped them. */
+export const resetProfileToBaked = (): Promise<boolean> =>
+  invoke<boolean>("reset_profile_to_baked");
+
 // ---- Voice calibration ----
 // Tunes the recognizer to this speaker's voice, mic and room. Everything stays
 // on the machine: the recordings, the comparison and the result.
