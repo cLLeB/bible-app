@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   learnFromRecordings,
+  PROTECTED_PROFILES,
   type LearnProgress,
   type LearnResult,
   type SttModel,
@@ -49,6 +50,15 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
     });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
     if (paths.length === 0) return;
+
+    // Learning rebuilds the profile from only these files — for a baked-in preacher that
+    // means overwriting the shipped tuning. Warn before that; a new profile keeps it.
+    if (
+      PROTECTED_PROFILES.includes(who) &&
+      !window.confirm(`Replace ${who}'s profile? Add a new one to keep it.`)
+    ) {
+      return;
+    }
 
     setRunning(true);
     setProgress(null);
