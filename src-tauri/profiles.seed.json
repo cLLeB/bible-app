@@ -1,0 +1,45 @@
+{
+  "active": "Miss Hilda",
+  "entries": {
+    "Miss Hilda": {
+      "aliases": {},
+      "room": 0.0037378154,
+      "translation": null,
+      "decode": {
+        "ggml-base.en.bin": {
+          "beam": 5,
+          "prompt": true,
+          "normalize": true,
+          "window": "full"
+        },
+        "ggml-small.en.bin": {
+          "beam": 5,
+          "prompt": true,
+          "normalize": true,
+          "window": "full"
+        }
+      }
+    },
+    "Vice-President": {
+      "aliases": {
+        "elves": "Prov"
+      },
+      "room": 0.00856535,
+      "translation": null,
+      "decode": {
+        "ggml-base.en.bin": {
+          "beam": 5,
+          "prompt": true,
+          "normalize": true,
+          "window": "full"
+        },
+        "ggml-small.en.bin": {
+          "beam": 5,
+          "prompt": true,
+          "normalize": true,
+          "window": "full"
+        }
+      }
+    }
+  }
+}

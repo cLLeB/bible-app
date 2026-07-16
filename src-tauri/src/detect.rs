@@ -4,12 +4,21 @@ use crate::reference::ParsedRef;
 /// How a reference was recognized — drives confidence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DetectSource {
-    Explicit,    // exact book name + numbers
-    Fuzzy,       // book name recovered by fuzzy match
-    Context,     // bare "verse N" / "chapter N" resolved via remembered book
-    Descriptive, // "last book of the Old Testament", "third book of Moses"
-    Story,       // famous story/passage ("the prodigal son")
+    Explicit,     // exact book name + numbers
+    WeakExplicit, // an ordinary-word book (Job/Mark/Acts…) cited bare, no cue — suggest only
+    Fuzzy,        // book name recovered by fuzzy match
+    Context,      // bare "verse N" / "chapter N" resolved via remembered book
+    Descriptive,  // "last book of the Old Testament", "third book of Moses"
+    Story,        // famous story/passage ("the prodigal son")
 }
+
+/// Ordinary English words (or near-homonyms) that are also books. Cited bare — "job 5",
+/// "mark 2", "acts 7", "number 3" — with no verse and no reference cue, they are as
+/// likely to be everyday speech as scripture, so they only *suggest*, never auto-project,
+/// until a verse, the word "chapter"/"verse", or a lead-in ("turn to", "book of") shows a
+/// reference is actually meant. Real names like John/James are left alone: a person named
+/// John rarely precedes a bare number, and those references are too common to risk.
+const AMBIGUOUS_BOOKS: &[&str] = &["Job", "Mark", "Acts", "Num", "Judg", "Ruth", "Song"];
 
 #[derive(Debug, Clone)]
 pub struct Detection {
@@ -217,6 +226,10 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
     while i < tokens.len() {
         // 1) Full reference: <book> [chapter] N [verse] M
         let mut book: Option<(String, usize, DetectSource)> = None;
+        // True when the book resolved via a per-speaker learned alias ("elves" →
+        // Proverbs) rather than a real name or a built-in mishearing. Such a word is
+        // trusted only inside a full reference (chapter AND verse) — see the guard below.
+        let mut via_learned = false;
         for len in (1..=3).rev() {
             if i + len <= tokens.len() {
                 let joined = tokens[i..i + len].join(" ");
@@ -237,6 +250,7 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                 if i + len <= tokens.len() {
                     let joined = tokens[i..i + len].join(" ");
                     if let Some(b) = resolve_book_fuzzy(&joined) {
+                        via_learned = crate::books::is_learned_alias(&joined);
                         book = Some((b.osis.to_string(), len, DetectSource::Fuzzy));
                         break;
                     }
@@ -253,8 +267,23 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                 tokens[start..i].iter().any(|t| eq_ci(t, "whole") || eq_ci(t, "entire"))
                     || tokens[start..i].windows(2).any(|w| eq_ci(&w[0], "all") && eq_ci(&w[1], "of"))
             };
+            // A reference cue just before the book ("turn to Mark 5", "the book of Job")
+            // marks it as scripture, not casual speech — used to keep ambiguous ordinary
+            // words like "mark"/"job" from auto-projecting when nothing signals a reference.
+            let leading_cue = {
+                let start = i.saturating_sub(3);
+                tokens[start..i].iter().any(|t| {
+                    matches!(
+                        t.to_lowercase().as_str(),
+                        "turn" | "read" | "reading" | "book" | "open" | "look" | "scripture"
+                            | "scriptures" | "chapter" | "verse"
+                    )
+                })
+            };
             let mut j = i + len;
+            let mut saw_chapter_word = false;
             if j < tokens.len() && eq_ci(&tokens[j], "chapter") {
+                saw_chapter_word = true;
                 j += 1;
             }
             // Single-chapter book cited directly by verse: "Jude verse 24" → 1:24.
@@ -302,14 +331,35 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
                     verse = Some(chapter);
                     chapter = 1;
                 }
+                // A per-speaker learned alias is an arbitrary word bound to a book, so
+                // trust it only inside a full reference — a chapter AND a verse, the
+                // shape the speaker actually uses ("Proverbs 22 verse 29"). This stops an
+                // everyday word like "elves" from becoming Proverbs on a bare "elves 22"
+                // or in ordinary speech. Real names and built-in mishearings are exempt.
+                if via_learned && verse.is_none() {
+                    i = j;
+                    continue;
+                }
                 let (conn_end, nj) = read_range_end(&tokens, j);
                 j = nj;
                 let verse_end = valid_end(verse, glued_end.or(conn_end));
+                // An ordinary-word book cited bare (no verse, no "chapter"/"verse" word,
+                // no lead-in) is only a suggestion — "job 5" in passing must not project.
+                let eff_source = if source == DetectSource::Explicit
+                    && verse.is_none()
+                    && !saw_chapter_word
+                    && !leading_cue
+                    && AMBIGUOUS_BOOKS.contains(&osis.as_str())
+                {
+                    DetectSource::WeakExplicit
+                } else {
+                    source
+                };
                 ctx.book_osis = Some(osis.clone());
                 ctx.chapter = Some(chapter);
                 out.push(Detection {
                     reference: ParsedRef { book_osis: osis.clone(), chapter, verse },
-                    source,
+                    source: eff_source,
                     verse_end,
                 });
                 i = j;
@@ -428,6 +478,63 @@ mod tests {
         let r = detect_references(text);
         assert_eq!(r.len(), 1, "expected 1 ref in {text:?}, got {r:?}");
         r.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn ordinary_word_books_only_suggest_until_a_cue_or_verse() {
+        let find = |t: &str| {
+            detect_with_context(t, &mut RefContext::default())
+                .into_iter()
+                .find(|d| d.reference.book_osis == "Mark" || d.reference.book_osis == "Job")
+        };
+        // Bare ordinary word + number in ordinary speech → still detected, but only as a
+        // suggestion (WeakExplicit, below the auto-project bar), never auto-projected.
+        assert_eq!(find("he found a job 5 years ago").unwrap().source, DetectSource::WeakExplicit);
+        assert_eq!(find("please mark 3 of them for me").unwrap().source, DetectSource::WeakExplicit);
+        // A verse, the word "chapter", or a lead-in cue restores full Explicit confidence.
+        assert_eq!(find("mark 5 verse 10").unwrap().source, DetectSource::Explicit);
+        assert_eq!(find("mark chapter 5").unwrap().source, DetectSource::Explicit);
+        assert_eq!(find("turn to mark 5").unwrap().source, DetectSource::Explicit);
+        // A name-book (John) is left alone — those references are too common to weaken.
+        assert_eq!(
+            detect_with_context("john 3 verse 16", &mut RefContext::default())[0].source,
+            DetectSource::Explicit
+        );
+    }
+
+    #[test]
+    fn a_learned_alias_is_trusted_only_inside_a_full_reference() {
+        // The Vice-President's real "Proverbs 22 verse 29" comes out of whisper as
+        // "elves 22 verse 29"; his profile has learned elves -> Proverbs.
+        let mut names = std::collections::HashMap::new();
+        names.insert("elves".to_string(), "Prov".to_string());
+        crate::books::set_learned_names(names);
+
+        // Full reference (chapter AND verse): resolves to Proverbs 22:29.
+        let hits = detect_with_context("elves 22 verse 29", &mut RefContext::default());
+        assert!(
+            hits.iter().any(|h| h.reference.book_osis == "Prov"
+                && h.reference.chapter == 22
+                && h.reference.verse == Some(29)),
+            "full reference should resolve, got {hits:?}"
+        );
+
+        // Chapter only — not certain enough for an arbitrary word; must NOT project Proverbs.
+        assert!(
+            detect_with_context("elves 22", &mut RefContext::default())
+                .iter()
+                .all(|h| h.reference.book_osis != "Prov"),
+            "a bare chapter must not fire a learned alias"
+        );
+        // Ordinary speech: the word "elves" alone is never Proverbs.
+        assert!(
+            detect_with_context("and there were elves everywhere that night", &mut RefContext::default())
+                .iter()
+                .all(|h| h.reference.book_osis != "Prov"),
+            "everyday use of the word must be ignored"
+        );
+
+        crate::books::set_learned_names(std::collections::HashMap::new()); // don't leak into other tests
     }
 
     #[test]

@@ -13,6 +13,7 @@ import {
   type VersePayload,
 } from "../api";
 import { present } from "../present";
+import { useServiceStore, type Cue } from "../services";
 
 const MODEL_LABELS: Record<SttModel, string> = {
   tiny: "Tiny (low-end PCs)",
@@ -20,6 +21,21 @@ const MODEL_LABELS: Record<SttModel, string> = {
   small: "Small (accurate, stronger PC)",
   medium: "Medium (best · GPU recommended)",
 };
+
+// A medium-confidence hearing that lands on a chapter already on the run sheet is
+// certain enough to project on its own: the expectation resolves the doubt. Below this
+// floor the hearing itself was too weak to trust, even with that corroboration — so we
+// still only suggest it and let the operator decide.
+const RUN_SHEET_ASSIST_FLOOR = 0.72;
+
+// Is this verse's chapter one the operator has queued on the run sheet? Book + chapter,
+// not the exact verse: the preacher going to that chapter is the corroboration that
+// matters, and she may read a different verse within it than the one queued.
+function onRunSheet(cues: Cue[], v: { bookOsis: string; chapter: number }): boolean {
+  return cues.some(
+    (c) => c.type === "verse" && c.verse.bookOsis === v.bookOsis && c.verse.chapter === v.chapter,
+  );
+}
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
@@ -37,6 +53,9 @@ export function ListenPanel() {
     const s = Number(localStorage.getItem("auto-threshold"));
     return s >= 50 && s <= 100 ? s / 100 : 0.82;
   });
+  const [useRunSheet, setUseRunSheet] = useState(() => localStorage.getItem("use-run-sheet") === "1");
+  const cues = useServiceStore((s) => s.cues);
+  const runSheetVerses = cues.filter((c) => c.type === "verse").length;
 
   function changeModel(m: SttModel): void {
     setModel(m);
@@ -45,6 +64,10 @@ export function ListenPanel() {
   function changeAuto(v: boolean): void {
     setAutoProject(v);
     localStorage.setItem("auto-project", v ? "1" : "0");
+  }
+  function changeRunSheet(v: boolean): void {
+    setUseRunSheet(v);
+    localStorage.setItem("use-run-sheet", v ? "1" : "0");
   }
   function changeThreshold(pct: number): void {
     const v = Math.min(100, Math.max(50, pct || 82));
@@ -65,6 +88,8 @@ export function ListenPanel() {
   autoRef.current = autoProject;
   const thresholdRef = useRef(0.82);
   thresholdRef.current = threshold;
+  const runSheetRef = useRef(false);
+  runSheetRef.current = useRunSheet;
 
   useEffect(() => {
     const unlisteners = [
@@ -72,9 +97,25 @@ export function ListenPanel() {
         setLines((prev) => [e.payload, ...prev].slice(0, 6));
       }),
       listen<Candidate>("verse-candidate", (e) => {
-        setCandidates((prev) => [e.payload, ...prev].slice(0, 12));
-        if (autoRef.current && e.payload.confidence >= thresholdRef.current && e.payload.source !== "voice-nav") {
-          void present(e.payload.verse);
+        const c = e.payload;
+        setCandidates((prev) => [c, ...prev].slice(0, 12));
+        if (!autoRef.current || c.source === "voice-nav") return;
+        // Confident enough on its own → project.
+        if (c.confidence >= thresholdRef.current) {
+          void present(c.verse);
+          return;
+        }
+        // Not sure enough on the hearing alone — but if it lands on a chapter the
+        // operator queued on the run sheet, that expectation makes it certain. Only a
+        // decent hearing qualifies (>= floor), and only a match to the run sheet: a
+        // detection off the run sheet is never forced, and a poor hearing stays a mere
+        // suggestion. Better to leave it to the operator than to project a wrong verse.
+        if (
+          runSheetRef.current &&
+          c.confidence >= RUN_SHEET_ASSIST_FLOOR &&
+          onRunSheet(useServiceStore.getState().cues, c.verse)
+        ) {
+          void present(c.verse);
         }
       }),
       // The speaker confirmed a suggested verse (said "yes"/"amen" or read it
@@ -138,6 +179,18 @@ export function ListenPanel() {
         )}
         <label
           className="ml-auto flex items-center gap-1.5 text-sm text-[var(--muted)]"
+          title="When on, a medium-confidence detection that lands on a chapter already on the run sheet is projected automatically — the run sheet removes the doubt. Detections that aren't on the run sheet are never affected, and a weak hearing still only shows as a suggestion."
+        >
+          <input
+            type="checkbox"
+            checked={useRunSheet}
+            disabled={!autoProject}
+            onChange={(e) => changeRunSheet(e.target.checked)}
+          />
+          Use run sheet{runSheetVerses > 0 ? ` (${runSheetVerses})` : ""}
+        </label>
+        <label
+          className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
           title="Automatically project detections at or above this confidence"
         >
           <input type="checkbox" checked={autoProject} onChange={(e) => changeAuto(e.target.checked)} />
@@ -242,17 +295,27 @@ export function ListenPanel() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{c.verse.reference}</span>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] ${
-                        c.confidence >= 0.9
-                          ? "bg-green-100 text-green-700"
-                          : c.confidence >= 0.8
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-gray-100 text-gray-600"
-                      }`}
-                      title={`${c.source} match`}
-                    >
-                      {Math.round(c.confidence * 100)}% · {c.source}
+                    <span className="flex items-center gap-1">
+                      {onRunSheet(cues, c.verse) && (
+                        <span
+                          className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700"
+                          title="This chapter is on the run sheet"
+                        >
+                          on run sheet
+                        </span>
+                      )}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                          c.confidence >= 0.9
+                            ? "bg-green-100 text-green-700"
+                            : c.confidence >= 0.8
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-gray-100 text-gray-600"
+                        }`}
+                        title={`${c.source} match`}
+                      >
+                        {Math.round(c.confidence * 100)}% · {c.source}
+                      </span>
                     </span>
                   </div>
                   <div className="line-clamp-2 text-xs text-gray-600">{c.verse.text}</div>

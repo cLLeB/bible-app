@@ -54,3 +54,6 @@ bundled/
 
 # Sermon recordings used to test the detector (private, not ours to distribute)
 sermons/
+
+# Learning/measurement run artifacts + private sermon transcripts + seed snapshots
+learning-results/

@@ -10,6 +10,7 @@ pub mod detect;
 mod events;
 pub mod knowledge;
 pub mod learn;
+pub mod profile_seed;
 pub mod reference;
 mod remote;
 mod resolution;
@@ -98,6 +99,10 @@ fn seed_library(app: &tauri::AppHandle) -> Result<(), String> {
                 let _ = db.seed_personal_songs(&json, 1);
             }
         }
+        // Arrive already tuned for this church's own preachers. Baked into the
+        // binary at build time; guarded so it seeds once and never clobbers a
+        // church's own calibration. Distribution builds skip it entirely.
+        let _ = crate::profile_seed::apply(&db, include_str!("../profiles.seed.json"));
     }
 
     let _ = app.emit("library-progress", "Building the search index…".to_string());

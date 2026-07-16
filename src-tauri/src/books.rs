@@ -212,6 +212,18 @@ fn learned(word: &str) -> Option<&'static CanonicalBook> {
     book_by_osis(osis)
 }
 
+/// Did this word resolve *only* because of a per-speaker learned alias (e.g. "elves"
+/// for Proverbs)? Such aliases are arbitrary words bound to a book, so the detector
+/// holds them to a stricter standard — it trusts them only inside a full reference.
+pub fn is_learned_alias(word: &str) -> bool {
+    let norm = word.trim().to_lowercase();
+    LEARNED
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().map(|m| m.contains_key(&norm)))
+        .unwrap_or(false)
+}
+
 /// Exact match first, then anything learned from this speaker, then fuzzy recovery
 /// for near-misses from speech-to-text ("roman" → Romans, "mathew" → Matthew).
 pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {

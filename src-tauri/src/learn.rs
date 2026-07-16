@@ -223,10 +223,33 @@ pub fn learn_book_name(text: &str, osis: &str, chapter: u16) -> Option<String> {
         if COMMON_WORDS.contains(&tok.as_str()) {
             continue; // never bind an everyday word to a book
         }
+        if sounds_structural(tok) {
+            // "chapter" itself gets mangled ("shapte") and then sits exactly where a
+            // book would, right before the number. That is not a misheard book.
+            continue;
+        }
+        if tokens[..i].iter().any(|w| crate::books::resolve_book_fuzzy(w).is_some()) {
+            // The real book was already heard in this phrase, so the word before the
+            // number is structural ("Romans [chapter] 8"), not the book.
+            continue;
+        }
         let _ = osis;
         return Some(tok.clone());
     }
     None
+}
+
+/// How close a word must sound to "chapter"/"verse" to be treated as one of them
+/// rather than a misheard book. Tuned so manglings like "shapte" are caught while
+/// genuine book manglings ("nemayer", "hemaiah") are not.
+const STRUCTURAL_SIMILARITY: f64 = 0.80;
+
+/// Does this word sound like a structural cue ("chapter"/"verse") rather than a book?
+/// whisper mangles these too, and a mangled "chapter" lands right where a book would.
+fn sounds_structural(word: &str) -> bool {
+    ["chapter", "chapters", "verse", "verses"]
+        .iter()
+        .any(|s| strsim::jaro_winkler(word, s) >= STRUCTURAL_SIMILARITY)
 }
 
 /// Words too ordinary to ever mean a book of the Bible, however they are heard.
@@ -274,6 +297,21 @@ mod tests {
         assert_eq!(learn_book_name("let's read hemaiah chapter 8", "Neh", 8), None);
         // An everyday word must never become a book of the Bible.
         assert_eq!(learn_book_name("look at these chapter 8", "Neh", 8), None);
+    }
+
+    #[test]
+    fn a_mangled_chapter_word_is_not_learned_as_a_book() {
+        // "Romans chapter 8" heard as "romans shapte 8": Romans was in fact caught,
+        // and "shapte" is a mangled "chapter" sitting where the book would be. The
+        // real book is present, so nothing should be learned.
+        assert_eq!(learn_book_name("romans shapte 8", "Rom", 8), None);
+        // Even with the book dropped entirely, a chapter-mangling before the number
+        // must not become a book.
+        assert_eq!(learn_book_name("shapte 8", "Rom", 8), None);
+        assert!(sounds_structural("shapte"), "must recognise a mangled 'chapter'");
+        // A genuine book mangling, with no real book already heard, is still learned.
+        assert_eq!(learn_book_name("read nemayer chapter 8", "Neh", 8), Some("nemayer".into()));
+        assert!(!sounds_structural("nemayer"), "a real book mangling is not structural");
     }
 
     #[test]
@@ -356,4 +394,202 @@ pub fn decode_audio_file(path: &Path) -> Result<Vec<f32>, String> {
     // The same downmix and resample the microphone path uses, so a recording and a
     // live feed are heard identically.
     Ok(crate::audio::to_16k_mono(&samples, channels, rate as f32))
+}
+
+/// Everything a learning pass discovers about a speaker. The pass writes nothing
+/// itself — the caller persists it (the app into its database, `learn_cli` into a
+/// seed file baked into the installer), so both routes learn identically.
+#[derive(Clone, Debug)]
+pub struct Learned {
+    /// Winning decode settings for `target_model`.
+    pub decode: Decode,
+    /// Speech threshold measured from the audio.
+    pub room: Room,
+    /// The version their readings matched, if one clearly won.
+    pub translation: Option<String>,
+    /// Misheard word -> OSIS book, learned from this speaker.
+    pub aliases: Vec<(String, String)>,
+    /// Passages read aloud — the ground truth a human operator got right that day.
+    pub references_found: usize,
+    /// How many of those the shipped defaults recover.
+    pub before: usize,
+    /// How many the winning settings recover.
+    pub after: usize,
+    pub minutes: f32,
+    pub recordings: usize,
+}
+
+/// The one learning pass, shared by the in-app wizard and the offline `learn_cli`,
+/// so a profile baked into the installer is the same profile the app would derive
+/// from the same audio. There is deliberately no second copy of this logic.
+///
+/// `scout_model` finds what was read aloud — it only has to be fast, and listens to
+/// every second of every sermon. `target_model` is the one the operator will
+/// actually use, so it is the one whose settings get scored. `reading(text)` looks a
+/// transcript up in the scripture library; taking it as a closure keeps this free of
+/// the database lock, so the app can hold the lock only for each brief lookup rather
+/// than for the whole hours-long pass. `say(stage, done, total, base, share)` reports
+/// progress: `base` is the fraction already complete, `share` this stage's slice.
+pub fn run(
+    scout_model: &Path,
+    target_model: &Path,
+    binary: &Path,
+    paths: &[String],
+    mut reading: impl FnMut(&str) -> Option<crate::db::VerseRecord>,
+    mut say: impl FnMut(&str, usize, usize, f32, f32),
+) -> Result<Learned, String> {
+    const LISTEN_SHARE: f32 = 0.6;
+    let scout_decode = Decode::for_model(scout_model);
+
+    // ---- pass one: listen to everything, and note what was read out --------------
+    let mut clips: Vec<Vec<f32>> = Vec::new(); // the clips worth re-testing
+    let mut truth: Vec<(usize, String, u16)> = Vec::new(); // (clip index, book, chapter)
+    let mut learned: Vec<(String, String)> = Vec::new();
+    let mut minutes = 0.0f32;
+    let mut used = 0usize;
+    let mut rooms: Vec<Room> = Vec::new();
+    let mut versions: HashMap<String, usize> = HashMap::new();
+
+    // Size the bar by total audio, not by file count: sermons differ wildly in length.
+    let mut decoded: Vec<(String, Vec<(f32, Vec<f32>)>)> = Vec::new();
+    for (fi, path) in paths.iter().enumerate() {
+        say("Reading the recordings", fi, paths.len(), 0.0, 0.05);
+        let audio = match decode_audio_file(Path::new(path)) {
+            Ok(a) => a,
+            Err(_) => continue, // a file we cannot read is not worth abandoning the rest for
+        };
+        minutes += audio.len() as f32 / 16_000.0 / 60.0;
+        used += 1;
+        // Measured from the recording, not assumed the same as every other church's.
+        rooms.push(measure_room(&audio));
+        let name = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        decoded.push((name, crate::audio::segment_utterances(&audio)));
+    }
+    if decoded.is_empty() {
+        return Err("None of those files could be read as audio.".into());
+    }
+
+    let total_utterances: usize = decoded.iter().map(|(_, u)| u.len()).sum();
+    let mut heard = 0usize;
+
+    for (name, utterances) in &decoded {
+        let mut transcripts: Vec<(usize, String)> = Vec::new();
+        for (i, (_at, clip)) in utterances.iter().enumerate() {
+            heard += 1;
+            if heard % 5 == 0 {
+                say(&format!("Listening to {name}"), heard, total_utterances, 0.05, LISTEN_SHARE);
+            }
+            if let Ok(raw) = crate::stt::transcribe(clip, scout_model, binary, scout_decode) {
+                let text = crate::corrections::correct(raw.trim());
+                if !text.is_empty() {
+                    transcripts.push((i, text));
+                }
+            }
+        }
+
+        let mut seen: Vec<(String, u16)> = Vec::new();
+        for (i, text) in &transcripts {
+            let Some(rec) = reading(text) else { continue };
+            if seen.iter().any(|(o, c)| *o == rec.book_osis && *c == rec.chapter) {
+                continue; // one passage, however long the reading
+            }
+            seen.push((rec.book_osis.clone(), rec.chapter));
+            *versions.entry(rec.translation.clone()).or_insert(0) += 1;
+
+            // Keep the reading and the moments before it, where the reference was
+            // announced. That is all the settings have to recover.
+            let first = i.saturating_sub(4);
+            let base = clips.len();
+            for k in first..=*i {
+                if k < utterances.len() {
+                    clips.push(utterances[k].1.clone());
+                }
+            }
+            truth.push((base + (*i - first), rec.book_osis.clone(), rec.chapter));
+
+            // A book name that came out as a word we do not know, vouched for by the
+            // chapter she then read, is worth remembering for this speaker.
+            for (_, said) in transcripts.iter().filter(|(j, _)| *j < *i && *i - *j <= 4) {
+                if let Some(word) = learn_book_name(said, &rec.book_osis, rec.chapter) {
+                    if !learned.iter().any(|(w, _)| *w == word) {
+                        learned.push((word, rec.book_osis.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    if truth.is_empty() {
+        return Err("No scripture was read aloud in those recordings, so there is nothing to \
+                    learn from. This needs sermons where the preacher reads the verses out."
+            .into());
+    }
+
+    // ---- pass two: which settings recover the most of it? ------------------------
+    let baseline = Decode::for_model(target_model);
+    let configs = candidates();
+    let mut best: Option<(Decode, usize)> = None;
+    let mut before = 0usize;
+
+    for (ci, cfg) in configs.iter().enumerate() {
+        say(
+            "Comparing recognizer settings",
+            ci,
+            configs.len(),
+            0.05 + LISTEN_SHARE,
+            1.0 - LISTEN_SHARE - 0.05,
+        );
+        let mut texts: HashMap<usize, String> = HashMap::new();
+        for (k, clip) in clips.iter().enumerate() {
+            if let Ok(raw) = crate::stt::transcribe(clip, target_model, binary, *cfg) {
+                texts.insert(k, crate::corrections::correct(raw.trim()));
+            }
+        }
+        let found = truth
+            .iter()
+            .filter(|(i, osis, chapter)| {
+                (i.saturating_sub(4)..=*i)
+                    .any(|k| texts.get(&k).map(|t| resolves_to(t, osis, *chapter)).unwrap_or(false))
+            })
+            .count();
+        if *cfg == baseline {
+            before = found;
+        }
+        if best.as_ref().map(|(_, b)| found > *b).unwrap_or(true) {
+            best = Some((*cfg, found));
+        }
+    }
+
+    let (decode, after) = best.ok_or("nothing to compare")?;
+
+    // The room: the median of what each recording said, so one odd file cannot skew it.
+    let room = {
+        let mut levels: Vec<f32> = rooms.iter().map(|r| r.speech_above).collect();
+        levels.sort_by(f32::total_cmp);
+        levels.get(levels.len() / 2).map(|v| Room { speech_above: *v }).unwrap_or_default()
+    };
+    // The version: whichever their readings matched most often, and only if it clearly
+    // won — a preacher who quotes loosely should not have the screen switched on a whim.
+    let translation = versions
+        .iter()
+        .max_by_key(|(_, n)| **n)
+        .filter(|(_, n)| **n * 2 >= truth.len().max(1))
+        .map(|(code, _)| code.clone());
+
+    say("Done", 1, 1, 1.0, 0.0);
+
+    Ok(Learned {
+        decode,
+        room,
+        translation,
+        aliases: learned,
+        references_found: truth.len(),
+        before,
+        after,
+        minutes,
+        recordings: used,
+    })
 }

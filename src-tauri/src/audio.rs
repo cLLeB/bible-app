@@ -181,6 +181,10 @@ fn confidence_of(d: &Detection) -> (f32, &'static str) {
         DetectSource::Explicit => {
             if d.reference.verse.is_some() { (0.95, "explicit") } else { (0.85, "explicit") }
         }
+        // An ordinary-word book cited bare — real, but not sure enough to project on its
+        // own. Below the auto-project bar, so it waits as a suggestion for the operator
+        // (or the run sheet, which can lift a match it corroborates).
+        DetectSource::WeakExplicit => (0.78, "unsure"),
         DetectSource::Fuzzy => {
             if d.reference.verse.is_some() { (0.82, "fuzzy") } else { (0.72, "fuzzy") }
         }
