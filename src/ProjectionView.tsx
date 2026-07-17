@@ -113,6 +113,17 @@ export function ProjectionView() {
   // goes truly dark.
   const media = state.kind === "blackout" ? null : mediaBackground(theme);
 
+  // A stable signature of the *content* so the slide fades in only on real slide
+  // changes — not on every countdown tick.
+  const contentKey =
+    state.kind === "verse" || state.kind === "song"
+      ? `${state.kind}:${state.caption}:${state.text}`
+      : state.kind === "message"
+        ? `message:${state.text}`
+        : state.kind === "countdown"
+          ? `countdown:${state.label}`
+          : state.kind;
+
   return (
     <div
       className="relative flex h-screen w-screen flex-col items-center justify-center overflow-hidden px-16 text-center"
@@ -146,7 +157,9 @@ export function ProjectionView() {
           )}
         </>
       )}
-      <div className="relative z-10 flex flex-col items-center justify-center">{body()}</div>
+      <div key={contentKey} className="proj-fade relative z-10 flex flex-col items-center justify-center">
+        {body()}
+      </div>
 
       {showAlert && (
         <div
