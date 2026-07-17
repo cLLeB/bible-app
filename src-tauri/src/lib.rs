@@ -217,6 +217,7 @@ pub fn run() {
             commands::project_verse,
             commands::project_slide,
             commands::present_coords,
+            commands::project_parallel,
             commands::navigate,
             commands::blank_projection,
             commands::set_projection,

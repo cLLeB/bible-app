@@ -31,6 +31,14 @@ pub enum ProjectionState {
     Logo,
     Verse { text: String, caption: String },
     Song { text: String, caption: String },
+    /// The same verse in two translations, side by side.
+    Parallel {
+        primary_text: String,
+        primary_code: String,
+        secondary_text: String,
+        secondary_code: String,
+        caption: String,
+    },
     Message { text: String },
     Countdown { target_ms: i64, label: String },
 }

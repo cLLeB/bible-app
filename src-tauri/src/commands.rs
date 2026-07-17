@@ -832,6 +832,41 @@ pub fn project_slide(
     project(&app, &state, ProjectionState::Song { text, caption })
 }
 
+/// Project the same verse in two translations side by side. Primary is the
+/// active translation; `secondary` is any installed translation code. Missing
+/// secondary text projects an empty column rather than failing.
+#[tauri::command]
+pub fn project_parallel(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    book_osis: String,
+    chapter: u16,
+    verse: u16,
+    secondary: String,
+) -> Result<VersePayload, String> {
+    let tr = state.active_translation();
+    let (primary, second) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let primary = db
+            .verse_at(&tr, &book_osis, chapter, verse)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Verse not found".to_string())?;
+        let second = db.verse_at(&secondary, &book_osis, chapter, verse).map_err(|e| e.to_string())?;
+        (primary, second)
+    };
+    let payload = build_payload(primary);
+    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
+    let st = ProjectionState::Parallel {
+        primary_text: payload.text.clone(),
+        primary_code: payload.translation.clone(),
+        secondary_text: second.map(|r| r.text).unwrap_or_default(),
+        secondary_code: secondary,
+        caption: payload.reference.clone(),
+    };
+    project(&app, &state, st)?;
+    Ok(payload)
+}
+
 #[tauri::command]
 pub fn blank_projection(
     app: tauri::AppHandle,

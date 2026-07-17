@@ -22,12 +22,29 @@ export const presentCoords = (
 ): Promise<VersePayload> =>
   invoke<VersePayload>("present_coords", { bookOsis, chapter, verse });
 
+/** Project the same verse in the active translation + a secondary one, side by side. */
+export const projectParallel = (
+  bookOsis: string,
+  chapter: number,
+  verse: number,
+  secondary: string,
+): Promise<VersePayload> =>
+  invoke<VersePayload>("project_parallel", { bookOsis, chapter, verse, secondary });
+
 export type ProjectionState =
   | { kind: "blank" }
   | { kind: "blackout" }
   | { kind: "logo" }
   | { kind: "verse"; text: string; caption: string }
   | { kind: "song"; text: string; caption: string }
+  | {
+      kind: "parallel";
+      primaryText: string;
+      primaryCode: string;
+      secondaryText: string;
+      secondaryCode: string;
+      caption: string;
+    }
   | { kind: "message"; text: string }
   | { kind: "countdown"; targetMs: number; label: string };
 

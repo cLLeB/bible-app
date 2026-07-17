@@ -70,6 +70,7 @@ function fitvw(n){return n<120?5:n<220?4:n<340?3.2:n<500?2.6:2.1;}
 function render(){let b=document.getElementById('body'),c=document.getElementById('cap');if(!cur){b.textContent='';c.textContent='';return;}
  b.style.fontSize='5vw';
  switch(cur.kind){case 'verse':case 'song':b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent=cur.caption;break;
+ case 'parallel':b.textContent=cur.primaryText+'\n\n'+cur.secondaryText;b.style.fontSize=fitvw((cur.primaryText+cur.secondaryText).length)+'vw';c.textContent=cur.caption+' ('+cur.primaryCode+' / '+cur.secondaryCode+')';break;
  case 'message':b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent='';break;
  case 'countdown':b.textContent=fmt(cur.targetMs-Date.now());c.textContent=cur.label||'';break;
  case 'logo':b.textContent='✝';c.textContent='';break;
@@ -94,6 +95,9 @@ fn state_summary(app: &AppHandle) -> String {
         Ok(ref g) => match &**g {
             ProjectionState::Verse { caption, .. } | ProjectionState::Song { caption, .. } => {
                 format!("On screen: {caption}")
+            }
+            ProjectionState::Parallel { caption, primary_code, secondary_code, .. } => {
+                format!("On screen: {caption} ({primary_code} / {secondary_code})")
             }
             ProjectionState::Message { text } => format!("Message: {text}"),
             ProjectionState::Countdown { label, .. } => format!("Countdown: {label}"),

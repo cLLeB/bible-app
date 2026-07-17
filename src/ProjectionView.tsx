@@ -71,6 +71,30 @@ export function ProjectionView() {
             <p style={capCss}>{state.caption}</p>
           </>
         );
+      case "parallel":
+        return (
+          <>
+            <div className="grid w-full max-w-[92vw] grid-cols-1 gap-8 md:grid-cols-2">
+              {[
+                { text: state.primaryText, code: state.primaryCode },
+                { text: state.secondaryText, code: state.secondaryCode },
+              ].map((col, i) => (
+                <div key={i} className="flex flex-col items-center">
+                  <p
+                    className="mb-3 whitespace-pre-line"
+                    style={bodyStyle(theme, Math.max(state.primaryText.length, state.secondaryText.length) * 2, scale)}
+                  >
+                    {col.text || "—"}
+                  </p>
+                  <p style={{ ...capCss, fontSize: `${1 * scale}rem` }}>{col.code}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-6" style={capCss}>
+              {state.caption}
+            </p>
+          </>
+        );
       case "message":
         return (
           <p className="max-w-6xl whitespace-pre-line" style={bodyCss}>
@@ -118,7 +142,9 @@ export function ProjectionView() {
   const contentKey =
     state.kind === "verse" || state.kind === "song"
       ? `${state.kind}:${state.caption}:${state.text}`
-      : state.kind === "message"
+      : state.kind === "parallel"
+        ? `parallel:${state.caption}:${state.primaryCode}:${state.secondaryCode}`
+        : state.kind === "message"
         ? `message:${state.text}`
         : state.kind === "countdown"
           ? `countdown:${state.label}`
