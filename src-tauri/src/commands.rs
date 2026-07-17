@@ -1058,6 +1058,28 @@ pub fn set_stage_message(
     emit_stage(&app, &info)
 }
 
+/// Start/stop the stage timer. `mode` is "countup" (elapsed from now),
+/// "countdown" (`seconds` from now), or "off". Shows only on the stage monitor.
+#[tauri::command]
+pub fn set_stage_timer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: String,
+    seconds: i64,
+) -> Result<(), String> {
+    let anchor_ms = match mode.as_str() {
+        "countup" => now_ms(),
+        "countdown" => now_ms() + seconds.max(0) * 1000,
+        _ => 0,
+    };
+    let info = {
+        let mut s = state.stage.lock().map_err(|e| e.to_string())?;
+        s.timer = crate::events::StageTimer { mode, anchor_ms };
+        s.clone()
+    };
+    emit_stage(&app, &info)
+}
+
 /// Peek at the next verse from the current cursor without projecting it or
 /// moving the cursor — used to populate the stage "next" preview.
 #[tauri::command]

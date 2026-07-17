@@ -54,16 +54,34 @@ pub struct StageSlot {
     pub caption: String,
 }
 
+/// A timer the platform team watches on the stage monitor (never on the wall):
+/// count *up* from a start, or *down* to a target. `anchor_ms` is the start
+/// (count-up) or target (count-down) epoch-ms; ignored when mode is "off".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StageTimer {
+    pub mode: String, // "off" | "countup" | "countdown"
+    pub anchor_ms: i64,
+}
+
+impl Default for StageTimer {
+    fn default() -> Self {
+        Self { mode: "off".into(), anchor_ms: 0 }
+    }
+}
+
 /// What the stage (confidence) monitor shows the platform team: the current
-/// live line, a preview of what's next, and any private operator message.
-/// Deliberately independent of `ProjectionState` so blanking/blackout of the
-/// congregation screen does not wipe the stage.
+/// live line, a preview of what's next, any private operator message, and a
+/// timer. Deliberately independent of `ProjectionState` so blanking/blackout of
+/// the congregation screen does not wipe the stage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StageInfo {
     pub current: Option<StageSlot>,
     pub next: Option<StageSlot>,
     pub message: String,
+    #[serde(default)]
+    pub timer: StageTimer,
 }
 
 /// Display appearance applied over any ProjectionState: a global font multiplier

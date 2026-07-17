@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getStage, type StageInfo } from "./api";
+import { stageTimerElapsed, stageTimerText } from "./lib/stageTimer";
 
-const EMPTY: StageInfo = { current: null, next: null, message: "" };
+const EMPTY: StageInfo = { current: null, next: null, message: "", timer: { mode: "off", anchorMs: 0 } };
 
 export function StageView() {
   const [stage, setStage] = useState<StageInfo>(EMPTY);
@@ -24,11 +25,23 @@ export function StageView() {
     second: "2-digit",
   });
 
+  const timer = stage.timer ?? EMPTY.timer;
+  const timerText = stageTimerText(timer, now.getTime());
+  const timerOver = stageTimerElapsed(timer, now.getTime());
+
   return (
     <div className="flex h-screen w-screen flex-col bg-neutral-950 p-6 text-white">
-      {/* Header: label + live clock */}
+      {/* Header: label + timer + live clock */}
       <div className="flex items-baseline justify-between border-b border-neutral-800 pb-2">
         <span className="text-sm uppercase tracking-widest text-neutral-500">Stage Display</span>
+        {timerText !== null && (
+          <span
+            className="font-mono text-5xl font-bold tabular-nums"
+            style={{ color: timerOver ? "#f87171" : "#4ade80" }}
+          >
+            {timerText}
+          </span>
+        )}
         <span className="font-mono text-3xl tabular-nums text-neutral-200">{time}</span>
       </div>
 

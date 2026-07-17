@@ -6,6 +6,7 @@ import {
   setFontScale,
   setProjection,
   setStageMessage,
+  setStageTimer,
   showAlert,
   showStage,
   startRemote,
@@ -139,6 +140,23 @@ export function DisplayPanel() {
           className="btn"
         >
           Clear
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-[var(--muted)]">Stage timer</span>
+        <button onClick={() => setStageTimer("countup", 0)} className="btn" title="Count up on the stage monitor only">
+          Start elapsed
+        </button>
+        <button
+          onClick={() => setStageTimer("countdown", minutes * 60)}
+          className="btn"
+          title={`Count down ${minutes} min on the stage monitor`}
+        >
+          Count down {minutes}m
+        </button>
+        <button onClick={() => setStageTimer("off", 0)} className="btn">
+          Stop
         </button>
       </div>
 

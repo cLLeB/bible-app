@@ -233,6 +233,7 @@ pub fn run() {
             commands::get_stage,
             commands::set_stage,
             commands::set_stage_message,
+            commands::set_stage_timer,
             commands::peek_next,
             commands::add_song,
             commands::list_songs,

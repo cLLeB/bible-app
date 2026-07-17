@@ -114,13 +114,23 @@ export interface StageSlot {
   caption: string;
 }
 
+export interface StageTimer {
+  mode: "off" | "countup" | "countdown";
+  anchorMs: number;
+}
+
 export interface StageInfo {
   current: StageSlot | null;
   next: StageSlot | null;
   message: string;
+  timer: StageTimer;
 }
 
 export const getStage = (): Promise<StageInfo> => invoke<StageInfo>("get_stage");
+
+/** Start/stop the stage-only timer. mode: "countup" | "countdown" | "off". */
+export const setStageTimer = (mode: StageTimer["mode"], seconds: number): Promise<void> =>
+  invoke<void>("set_stage_timer", { mode, seconds });
 
 export const setStage = (
   current: StageSlot | null,
