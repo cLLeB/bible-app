@@ -65,6 +65,11 @@ export function DisplayPanel() {
             OBS / browser output: add a Browser Source at{" "}
             <span className="font-mono text-blue-700">{remoteUrl}/projection</span>.
           </p>
+          <p>
+            NDI (for vMix / OBS / Resolume): add the Browser Source above in OBS, then turn on
+            OBS&rsquo;s NDI output (Tools → NDI Output Settings → Main Output). vMix and other NDI
+            tools then see the live projection as an NDI source on the network — no extra hardware.
+          </p>
         </div>
       )}
 
