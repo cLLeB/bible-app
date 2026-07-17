@@ -827,9 +827,21 @@ pub fn project_slide(
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "Song".to_string());
         // Projection shows just the title — no slide numbers on the wall.
+        // Log usage once per day for CCLI reporting (ignore logging errors).
+        let _ = db.log_song_usage(song_id);
         (slide.text.clone(), title)
     };
     project(&app, &state, ProjectionState::Song { text, caption })
+}
+
+/// The CCLI song-usage report: which songs were shown, how many service days,
+/// and when last used. Most-used first.
+#[tauri::command]
+pub fn song_usage_report(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::db::UsageRow>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.song_usage_report().map_err(|e| e.to_string())
 }
 
 /// Project the same verse in two translations side by side. Primary is the

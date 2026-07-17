@@ -216,6 +216,7 @@ pub fn run() {
             commands::get_projection,
             commands::project_verse,
             commands::project_slide,
+            commands::song_usage_report,
             commands::present_coords,
             commands::project_parallel,
             commands::navigate,

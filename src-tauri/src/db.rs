@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS song_usage (
+    song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    PRIMARY KEY (song_id, day)
+);
 "#;
 
 #[cfg_attr(not(test), allow(dead_code))] // used by unit tests
@@ -105,6 +111,16 @@ pub struct SlideRecord {
     /// Section label ("Verse 1", "Chorus", …) parsed from the slide, or None.
     /// Guides the operator; never shown on the congregation screen.
     pub label: Option<String>,
+}
+
+/// One line of the CCLI song-usage report.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageRow {
+    pub title: String,
+    pub author: Option<String>,
+    pub times: i64,
+    pub last_used: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -613,6 +629,37 @@ impl Db {
             [version.to_string()],
         )?;
         Ok(n)
+    }
+
+    /// Record that a song went on the wall today (deduped to once per day, so
+    /// CCLI "times used" counts distinct service days, not slide advances).
+    pub fn log_song_usage(&self, song_id: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO song_usage(song_id, day, ts)
+             VALUES(?1, date('now','localtime'), datetime('now','localtime'))",
+            [song_id],
+        )?;
+        Ok(())
+    }
+
+    /// Per-song usage totals for CCLI reporting: title, author, times used
+    /// (distinct days), and the most recent day — most-used first.
+    pub fn song_usage_report(&self) -> rusqlite::Result<Vec<UsageRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.title, s.author, COUNT(u.day) AS times, MAX(u.day) AS last_used
+             FROM song_usage u JOIN songs s ON s.id = u.song_id
+             GROUP BY u.song_id
+             ORDER BY times DESC, s.title ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(UsageRow {
+                title: r.get(0)?,
+                author: r.get(1)?,
+                times: r.get(2)?,
+                last_used: r.get(3)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn get_song_slides(&self, song_id: i64) -> rusqlite::Result<Vec<SlideRecord>> {

@@ -280,6 +280,17 @@ export const updateSong = (
 export const deleteSong = (songId: number): Promise<void> =>
   invoke<void>("delete_song", { songId });
 
+/** One line of the CCLI song-usage report. */
+export interface UsageRow {
+  title: string;
+  author: string | null;
+  times: number;
+  lastUsed: string | null;
+}
+
+export const songUsageReport = (): Promise<UsageRow[]> =>
+  invoke<UsageRow[]>("song_usage_report");
+
 export const exportSongs = (): Promise<string> => invoke<string>("export_songs");
 export const importSongs = (json: string): Promise<number> =>
   invoke<number>("import_songs", { json });
