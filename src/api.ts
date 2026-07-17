@@ -156,6 +156,8 @@ export interface SongSummary {
 export interface Slide {
   orderIndex: number;
   text: string;
+  /** Section label ("Verse 1", "Chorus", …) for the operator, or null. */
+  label: string | null;
 }
 
 export const lookupReference = (query: string): Promise<VersePayload> =>

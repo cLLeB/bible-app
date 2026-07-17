@@ -125,7 +125,14 @@ export function SongLive({ song }: SongLiveProps) {
               slide.orderIndex === index ? "tint tint-current" : "tint-neutral tint-hover"
             }`}
           >
-            <div className="text-[10px] text-[var(--faint)]">Slide {slide.orderIndex + 1}</div>
+            <div className="flex items-center gap-1.5 text-[10px] text-[var(--faint)]">
+              {slide.label && (
+                <span className="rounded bg-[var(--tint-neutral,#8883)] px-1.5 py-0.5 font-medium uppercase tracking-wide">
+                  {slide.label}
+                </span>
+              )}
+              <span>Slide {slide.orderIndex + 1}</span>
+            </div>
             <p className="whitespace-pre-line text-sm">{slide.text}</p>
           </button>
         ))}

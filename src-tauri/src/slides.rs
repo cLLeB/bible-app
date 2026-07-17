@@ -10,6 +10,69 @@ pub fn split_lyrics(lyrics: &str) -> Vec<String> {
         .collect()
 }
 
+fn split_trailing_number(s: &str) -> (String, Option<String>) {
+    let t = s.trim();
+    let digits: String = t.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return (t.to_string(), None);
+    }
+    let digits: String = digits.chars().rev().collect();
+    let word = t[..t.len() - digits.len()].trim().to_string();
+    (word, Some(digits))
+}
+
+/// Recognise a lyric section header ("Verse 1", "Chorus", "[Bridge]",
+/// "Pre-Chorus:") as a canonical label, or None if the line isn't purely a
+/// marker. The whole line must be the marker, so real lyrics like "Chorus of
+/// angels" never match.
+fn parse_marker(line: &str) -> Option<String> {
+    let s = line
+        .trim()
+        .trim_start_matches(['[', '('])
+        .trim_end_matches([']', ')'])
+        .trim()
+        .trim_end_matches(':')
+        .trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (word, num) = split_trailing_number(&s.to_lowercase());
+    let canonical = match word.trim() {
+        "verse" | "v" => "Verse",
+        "chorus" | "c" => "Chorus",
+        "pre-chorus" | "prechorus" | "pre chorus" => "Pre-Chorus",
+        "bridge" | "b" => "Bridge",
+        "refrain" => "Refrain",
+        "tag" => "Tag",
+        "intro" => "Intro",
+        "outro" | "ending" => "Ending",
+        "interlude" => "Interlude",
+        "vamp" => "Vamp",
+        "coda" => "Coda",
+        _ => return None,
+    };
+    Some(match num {
+        Some(n) => format!("{canonical} {n}"),
+        None => canonical.to_string(),
+    })
+}
+
+/// Split a slide into its optional section label and the lyric text to show. The
+/// label (if any) is stripped from the projected text so markers never reach the
+/// wall — they only guide the operator. A slide that is *only* a marker keeps its
+/// text (nothing to strip to).
+pub fn section_label(text: &str) -> (Option<String>, String) {
+    let trimmed = text.trim_start();
+    let (first, rest) = match trimmed.split_once('\n') {
+        Some((a, b)) => (a, b),
+        None => (trimmed, ""),
+    };
+    match parse_marker(first) {
+        Some(label) if !rest.trim().is_empty() => (Some(label), rest.trim_start().to_string()),
+        _ => (None, text.to_string()),
+    }
+}
+
 /// Split a long passage into readable slides, each at most `max_chars`,
 /// breaking only at word boundaries. A short passage stays a single slide.
 pub fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
@@ -66,5 +129,26 @@ mod tests {
     #[test]
     fn single_block_is_one_slide() {
         assert_eq!(split_lyrics("just one slide"), vec!["just one slide".to_string()]);
+    }
+
+    #[test]
+    fn section_label_detects_and_strips_markers() {
+        let (label, text) = section_label("Verse 1\nAmazing grace\nhow sweet");
+        assert_eq!(label, Some("Verse 1".to_string()));
+        assert_eq!(text, "Amazing grace\nhow sweet");
+
+        assert_eq!(section_label("[Chorus]\nline").0, Some("Chorus".to_string()));
+        assert_eq!(section_label("Pre-Chorus:\nline").0, Some("Pre-Chorus".to_string()));
+        assert_eq!(section_label("BRIDGE\nline").0, Some("Bridge".to_string()));
+    }
+
+    #[test]
+    fn section_label_ignores_real_lyric_lines() {
+        // A line that merely starts with a section word is not a marker.
+        let (label, text) = section_label("Chorus of angels sing\nto the King");
+        assert_eq!(label, None);
+        assert_eq!(text, "Chorus of angels sing\nto the King");
+        // A lone marker with no lyric keeps its text (nothing to strip to).
+        assert_eq!(section_label("Chorus"), (None, "Chorus".to_string()));
     }
 }

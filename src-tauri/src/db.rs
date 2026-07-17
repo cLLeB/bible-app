@@ -102,6 +102,9 @@ pub struct SongSummary {
 pub struct SlideRecord {
     pub order_index: u16,
     pub text: String,
+    /// Section label ("Verse 1", "Chorus", …) parsed from the slide, or None.
+    /// Guides the operator; never shown on the congregation screen.
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -617,7 +620,10 @@ impl Db {
             "SELECT order_index, text FROM song_slides WHERE song_id = ?1 ORDER BY order_index",
         )?;
         let rows = stmt.query_map([song_id], |r| {
-            Ok(SlideRecord { order_index: r.get(0)?, text: r.get(1)? })
+            let order_index: u16 = r.get(0)?;
+            let raw: String = r.get(1)?;
+            let (label, text) = crate::slides::section_label(&raw);
+            Ok(SlideRecord { order_index, text, label })
         })?;
         rows.collect()
     }
