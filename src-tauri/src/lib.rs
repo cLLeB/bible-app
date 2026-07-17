@@ -12,6 +12,7 @@ pub mod idle;
 pub mod knowledge;
 pub mod learn;
 pub mod pjlink;
+pub mod planning_center;
 pub mod profile_seed;
 pub mod reference;
 pub mod relearn;
@@ -231,6 +232,7 @@ pub fn run() {
             commands::save_theme,
             commands::delete_theme,
             commands::pjlink_command,
+            commands::pco_import_plan,
             commands::get_alert,
             commands::show_alert,
             commands::clear_alert,

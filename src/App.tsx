@@ -6,6 +6,7 @@ import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
 import { PdfImport } from "./components/PdfImport";
+import { PlanningCenterPanel } from "./components/PlanningCenterPanel";
 import { ProjectorPanel } from "./components/ProjectorPanel";
 import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
@@ -70,6 +71,9 @@ export default function App() {
           <div className="space-y-4">
             <div className="card">
               <ServicePanel />
+            </div>
+            <div className="card">
+              <PlanningCenterPanel />
             </div>
             <div className="card">
               <SongsPanel />

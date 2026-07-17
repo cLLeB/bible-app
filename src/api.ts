@@ -168,6 +168,20 @@ export const peekNext = (): Promise<VersePayload | null> =>
 
 export const startRemote = (): Promise<string> => invoke<string>("start_remote");
 
+/** One item in a Planning Center plan. */
+export interface PlanItem {
+  title: string;
+  kind: string;
+}
+
+export const pcoImportPlan = (
+  appId: string,
+  secret: string,
+  serviceTypeId: string,
+  planId: string,
+): Promise<PlanItem[]> =>
+  invoke<PlanItem[]>("pco_import_plan", { appId, secret, serviceTypeId, planId });
+
 /** Send a raw PJLink command body (e.g. "%1POWR 1") to a LAN projector. */
 export const pjlinkCommand = (
   host: string,

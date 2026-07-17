@@ -1010,6 +1010,24 @@ pub fn delete_theme(
     Ok(())
 }
 
+// ---- Planning Center Online import ----
+
+/// Fetch a Planning Center plan's item list (songs, headers, …). Blocking HTTP
+/// on a worker thread. Requires the operator's own PCO Personal Access Token.
+#[tauri::command]
+pub async fn pco_import_plan(
+    app_id: String,
+    secret: String,
+    service_type_id: String,
+    plan_id: String,
+) -> Result<Vec<crate::planning_center::PlanItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::planning_center::fetch_plan(&app_id, &secret, &service_type_id, &plan_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- PJLink network projector control ----
 
 /// Send one PJLink command (e.g. "%1POWR 1" on, "%1POWR 0" off, "%1AVMT 31"
