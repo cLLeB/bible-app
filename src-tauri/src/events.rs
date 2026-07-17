@@ -56,17 +56,20 @@ pub struct StageInfo {
     pub message: String,
 }
 
-/// Display appearance applied over any ProjectionState.
+/// Display appearance applied over any ProjectionState: a global font multiplier
+/// plus the fully-resolved active theme. Carrying the resolved theme (not just an
+/// id) means the projection window renders straight from this payload without
+/// needing the theme library.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectionSettings {
-    pub font_scale: f32,   // 1.0 = default
-    pub theme: String,     // "dark" | "light" | "sepia"
+    pub font_scale: f32, // 1.0 = default
+    pub theme: crate::themes::Theme,
 }
 
 impl Default for ProjectionSettings {
     fn default() -> Self {
-        Self { font_scale: 1.0, theme: "dark".into() }
+        Self { font_scale: 1.0, theme: crate::themes::default_theme() }
     }
 }
 

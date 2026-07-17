@@ -31,9 +31,37 @@ export type ProjectionState =
   | { kind: "message"; text: string }
   | { kind: "countdown"; targetMs: number; label: string };
 
+/** Where the congregation screen's background comes from. `image`/video are a
+ *  later slice; the shape is forward-compatible so that's a render-only addition. */
+export interface Background {
+  kind: "color" | "gradient";
+  color: string;
+  color2: string;
+  angle: number;
+}
+
+export interface TextStyle {
+  fontFamily: string;
+  color: string;
+  captionColor: string;
+  align: "center" | "left" | "right";
+  weight: number;
+  shadow: boolean;
+  uppercase: boolean;
+}
+
+/** A named, self-contained look for the congregation screen. */
+export interface Theme {
+  id: string;
+  name: string;
+  background: Background;
+  text: TextStyle;
+  builtIn: boolean;
+}
+
 export interface ProjectionSettings {
   fontScale: number;
-  theme: "dark" | "light" | "sepia";
+  theme: Theme;
 }
 
 export const setProjection = (next: ProjectionState): Promise<void> =>
@@ -42,8 +70,22 @@ export const setProjection = (next: ProjectionState): Promise<void> =>
 export const getProjectionSettings = (): Promise<ProjectionSettings> =>
   invoke<ProjectionSettings>("get_projection_settings");
 
-export const setProjectionSettings = (settings: ProjectionSettings): Promise<void> =>
-  invoke<void>("set_projection_settings", { settings });
+/** Built-in themes first, then the operator's custom ones. */
+export const listThemes = (): Promise<Theme[]> => invoke<Theme[]>("list_themes");
+
+/** Make a theme live; returns the resolved settings now in force. */
+export const setActiveTheme = (id: string): Promise<ProjectionSettings> =>
+  invoke<ProjectionSettings>("set_active_theme", { id });
+
+export const setFontScale = (scale: number): Promise<void> =>
+  invoke<void>("set_font_scale", { scale });
+
+/** Create or update a custom theme (built-ins are duplicated before editing). */
+export const saveTheme = (theme: Theme): Promise<void> =>
+  invoke<void>("save_theme", { theme });
+
+export const deleteTheme = (id: string): Promise<void> =>
+  invoke<void>("delete_theme", { id });
 
 export const showStage = (): Promise<void> => invoke<void>("show_stage");
 

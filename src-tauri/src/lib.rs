@@ -21,9 +21,10 @@ mod translations;
 pub mod semantic;
 mod slides;
 pub mod stt;
+pub mod themes;
 
 use commands::AppState;
-use events::{ProjectionSettings, ProjectionState};
+use events::ProjectionState;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -130,13 +131,15 @@ pub fn run() {
             let db_path = data_dir.join("bible.sqlite");
             let db = db::open_at(&db_path).expect("open db");
             db.migrate().expect("migrate");
+            // Appearance persists across restarts (theme + font scale).
+            let initial_settings = themes::load_projection_settings(&db);
 
             let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
                 db: Mutex::new(db),
                 translation: Mutex::new("WEB".into()),
                 current: Mutex::new(ProjectionState::Blank),
-                settings: Mutex::new(ProjectionSettings::default()),
+                settings: Mutex::new(initial_settings),
                 stage: Mutex::new(crate::events::StageInfo::default()),
                 ready: ready.clone(),
                 listening: Arc::new(AtomicBool::new(false)),
@@ -218,7 +221,11 @@ pub fn run() {
             commands::set_projection,
             commands::show_stage,
             commands::get_projection_settings,
-            commands::set_projection_settings,
+            commands::list_themes,
+            commands::set_active_theme,
+            commands::set_font_scale,
+            commands::save_theme,
+            commands::delete_theme,
             commands::get_stage,
             commands::set_stage,
             commands::set_stage_message,

@@ -6,12 +6,8 @@ import {
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
-
-const THEMES: Record<string, { bg: string; fg: string; sub: string }> = {
-  dark: { bg: "#000000", fg: "#ffffff", sub: "#c9c9c9" },
-  light: { bg: "#ffffff", fg: "#101010", sub: "#555555" },
-  sepia: { bg: "#f4ecd8", fg: "#5b4636", sub: "#8a725a" },
-};
+import { backgroundCss, bodyStyle, captionStyle } from "./lib/theme";
+import { defaultProjectionSettings } from "./lib/themeDefaults";
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now());
@@ -32,7 +28,7 @@ function formatRemaining(ms: number): string {
 
 export function ProjectionView() {
   const [state, setState] = useState<ProjectionState>({ kind: "blank" });
-  const [settings, setSettings] = useState<ProjectionSettings>({ fontScale: 1, theme: "dark" });
+  const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
 
   useEffect(() => {
     getProjection().then(setState).catch(() => setState({ kind: "blank" }));
@@ -46,19 +42,13 @@ export function ProjectionView() {
     };
   }, []);
 
-  const theme = THEMES[settings.theme] ?? THEMES.dark;
+  const theme = settings.theme;
   const scale = settings.fontScale || 1;
   const now = useNow(state.kind === "countdown");
 
-  // Auto-fit: shrink the text as the verse gets longer so it never overflows.
-  function fitRem(text: string): number {
-    const n = text.length;
-    const base = n < 120 ? 3.2 : n < 220 ? 2.6 : n < 340 ? 2.1 : n < 500 ? 1.7 : 1.4;
-    return base * scale;
-  }
   const bodyText = state.kind === "verse" || state.kind === "song" || state.kind === "message" ? state.text : "";
-  const bodyStyle = { fontSize: `${fitRem(bodyText)}rem`, lineHeight: 1.15 };
-  const capStyle = { fontSize: `${1.4 * scale}rem`, color: theme.sub };
+  const bodyCss = bodyStyle(theme, bodyText.length, scale);
+  const capCss = captionStyle(theme, scale);
 
   function body() {
     switch (state.kind) {
@@ -66,25 +56,25 @@ export function ProjectionView() {
       case "song":
         return (
           <>
-            <p className="mb-8 max-w-6xl whitespace-pre-line" style={bodyStyle}>
+            <p className="mb-8 max-w-6xl whitespace-pre-line" style={bodyCss}>
               {state.text}
             </p>
-            <p style={capStyle}>{state.caption}</p>
+            <p style={capCss}>{state.caption}</p>
           </>
         );
       case "message":
         return (
-          <p className="max-w-6xl whitespace-pre-line" style={bodyStyle}>
+          <p className="max-w-6xl whitespace-pre-line" style={bodyCss}>
             {state.text}
           </p>
         );
       case "countdown":
         return (
           <>
-            <p style={{ fontSize: `${5 * scale}rem`, fontVariantNumeric: "tabular-nums" }}>
+            <p style={{ ...bodyCss, fontSize: `${5 * scale}rem`, fontVariantNumeric: "tabular-nums" }}>
               {formatRemaining(state.targetMs - now)}
             </p>
-            {state.label && <p style={capStyle}>{state.label}</p>}
+            {state.label && <p style={capCss}>{state.label}</p>}
           </>
         );
       case "logo":
@@ -106,14 +96,17 @@ export function ProjectionView() {
         return null;
       case "blank":
       default:
-        return <p style={{ fontSize: "0.9rem", color: theme.sub }}>Projection ready</p>;
+        return <p style={{ fontSize: "0.9rem", color: theme.text.captionColor }}>Projection ready</p>;
     }
   }
 
   return (
     <div
       className="flex h-screen w-screen flex-col items-center justify-center px-16 text-center"
-      style={{ backgroundColor: state.kind === "blackout" ? "#000000" : theme.bg, color: theme.fg }}
+      style={{
+        background: state.kind === "blackout" ? "#000000" : backgroundCss(theme),
+        color: theme.text.color,
+      }}
     >
       {body()}
     </div>

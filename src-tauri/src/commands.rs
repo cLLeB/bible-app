@@ -2,6 +2,7 @@ use crate::books::{book_after, book_before, book_by_osis};
 use crate::db::{Db, SongSummary};
 use crate::events::{ProjectionSettings, ProjectionState, StageInfo, StageSlot, VersePayload};
 use crate::reference::parse_reference;
+use crate::themes::{self, Theme};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -863,10 +864,11 @@ pub fn get_projection_settings(state: tauri::State<'_, AppState>) -> ProjectionS
     state.settings.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
-#[tauri::command]
-pub fn set_projection_settings(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
+/// Store the resolved settings in shared state and push them to the projection
+/// window. The single seam every appearance change flows through.
+fn apply_settings(
+    app: &tauri::AppHandle,
+    state: &AppState,
     settings: ProjectionSettings,
 ) -> Result<(), String> {
     if let Ok(mut s) = state.settings.lock() {
@@ -874,6 +876,90 @@ pub fn set_projection_settings(
     }
     app.emit_to("projection", "set-settings", settings)
         .map_err(|e| e.to_string())
+}
+
+/// Every theme the operator can choose from (built-ins first, then custom).
+#[tauri::command]
+pub fn list_themes(state: tauri::State<'_, AppState>) -> Result<Vec<Theme>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(themes::all_themes(&db))
+}
+
+/// Make a theme the active look: persist the choice, resolve it, and project it.
+#[tauri::command]
+pub fn set_active_theme(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<ProjectionSettings, String> {
+    let theme = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        themes::set_active_theme_id(&db, &id).map_err(|e| e.to_string())?;
+        themes::theme_by_id(&db, &id)
+    };
+    let font_scale = state.settings.lock().map(|s| s.font_scale).unwrap_or(1.0);
+    let settings = ProjectionSettings { font_scale, theme };
+    apply_settings(&app, &state, settings.clone())?;
+    Ok(settings)
+}
+
+/// Adjust the global font multiplier; persisted and applied live.
+#[tauri::command]
+pub fn set_font_scale(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    scale: f32,
+) -> Result<(), String> {
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        themes::set_font_scale(&db, scale).map_err(|e| e.to_string())?;
+    }
+    let theme = state.settings.lock().map(|s| s.theme.clone()).unwrap_or_else(|_| themes::default_theme());
+    apply_settings(&app, &state, ProjectionSettings { font_scale: scale, theme })
+}
+
+/// Create or update a custom theme. Editing the live theme re-projects it at once.
+#[tauri::command]
+pub fn save_theme(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    theme: Theme,
+) -> Result<(), String> {
+    let is_active = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        themes::save_custom(&db, &theme).map_err(|e| e.to_string())?;
+        themes::active_theme_id(&db) == theme.id
+    };
+    if is_active {
+        let font_scale = state.settings.lock().map(|s| s.font_scale).unwrap_or(1.0);
+        let stored = Theme { built_in: false, ..theme };
+        apply_settings(&app, &state, ProjectionSettings { font_scale, theme: stored })?;
+    }
+    Ok(())
+}
+
+/// Delete a custom theme. If it was live, fall back to the default look.
+#[tauri::command]
+pub fn delete_theme(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    let fell_back = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        themes::delete_custom(&db, &id).map_err(|e| e.to_string())?;
+        if themes::active_theme_id(&db) == id {
+            themes::set_active_theme_id(&db, themes::default_theme_id()).map_err(|e| e.to_string())?;
+            true
+        } else {
+            false
+        }
+    };
+    if fell_back {
+        let font_scale = state.settings.lock().map(|s| s.font_scale).unwrap_or(1.0);
+        apply_settings(&app, &state, ProjectionSettings { font_scale, theme: themes::default_theme() })?;
+    }
+    Ok(())
 }
 
 // ---- Stage / confidence monitor ----

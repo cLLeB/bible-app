@@ -12,6 +12,7 @@ import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
+import { ThemesPanel } from "./components/ThemesPanel";
 import { TranslationPicker } from "./components/TranslationPicker";
 import { TranslationManager } from "./components/TranslationManager";
 
@@ -72,6 +73,9 @@ export default function App() {
             </div>
             <div className="card">
               <DisplayPanel />
+            </div>
+            <div className="card">
+              <ThemesPanel />
             </div>
           </div>
         </div>

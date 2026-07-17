@@ -2,29 +2,30 @@ import { useEffect, useState } from "react";
 import {
   blankProjection,
   getProjectionSettings,
+  setFontScale,
   setProjection,
-  setProjectionSettings,
   setStageMessage,
   showStage,
   startRemote,
   type ProjectionSettings,
 } from "../api";
+import { defaultProjectionSettings } from "../lib/themeDefaults";
 
 export function DisplayPanel() {
   const [message, setMessage] = useState("");
   const [stageMsg, setStageMsg] = useState("");
   const [minutes, setMinutes] = useState(5);
   const [label, setLabel] = useState("Starting soon");
-  const [settings, setSettings] = useState<ProjectionSettings>({ fontScale: 1, theme: "dark" });
+  const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
 
   useEffect(() => {
     getProjectionSettings().then(setSettings).catch(() => {});
   }, []);
 
-  function applySettings(next: ProjectionSettings): void {
-    setSettings(next);
-    void setProjectionSettings(next);
+  function changeFontScale(scale: number): void {
+    setSettings((s) => ({ ...s, fontScale: scale }));
+    void setFontScale(scale);
   }
 
   return (
@@ -141,25 +142,11 @@ export function DisplayPanel() {
             max={2}
             step={0.1}
             value={settings.fontScale}
-            onChange={(e) => applySettings({ ...settings, fontScale: Number(e.target.value) })}
+            onChange={(e) => changeFontScale(Number(e.target.value))}
           />
           <span className="tabular-nums text-[var(--muted)]">{Math.round(settings.fontScale * 100)}%</span>
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          Theme
-          <select
-            value={settings.theme}
-            onChange={(e) =>
-              applySettings({ ...settings, theme: e.target.value as ProjectionSettings["theme"] })
-            }
-            className="select"
-            style={{ width: "auto" }}
-          >
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-            <option value="sepia">Sepia</option>
-          </select>
-        </label>
+        <span className="text-xs text-[var(--muted)]">Theme &amp; backgrounds → Themes panel</span>
       </div>
     </section>
   );
