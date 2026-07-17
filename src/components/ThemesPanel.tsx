@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   deleteTheme,
   getProjectionSettings,
@@ -7,7 +9,7 @@ import {
   setActiveTheme,
   type Theme,
 } from "../api";
-import { backgroundCss, bodyStyle, captionStyle } from "../lib/theme";
+import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "../lib/theme";
 
 const FONTS: { label: string; value: string }[] = [
   { label: "Sans (Inter)", value: "Inter, 'Segoe UI', system-ui, sans-serif" },
@@ -87,13 +89,27 @@ export function ThemesPanel() {
 
       {preview && (
         <div
-          className="flex h-32 flex-col items-center justify-center overflow-hidden rounded-lg px-6 text-center"
+          className="relative flex h-32 flex-col items-center justify-center overflow-hidden rounded-lg px-6 text-center"
           style={{ background: backgroundCss(preview) }}
         >
-          <p className="line-clamp-2" style={{ ...bodyStyle(preview, SAMPLE.length, 1), fontSize: "1.25rem" }}>
+          {(() => {
+            const m = mediaBackground(preview);
+            if (!m) return null;
+            return (
+              <>
+                {m.kind === "image" ? (
+                  <img src={convertFileSrc(m.src)} alt="" className="absolute inset-0 h-full w-full" style={{ objectFit: m.fit }} />
+                ) : (
+                  <video src={convertFileSrc(m.src)} className="absolute inset-0 h-full w-full" style={{ objectFit: m.fit }} autoPlay loop muted playsInline />
+                )}
+                {m.dim > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${m.dim})` }} />}
+              </>
+            );
+          })()}
+          <p className="relative z-10 line-clamp-2" style={{ ...bodyStyle(preview, SAMPLE.length, 1), fontSize: "1.25rem" }}>
             {SAMPLE}
           </p>
-          <p style={{ ...captionStyle(preview, 1), fontSize: "0.85rem", marginTop: "0.4rem" }}>
+          <p className="relative z-10" style={{ ...captionStyle(preview, 1), fontSize: "0.85rem", marginTop: "0.4rem" }}>
             {SAMPLE_CAPTION}
           </p>
         </div>
@@ -166,12 +182,19 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <label className="flex items-center gap-1.5">
           Background
-          <select className="select" style={{ width: "auto" }} value={bg.kind} onChange={(e) => setBg({ kind: e.target.value as "color" | "gradient" })}>
+          <select
+            className="select"
+            style={{ width: "auto" }}
+            value={bg.kind}
+            onChange={(e) => setBg({ kind: e.target.value as Theme["background"]["kind"] })}
+          >
             <option value="color">Solid</option>
             <option value="gradient">Gradient</option>
+            <option value="image">Image</option>
+            <option value="video">Video</option>
           </select>
         </label>
-        <label className="flex items-center gap-1.5" title="Background colour">
+        <label className="flex items-center gap-1.5" title="Background / behind-media colour">
           <input type="color" value={bg.color} onChange={(e) => setBg({ color: e.target.value })} />
         </label>
         {bg.kind === "gradient" && (
@@ -189,6 +212,52 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
                 value={bg.angle}
                 onChange={(e) => setBg({ angle: Math.max(0, Math.min(360, Number(e.target.value) || 0)) })}
               />
+            </label>
+          </>
+        )}
+        {(bg.kind === "image" || bg.kind === "video") && (
+          <>
+            <button
+              className="btn"
+              onClick={async () => {
+                const isVideo = bg.kind === "video";
+                const picked = await open({
+                  multiple: false,
+                  directory: false,
+                  filters: [
+                    isVideo
+                      ? { name: "Video", extensions: ["mp4", "webm", "mov", "mkv", "m4v"] }
+                      : { name: "Image", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] },
+                  ],
+                });
+                if (typeof picked === "string") setBg({ src: picked });
+              }}
+            >
+              {bg.src ? "Change file…" : "Choose file…"}
+            </button>
+            {bg.src && (
+              <span className="max-w-[12rem] truncate text-xs text-[var(--muted)]" title={bg.src}>
+                {bg.src.split(/[/\\]/).pop()}
+              </span>
+            )}
+            <label className="flex items-center gap-1.5">
+              Fit
+              <select className="select" style={{ width: "auto" }} value={bg.fit} onChange={(e) => setBg({ fit: e.target.value as "cover" | "contain" })}>
+                <option value="cover">Cover</option>
+                <option value="contain">Contain</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5" title="Darken the media so text stays readable">
+              Dim
+              <input
+                type="range"
+                min={0}
+                max={0.8}
+                step={0.05}
+                value={bg.dim}
+                onChange={(e) => setBg({ dim: Number(e.target.value) })}
+              />
+              <span className="tabular-nums text-[var(--muted)]">{Math.round(bg.dim * 100)}%</span>
             </label>
           </>
         )}

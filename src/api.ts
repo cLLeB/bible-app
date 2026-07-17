@@ -34,10 +34,16 @@ export type ProjectionState =
 /** Where the congregation screen's background comes from. `image`/video are a
  *  later slice; the shape is forward-compatible so that's a render-only addition. */
 export interface Background {
-  kind: "color" | "gradient";
+  kind: "color" | "gradient" | "image" | "video";
   color: string;
   color2: string;
   angle: number;
+  /** Absolute path to an image/video file (empty for color/gradient). */
+  src: string;
+  /** How media fills the screen. */
+  fit: "cover" | "contain";
+  /** 0..1 dark overlay over media for text legibility. */
+  dim: number;
 }
 
 export interface TextStyle {

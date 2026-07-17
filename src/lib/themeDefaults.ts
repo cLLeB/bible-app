@@ -8,7 +8,7 @@ import type { ProjectionSettings, Theme } from "../api";
 export const DEFAULT_THEME: Theme = {
   id: "dark",
   name: "Dark",
-  background: { kind: "color", color: "#000000", color2: "#000000", angle: 0 },
+  background: { kind: "color", color: "#000000", color2: "#000000", angle: 0, src: "", fit: "cover", dim: 0 },
   text: {
     fontFamily: "Inter, 'Segoe UI', system-ui, sans-serif",
     color: "#ffffff",

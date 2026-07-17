@@ -18,14 +18,28 @@ use crate::db::Db;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Background {
-    /// "color" (solid) | "gradient" (linear color→color2).
+    /// "color" (solid) | "gradient" (linear color→color2) | "image" | "video".
     pub kind: String,
-    /// Solid fill, or the gradient's first stop.
+    /// Solid fill, or the gradient's first stop. Also shows under a still-loading
+    /// image/video, so text is legible before media paints.
     pub color: String,
     /// Gradient's second stop (ignored when kind == "color").
     pub color2: String,
     /// Gradient angle in degrees (0 = upward).
     pub angle: u16,
+    /// Absolute path to an image/video file (empty for color/gradient).
+    #[serde(default)]
+    pub src: String,
+    /// How media fills the screen: "cover" | "contain".
+    #[serde(default = "default_fit")]
+    pub fit: String,
+    /// 0..1 dark overlay drawn over media so text stays readable.
+    #[serde(default)]
+    pub dim: f32,
+}
+
+fn default_fit() -> String {
+    "cover".into()
 }
 
 /// How the words look: font, colour, weight, and the legibility aids that make
@@ -65,11 +79,27 @@ const FONT_SANS: &str = "Inter, 'Segoe UI', system-ui, sans-serif";
 const FONT_SERIF: &str = "Georgia, 'Times New Roman', serif";
 
 fn solid(color: &str) -> Background {
-    Background { kind: "color".into(), color: color.into(), color2: color.into(), angle: 0 }
+    Background {
+        kind: "color".into(),
+        color: color.into(),
+        color2: color.into(),
+        angle: 0,
+        src: String::new(),
+        fit: default_fit(),
+        dim: 0.0,
+    }
 }
 
 fn gradient(color: &str, color2: &str, angle: u16) -> Background {
-    Background { kind: "gradient".into(), color: color.into(), color2: color2.into(), angle }
+    Background {
+        kind: "gradient".into(),
+        color: color.into(),
+        color2: color2.into(),
+        angle,
+        src: String::new(),
+        fit: default_fit(),
+        dim: 0.0,
+    }
 }
 
 fn text(font_family: &str, color: &str, caption_color: &str, weight: u16, shadow: bool) -> TextStyle {
@@ -232,6 +262,17 @@ mod tests {
         assert!(json.contains("\"builtIn\""), "got {json}");
         let back: Theme = serde_json::from_str(&json).unwrap();
         assert_eq!(back, t);
+    }
+
+    #[test]
+    fn old_themes_without_media_fields_still_load() {
+        // A theme persisted before media backgrounds existed must deserialize
+        // with sensible defaults (no src, cover fit, no dim) — not fail.
+        let legacy = r##"{"id":"x","name":"X","background":{"kind":"color","color":"#111111","color2":"#111111","angle":0},"text":{"fontFamily":"Inter","color":"#fff","captionColor":"#ccc","align":"center","weight":400,"shadow":false,"uppercase":false},"builtIn":false}"##;
+        let t: Theme = serde_json::from_str(legacy).unwrap();
+        assert_eq!(t.background.src, "");
+        assert_eq!(t.background.fit, "cover");
+        assert_eq!(t.background.dim, 0.0);
     }
 
     #[test]

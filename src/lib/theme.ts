@@ -8,13 +8,27 @@ import type { Theme } from "../api";
  * what the operator previews is exactly what the congregation sees.
  */
 
-/** The CSS `background` value for a theme (solid colour or linear gradient). */
+/** The CSS base `background` for a theme. For image/video themes this is the
+ *  solid colour drawn *behind* the media (visible while it loads). */
 export function backgroundCss(theme: Theme): string {
   const bg = theme.background;
   if (bg.kind === "gradient") {
     return `linear-gradient(${bg.angle}deg, ${bg.color}, ${bg.color2})`;
   }
   return bg.color;
+}
+
+/** A media layer to render behind the text, or null for colour/gradient themes
+ *  (and image/video themes with no file chosen yet). The `src` is the raw file
+ *  path; the caller converts it to a webview-loadable URL. */
+export function mediaBackground(
+  theme: Theme,
+): { kind: "image" | "video"; src: string; fit: "cover" | "contain"; dim: number } | null {
+  const bg = theme.background;
+  if ((bg.kind === "image" || bg.kind === "video") && bg.src.trim() !== "") {
+    return { kind: bg.kind, src: bg.src, fit: bg.fit, dim: bg.dim };
+  }
+  return null;
 }
 
 /**

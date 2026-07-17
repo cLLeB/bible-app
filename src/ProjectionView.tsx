@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   getProjection,
@@ -6,7 +7,7 @@ import {
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
-import { backgroundCss, bodyStyle, captionStyle } from "./lib/theme";
+import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
 
 function useNow(active: boolean): number {
@@ -100,15 +101,44 @@ export function ProjectionView() {
     }
   }
 
+  // Media (image/video) backgrounds are hidden during blackout so the screen
+  // goes truly dark.
+  const media = state.kind === "blackout" ? null : mediaBackground(theme);
+
   return (
     <div
-      className="flex h-screen w-screen flex-col items-center justify-center px-16 text-center"
+      className="relative flex h-screen w-screen flex-col items-center justify-center overflow-hidden px-16 text-center"
       style={{
         background: state.kind === "blackout" ? "#000000" : backgroundCss(theme),
         color: theme.text.color,
       }}
     >
-      {body()}
+      {media && (
+        <>
+          {media.kind === "image" ? (
+            <img
+              src={convertFileSrc(media.src)}
+              alt=""
+              className="absolute inset-0 h-full w-full"
+              style={{ objectFit: media.fit }}
+            />
+          ) : (
+            <video
+              src={convertFileSrc(media.src)}
+              className="absolute inset-0 h-full w-full"
+              style={{ objectFit: media.fit }}
+              autoPlay
+              loop
+              muted
+              playsInline
+            />
+          )}
+          {media.dim > 0 && (
+            <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${media.dim})` }} />
+          )}
+        </>
+      )}
+      <div className="relative z-10 flex flex-col items-center justify-center">{body()}</div>
     </div>
   );
 }

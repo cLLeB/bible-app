@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Theme } from "../api";
-import { backgroundCss, bodyRem, bodyStyle, captionStyle } from "./theme";
+import { backgroundCss, bodyRem, bodyStyle, captionStyle, mediaBackground } from "./theme";
 
 const solid: Theme = {
   id: "t",
   name: "T",
-  background: { kind: "color", color: "#010203", color2: "#000000", angle: 0 },
+  background: { kind: "color", color: "#010203", color2: "#000000", angle: 0, src: "", fit: "cover", dim: 0 },
   text: {
     fontFamily: "Inter, sans-serif",
     color: "#ffffff",
@@ -20,8 +20,13 @@ const solid: Theme = {
 
 const gradient: Theme = {
   ...solid,
-  background: { kind: "gradient", color: "#111111", color2: "#222222", angle: 160 },
+  background: { kind: "gradient", color: "#111111", color2: "#222222", angle: 160, src: "", fit: "cover", dim: 0 },
   text: { ...solid.text, shadow: false, uppercase: false, weight: 400 },
+};
+
+const image: Theme = {
+  ...solid,
+  background: { kind: "image", color: "#000000", color2: "#000000", angle: 0, src: "C:/pics/bg.jpg", fit: "contain", dim: 0.4 },
 };
 
 describe("backgroundCss", () => {
@@ -30,6 +35,25 @@ describe("backgroundCss", () => {
   });
   it("builds a linear-gradient for a gradient background", () => {
     expect(backgroundCss(gradient)).toBe("linear-gradient(160deg, #111111, #222222)");
+  });
+});
+
+describe("mediaBackground", () => {
+  it("is null for colour and gradient themes", () => {
+    expect(mediaBackground(solid)).toBeNull();
+    expect(mediaBackground(gradient)).toBeNull();
+  });
+  it("returns the layer for an image theme with a src", () => {
+    expect(mediaBackground(image)).toEqual({
+      kind: "image",
+      src: "C:/pics/bg.jpg",
+      fit: "contain",
+      dim: 0.4,
+    });
+  });
+  it("is null for an image theme with no file chosen yet", () => {
+    const empty: Theme = { ...image, background: { ...image.background, src: "  " } };
+    expect(mediaBackground(empty)).toBeNull();
   });
 });
 
