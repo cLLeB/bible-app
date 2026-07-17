@@ -5,6 +5,7 @@ import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
+import { ProjectorPanel } from "./components/ProjectorPanel";
 import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -80,6 +81,9 @@ export default function App() {
             </div>
             <div className="card">
               <ThemesPanel />
+            </div>
+            <div className="card">
+              <ProjectorPanel />
             </div>
           </div>
         </div>

@@ -163,6 +163,14 @@ export const peekNext = (): Promise<VersePayload | null> =>
 
 export const startRemote = (): Promise<string> => invoke<string>("start_remote");
 
+/** Send a raw PJLink command body (e.g. "%1POWR 1") to a LAN projector. */
+export const pjlinkCommand = (
+  host: string,
+  port: number,
+  password: string,
+  body: string,
+): Promise<string> => invoke<string>("pjlink_command", { host, port, password, body });
+
 export interface SongSummary {
   id: number;
   title: string;

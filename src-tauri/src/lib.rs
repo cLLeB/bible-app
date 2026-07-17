@@ -11,6 +11,7 @@ mod events;
 pub mod idle;
 pub mod knowledge;
 pub mod learn;
+pub mod pjlink;
 pub mod profile_seed;
 pub mod reference;
 pub mod relearn;
@@ -229,6 +230,7 @@ pub fn run() {
             commands::set_font_scale,
             commands::save_theme,
             commands::delete_theme,
+            commands::pjlink_command,
             commands::get_alert,
             commands::show_alert,
             commands::clear_alert,

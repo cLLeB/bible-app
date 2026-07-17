@@ -1010,6 +1010,24 @@ pub fn delete_theme(
     Ok(())
 }
 
+// ---- PJLink network projector control ----
+
+/// Send one PJLink command (e.g. "%1POWR 1" on, "%1POWR 0" off, "%1AVMT 31"
+/// blank, "%1AVMT 30" unblank, "%1POWR ?" query) to a projector on the LAN and
+/// return its response. Runs on a blocking thread so a slow/absent projector
+/// can't freeze the UI.
+#[tauri::command]
+pub async fn pjlink_command(
+    host: String,
+    port: u16,
+    password: String,
+    body: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pjlink::send(&host, port, &password, &body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ---- Lower-third alerts (overlay on the congregation screen) ----
 
 fn now_ms() -> i64 {
