@@ -99,6 +99,7 @@ fn state_summary(app: &AppHandle) -> String {
             ProjectionState::Parallel { caption, primary_code, secondary_code, .. } => {
                 format!("On screen: {caption} ({primary_code} / {secondary_code})")
             }
+            ProjectionState::Image { .. } => "Image".into(),
             ProjectionState::Message { text } => format!("Message: {text}"),
             ProjectionState::Countdown { label, .. } => format!("Countdown: {label}"),
             ProjectionState::Logo => "Logo".into(),

@@ -95,6 +95,15 @@ export function ProjectionView() {
             </p>
           </>
         );
+      case "image":
+        return (
+          <img
+            src={state.src}
+            alt=""
+            className="absolute inset-0 h-full w-full"
+            style={{ objectFit: "contain" }}
+          />
+        );
       case "message":
         return (
           <p className="max-w-6xl whitespace-pre-line" style={bodyCss}>
@@ -142,9 +151,11 @@ export function ProjectionView() {
   const contentKey =
     state.kind === "verse" || state.kind === "song"
       ? `${state.kind}:${state.caption}:${state.text}`
-      : state.kind === "parallel"
-        ? `parallel:${state.caption}:${state.primaryCode}:${state.secondaryCode}`
-        : state.kind === "message"
+      : state.kind === "image"
+        ? `image:${state.src.slice(0, 64)}`
+        : state.kind === "parallel"
+          ? `parallel:${state.caption}:${state.primaryCode}:${state.secondaryCode}`
+          : state.kind === "message"
         ? `message:${state.text}`
         : state.kind === "countdown"
           ? `countdown:${state.label}`

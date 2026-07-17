@@ -31,6 +31,9 @@ pub enum ProjectionState {
     Logo,
     Verse { text: String, caption: String },
     Song { text: String, caption: String },
+    /// A full-screen image (e.g. a rendered PDF/PowerPoint page). `src` is a
+    /// data URL or an asset-protocol path.
+    Image { src: String },
     /// The same verse in two translations, side by side.
     Parallel {
         primary_text: String,

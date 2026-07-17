@@ -37,6 +37,7 @@ export type ProjectionState =
   | { kind: "logo" }
   | { kind: "verse"; text: string; caption: string }
   | { kind: "song"; text: string; caption: string }
+  | { kind: "image"; src: string }
   | {
       kind: "parallel";
       primaryText: string;
@@ -89,6 +90,10 @@ export interface ProjectionSettings {
 
 export const setProjection = (next: ProjectionState): Promise<void> =>
   invoke<void>("set_projection", { next });
+
+/** Project a full-screen image (data URL or path) — e.g. a rendered PDF page. */
+export const projectImage = (src: string): Promise<void> =>
+  setProjection({ kind: "image", src });
 
 export const getProjectionSettings = (): Promise<ProjectionSettings> =>
   invoke<ProjectionSettings>("get_projection_settings");

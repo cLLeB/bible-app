@@ -5,6 +5,7 @@ import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
 import { LookupBar } from "./components/LookupBar";
+import { PdfImport } from "./components/PdfImport";
 import { ProjectorPanel } from "./components/ProjectorPanel";
 import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
@@ -75,6 +76,9 @@ export default function App() {
             </div>
             <div className="card">
               <SongUsageReport />
+            </div>
+            <div className="card">
+              <PdfImport />
             </div>
             <div className="card">
               <DisplayPanel />
