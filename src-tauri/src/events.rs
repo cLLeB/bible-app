@@ -35,6 +35,16 @@ pub enum ProjectionState {
     Countdown { target_ms: i64, label: String },
 }
 
+/// A lower-third alert overlaid on the congregation screen *on top of* whatever
+/// is live (a verse/song stays up). Empty `text` = no alert. `until_ms` is an
+/// epoch-millis auto-dismiss time; 0 means it stays until cleared.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Alert {
+    pub text: String,
+    pub until_ms: i64,
+}
+
 /// One line of content on the stage/confidence monitor: the big text plus its
 /// reference/title caption.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

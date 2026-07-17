@@ -95,6 +95,20 @@ export const deleteTheme = (id: string): Promise<void> =>
 
 export const showStage = (): Promise<void> => invoke<void>("show_stage");
 
+/** A lower-third alert over the congregation screen. Empty text = none;
+ *  `untilMs` is an epoch-ms auto-dismiss time (0 = stays until cleared). */
+export interface Alert {
+  text: string;
+  untilMs: number;
+}
+
+export const getAlert = (): Promise<Alert> => invoke<Alert>("get_alert");
+
+export const showAlert = (text: string, seconds: number): Promise<void> =>
+  invoke<void>("show_alert", { text, seconds });
+
+export const clearAlert = (): Promise<void> => invoke<void>("clear_alert");
+
 export interface StageSlot {
   text: string;
   caption: string;

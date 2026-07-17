@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  getAlert,
   getProjection,
   getProjectionSettings,
+  type Alert,
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
+import { alertVisible } from "./lib/alert";
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
 
@@ -30,13 +33,16 @@ function formatRemaining(ms: number): string {
 export function ProjectionView() {
   const [state, setState] = useState<ProjectionState>({ kind: "blank" });
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
+  const [alert, setAlert] = useState<Alert>({ text: "", untilMs: 0 });
 
   useEffect(() => {
     getProjection().then(setState).catch(() => setState({ kind: "blank" }));
     getProjectionSettings().then(setSettings).catch(() => {});
+    getAlert().then(setAlert).catch(() => {});
     const subs = [
       listen<ProjectionState>("set-projection", (e) => setState(e.payload)),
       listen<ProjectionSettings>("set-settings", (e) => setSettings(e.payload)),
+      listen<Alert>("set-alert", (e) => setAlert(e.payload)),
     ];
     return () => {
       subs.forEach((u) => u.then((f) => f()));
@@ -45,7 +51,9 @@ export function ProjectionView() {
 
   const theme = settings.theme;
   const scale = settings.fontScale || 1;
-  const now = useNow(state.kind === "countdown");
+  // Tick while a countdown runs or a timed alert is counting down to dismissal.
+  const now = useNow(state.kind === "countdown" || (alert.text !== "" && alert.untilMs !== 0));
+  const showAlert = state.kind !== "blackout" && alertVisible(alert, now);
 
   const bodyText = state.kind === "verse" || state.kind === "song" || state.kind === "message" ? state.text : "";
   const bodyCss = bodyStyle(theme, bodyText.length, scale);
@@ -139,6 +147,21 @@ export function ProjectionView() {
         </>
       )}
       <div className="relative z-10 flex flex-col items-center justify-center">{body()}</div>
+
+      {showAlert && (
+        <div
+          className="absolute inset-x-0 bottom-0 z-20 px-10 py-5 text-center"
+          style={{
+            background: "rgba(0,0,0,0.72)",
+            color: "#ffffff",
+            fontFamily: theme.text.fontFamily,
+            fontSize: `${1.9 * scale}rem`,
+            fontWeight: 600,
+          }}
+        >
+          {alert.text}
+        </div>
+      )}
     </div>
   );
 }

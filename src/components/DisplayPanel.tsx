@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import {
   blankProjection,
+  clearAlert,
   getProjectionSettings,
   setFontScale,
   setProjection,
   setStageMessage,
+  showAlert,
   showStage,
   startRemote,
   type ProjectionSettings,
@@ -16,6 +18,8 @@ export function DisplayPanel() {
   const [stageMsg, setStageMsg] = useState("");
   const [minutes, setMinutes] = useState(5);
   const [label, setLabel] = useState("Starting soon");
+  const [alertText, setAlertText] = useState("");
+  const [alertSecs, setAlertSecs] = useState(10);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
 
@@ -75,6 +79,38 @@ export function DisplayPanel() {
           className="btn btn-primary"
         >
           Show
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={alertText}
+          onChange={(e) => setAlertText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && alertText.trim()) void showAlert(alertText.trim(), alertSecs);
+          }}
+          placeholder="Lower-third alert (shows over the live verse/song)"
+          className="input flex-1"
+        />
+        <input
+          type="number"
+          min={0}
+          max={300}
+          value={alertSecs}
+          onChange={(e) => setAlertSecs(Math.max(0, Number(e.target.value) || 0))}
+          className="input w-16 text-center"
+          title="Auto-dismiss after this many seconds (0 = stays until cleared)"
+        />
+        <span className="text-sm text-[var(--muted)]">s</span>
+        <button
+          onClick={() => alertText.trim() && showAlert(alertText.trim(), alertSecs)}
+          className="btn btn-primary"
+          title="Overlays the congregation screen without hiding what's live"
+        >
+          Alert
+        </button>
+        <button onClick={() => clearAlert()} className="btn">
+          Clear
         </button>
       </div>
 

@@ -1,6 +1,6 @@
 use crate::books::{book_after, book_before, book_by_osis};
 use crate::db::{Db, SongSummary};
-use crate::events::{ProjectionSettings, ProjectionState, StageInfo, StageSlot, VersePayload};
+use crate::events::{Alert, ProjectionSettings, ProjectionState, StageInfo, StageSlot, VersePayload};
 use crate::reference::parse_reference;
 use crate::themes::{self, Theme};
 use std::path::{Path, PathBuf};
@@ -14,6 +14,7 @@ pub struct AppState {
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
+    pub alert: Mutex<crate::events::Alert>, // lower-third alert over the congregation screen
     // First-run seeding runs on a background thread (it holds the db lock for
     // as long as it takes), so the UI can tell "still installing" from "ready".
     pub ready: Arc<AtomicBool>,
@@ -960,6 +961,55 @@ pub fn delete_theme(
         apply_settings(&app, &state, ProjectionSettings { font_scale, theme: themes::default_theme() })?;
     }
     Ok(())
+}
+
+// ---- Lower-third alerts (overlay on the congregation screen) ----
+
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn emit_alert(app: &tauri::AppHandle, alert: &Alert) -> Result<(), String> {
+    app.emit_to("projection", "set-alert", alert.clone())
+        .map_err(|e| e.to_string())
+}
+
+/// The current alert, so the projection window can show it on (re)load.
+#[tauri::command]
+pub fn get_alert(state: tauri::State<'_, AppState>) -> Alert {
+    state.alert.lock().map(|a| a.clone()).unwrap_or_default()
+}
+
+/// Overlay an alert band over whatever is live. `seconds > 0` auto-dismisses;
+/// 0 keeps it up until cleared. Empty text clears it.
+#[tauri::command]
+pub fn show_alert(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    text: String,
+    seconds: i64,
+) -> Result<(), String> {
+    let text = text.trim().to_string();
+    let until_ms = if text.is_empty() || seconds <= 0 { 0 } else { now_ms() + seconds * 1000 };
+    let alert = Alert { text, until_ms };
+    if let Ok(mut a) = state.alert.lock() {
+        *a = alert.clone();
+    }
+    emit_alert(&app, &alert)
+}
+
+/// Clear any live alert.
+#[tauri::command]
+pub fn clear_alert(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let alert = Alert::default();
+    if let Ok(mut a) = state.alert.lock() {
+        *a = alert.clone();
+    }
+    emit_alert(&app, &alert)
 }
 
 // ---- Stage / confidence monitor ----
@@ -2105,6 +2155,7 @@ mod tests {
             current: Mutex::new(ProjectionState::Blank),
             settings: Mutex::new(ProjectionSettings::default()),
             stage: Mutex::new(StageInfo::default()),
+            alert: Mutex::new(crate::events::Alert::default()),
             ready: Arc::new(AtomicBool::new(true)),
             listening: Arc::new(AtomicBool::new(false)),
             recording: Arc::new(AtomicBool::new(false)),
