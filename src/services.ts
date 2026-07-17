@@ -13,6 +13,8 @@ interface ServiceState {
   remove: (id: string) => void;
   move: (id: string, dir: -1 | 1) => void;
   clear: () => void;
+  /** Replace the whole run order (used when loading a template). */
+  setCues: (cues: Cue[]) => void;
 }
 
 function uid(): string {
@@ -68,6 +70,7 @@ export const useServiceStore = create<ServiceState>()(
           return { cues };
         }),
       clear: () => set({ cues: [] }),
+      setCues: (cues) => set({ cues }),
     }),
     {
       name: "service-order",
@@ -85,5 +88,36 @@ export const useServiceStore = create<ServiceState>()(
         return { cues };
       },
     },
+  ),
+);
+
+/** A reusable, named order of service (e.g. "Sunday Morning"). */
+export interface ServiceTemplate {
+  id: string;
+  name: string;
+  cues: Cue[];
+}
+
+interface TemplateState {
+  templates: ServiceTemplate[];
+  /** Save the given cues under a name; a same-name template is overwritten. */
+  save: (name: string, cues: Cue[]) => void;
+  remove: (id: string) => void;
+}
+
+export const useTemplateStore = create<TemplateState>()(
+  persist(
+    (set) => ({
+      templates: [],
+      save: (name, cues) =>
+        set((s) => ({
+          templates: [
+            ...s.templates.filter((t) => t.name !== name),
+            { id: uid(), name, cues },
+          ].sort((a, b) => a.name.localeCompare(b.name)),
+        })),
+      remove: (id) => set((s) => ({ templates: s.templates.filter((t) => t.id !== id) })),
+    }),
+    { name: "service-templates", version: 1 },
   ),
 );

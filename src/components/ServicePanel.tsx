@@ -8,7 +8,13 @@ import {
   type Slide,
   type StageSlot,
 } from "../api";
-import { type Cue, useLiveStore, useScriptureStore, useServiceStore } from "../services";
+import {
+  type Cue,
+  useLiveStore,
+  useScriptureStore,
+  useServiceStore,
+  useTemplateStore,
+} from "../services";
 import { slideSlot, verseSlot } from "../stage";
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -17,11 +23,14 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 export function ServicePanel() {
-  const { cues, remove, move, clear } = useServiceStore();
+  const { cues, remove, move, clear, setCues } = useServiceStore();
+  const { templates, save: saveTemplate, remove: removeTemplate } = useTemplateStore();
   const [item, setItem] = useState(-1); // current cue index (-1 = none live)
   const [slide, setSlide] = useState(0); // slide index within a song cue
   const [slides, setSlides] = useState<Slide[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [chosenTemplate, setChosenTemplate] = useState("");
 
   // Refs for the global key handler.
   const st = useRef({ cues, item, slide, slides });
@@ -141,6 +150,71 @@ export function ServicePanel() {
       </div>
 
       {error && <p className="tint tint-bad rounded px-2 py-1 text-sm">{error}</p>}
+
+      {/* Templates: save the current order, or load/replace with a saved one. */}
+      <div className="flex flex-wrap items-center gap-2 border-b pb-2 text-sm">
+        <input
+          value={templateName}
+          onChange={(e) => setTemplateName(e.target.value)}
+          placeholder="Template name"
+          className="input w-40"
+        />
+        <button
+          onClick={() => {
+            if (templateName.trim() && cues.length) {
+              saveTemplate(templateName.trim(), cues);
+              setTemplateName("");
+            }
+          }}
+          className="btn btn-sm"
+          title="Save the current run order as a reusable template"
+        >
+          Save
+        </button>
+        {templates.length > 0 && (
+          <>
+            <select
+              className="select"
+              style={{ width: "auto" }}
+              value={chosenTemplate}
+              onChange={(e) => setChosenTemplate(e.target.value)}
+            >
+              <option value="">Load template…</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                const t = templates.find((x) => x.id === chosenTemplate);
+                if (t) {
+                  setCues(t.cues);
+                  setItem(-1);
+                }
+              }}
+              className="btn btn-sm"
+              disabled={!chosenTemplate}
+            >
+              Load
+            </button>
+            <button
+              onClick={() => {
+                if (chosenTemplate) {
+                  removeTemplate(chosenTemplate);
+                  setChosenTemplate("");
+                }
+              }}
+              className="btn btn-sm"
+              disabled={!chosenTemplate}
+              title="Delete the selected template"
+            >
+              ✕
+            </button>
+          </>
+        )}
+      </div>
 
       {cues.length > 0 && nextCue && (
         <p className="text-xs text-[var(--muted)]">Next up: {cueLabel(nextCue)}</p>
