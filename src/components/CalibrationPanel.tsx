@@ -3,8 +3,10 @@ import { LearnFromSermon } from "./LearnFromSermon";
 import {
   PROTECTED_PROFILES,
   forgetRecordings,
+  learningStatus,
   recordingConsent,
   removeVoiceProfile,
+  resetProfileToBaked,
   setRecordingConsent,
   setVoiceProfile,
   voiceProfiles,
@@ -27,6 +29,9 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
   const [profiles, setProfiles] = useState<string[]>([]);
   const [who, setWho] = useState<string>("");
   const [consent, setConsent] = useState(false);
+  // Can this speaker be put back exactly as the app shipped them? True only for the
+  // preachers baked into this build.
+  const [canReset, setCanReset] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function load(): void {
@@ -37,6 +42,9 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
       })
       .catch(() => undefined);
     void recordingConsent().then(setConsent).catch(() => undefined);
+    void learningStatus()
+      .then((s) => setCanReset(s.canReset))
+      .catch(() => undefined);
   }
 
   useEffect(load, []);
@@ -48,8 +56,9 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
       await setVoiceProfile(name);
       setWho(name);
       if (!profiles.includes(name)) setProfiles([...profiles, name]);
-      // Consent belongs to the person, so it has to be re-read for whoever this is.
-      setConsent(await recordingConsent());
+      // Consent, and whether there is a shipped version to fall back on, both belong to
+      // the person — so they are re-read for whoever this now is.
+      load();
       onProfileChange?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -95,11 +104,40 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
 
   async function removeWho(): Promise<void> {
     if (PROTECTED_PROFILES.includes(who)) return;
-    if (!window.confirm(`Remove the “${who}” profile and its learned settings?`)) return;
+    // Say what this actually does: removing a speaker deletes their recordings too.
+    if (
+      !window.confirm(
+        `Remove “${who}” — their learned settings and every recording of them on this machine? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
     setError(null);
     try {
       await removeVoiceProfile(who);
       load();
+      // The app has fallen back to another speaker: the panels showing this one's
+      // services and proposal are about somebody who is no longer here.
+      onProfileChange?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** The floor under all local learning: whatever this build shipped for this speaker. */
+  async function resetToShipped(): Promise<void> {
+    if (
+      !window.confirm(
+        `Put ${who} back exactly as the app shipped, discarding everything this machine has learnt about them?`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      await resetProfileToBaked();
+      load();
+      onProfileChange?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -168,14 +206,26 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
               </span>
             </span>
           </label>
-          <button
-            className="btn btn-sm mt-1.5"
-            disabled={disabled || !who}
-            onClick={() => void forgetAll()}
-            title="Delete every recording of this speaker"
-          >
-            Delete {who || "this speaker"}’s recordings
-          </button>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <button
+              className="btn btn-sm"
+              disabled={disabled || !who}
+              onClick={() => void forgetAll()}
+              title="Delete every recording of this speaker"
+            >
+              Delete {who || "this speaker"}’s recordings
+            </button>
+            {canReset && (
+              <button
+                className="btn btn-sm"
+                disabled={disabled || !who}
+                onClick={() => void resetToShipped()}
+                title="Discard everything this machine has learnt about this speaker and go back to the tuning the app was installed with"
+              >
+                Reset {who} to as shipped
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}

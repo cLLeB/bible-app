@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 ///   * "operator"  — the operator projected/picked it themselves (Silver)
 ///   * "auto"      — auto-projected, no confirmation yet (Bronze)
 ///   * "corrected" — auto-projected, then the operator swapped it out (Negative: a
-///                   labelled mistake — what was heard -> the wrong guess -> the right one)
+///     labelled mistake — what was heard -> the wrong guess -> the right one)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Moment {
@@ -79,6 +79,15 @@ pub fn clamp_keep(n: usize) -> usize {
 
 /// A filesystem-safe folder name for a speaker, so "Vice-President" or a typed guest name
 /// never produces an unusable path.
+///
+/// The readable part is lossy on purpose — spaces, dashes and punctuation all collapse —
+/// so it CANNOT stand alone as a speaker's identity: "Guest Mensah" and "Guest-Mensah"
+/// are different people with different consent, and they would read the same. Everything
+/// else about a speaker is keyed by their exact name, so a folder shared between two of
+/// them would mean one person's sermons being shown, learned from, or deleted under the
+/// other's name — the exact thing consent is meant to prevent. The fingerprint of the
+/// exact name is therefore what makes the folder theirs; the readable part is only there
+/// so a person looking in the folder can tell whose it is.
 pub fn slug(profile: &str) -> String {
     let mut out = String::new();
     let mut prev_dash = false;
@@ -91,8 +100,26 @@ pub fn slug(profile: &str) -> String {
             prev_dash = true;
         }
     }
-    let s = out.trim_matches('-').to_string();
-    if s.is_empty() { "speaker".into() } else { s }
+    let readable = out.trim_matches('-');
+    let readable = if readable.is_empty() { "speaker" } else { readable };
+    // Trimmed so a very long guest name cannot push the path past what Windows allows.
+    let readable: String = readable.chars().take(40).collect();
+    format!("{readable}-{:08x}", fingerprint(profile))
+}
+
+/// A stable 32-bit fingerprint of the exact speaker name (FNV-1a).
+///
+/// Written out rather than taken from the standard library on purpose: this value names
+/// a folder on a church's disk, so it has to mean the same thing in every future build.
+/// `DefaultHasher` gives no such promise — if it changed, every speaker would silently
+/// point at a new, empty folder and their recordings would look like they had vanished.
+fn fingerprint(s: &str) -> u32 {
+    let mut hash: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        hash ^= *b as u32;
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    hash
 }
 
 /// The recorded-service audio files in `dir`, newest first.
@@ -135,8 +162,7 @@ pub fn read_labels(audio: &Path) -> Labels {
 }
 
 pub fn write_labels(audio: &Path, labels: &Labels) -> std::io::Result<()> {
-    let json = serde_json::to_string(labels)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string(labels).map_err(std::io::Error::other)?;
     std::fs::write(audio.with_extension("json"), json)
 }
 
@@ -200,7 +226,7 @@ pub fn now_stamp() -> String {
 }
 
 fn io_err(e: hound::Error) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, e)
+    std::io::Error::other(e)
 }
 
 /// Write the recognizer's own 16 kHz mono float samples out as a small WAV.
@@ -357,10 +383,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slug_is_filesystem_safe() {
-        assert_eq!(slug("Vice-President"), "vice-president");
-        assert_eq!(slug("Guest — Pastor Mensah"), "guest-pastor-mensah");
-        assert_eq!(slug("   "), "speaker");
+    fn slug_is_filesystem_safe_and_readable() {
+        assert!(slug("Vice-President").starts_with("vice-president-"));
+        assert!(slug("Guest — Pastor Mensah").starts_with("guest-pastor-mensah-"));
+        assert!(slug("   ").starts_with("speaker-"));
+        // Nothing that could walk out of the folder, whatever was typed.
+        for name in ["../../secrets", "..", "C:\\Windows", "a/b", "  ", "..."] {
+            let s = slug(name);
+            assert!(
+                s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+                "{name} produced an unsafe folder name: {s}"
+            );
+        }
+        // Stable across runs and builds, or a church's recordings would go missing.
+        assert_eq!(slug("President"), slug("President"));
+        assert_eq!(fingerprint("President"), 2_151_873_119, "the fingerprint must never drift");
+    }
+
+    #[test]
+    fn two_speakers_who_read_alike_never_share_a_folder() {
+        // These are different people with separate consent, but the readable part of
+        // the folder name is the same for all of them. Sharing a folder would mean one
+        // person's sermons showing up — and being deletable — under another's name.
+        let names = ["Guest Mensah", "Guest-Mensah", "guest mensah", "Guest_Mensah", "GUEST  MENSAH"];
+        let dirs: Vec<_> = names.iter().map(|n| dir_for(Path::new("/data"), n)).collect();
+        for (i, a) in dirs.iter().enumerate() {
+            for (j, b) in dirs.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "{} and {} must not share a folder", names[i], names[j]);
+                }
+            }
+        }
+        // The same person still gets the same folder every time.
+        assert_eq!(dir_for(Path::new("/data"), "Guest Mensah"), dirs[0]);
     }
 
     #[test]
@@ -406,7 +461,10 @@ mod tests {
     #[test]
     fn dir_is_under_sessions_by_speaker_slug() {
         let d = dir_for(Path::new("/data"), "Vice-President");
-        assert!(d.ends_with("sessions/vice-president") || d.ends_with("sessions\\vice-president"));
+        assert!(d.starts_with("/data"));
+        assert!(d.parent().unwrap().ends_with("sessions"));
+        let name = d.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("vice-president-"), "the folder should say whose it is: {name}");
     }
 
     #[test]
@@ -543,6 +601,32 @@ mod tests {
         assert!(list_audio(&dir).is_empty());
         assert!(!consented(&db, "President"), "forgetting withdraws the opt-in too");
         assert_eq!(forget(&db, &dir, "President").unwrap(), 0, "and is safe to repeat");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn forgetting_one_speaker_cannot_destroy_another_s_recordings() {
+        // Two different guests whose names read the same once punctuation is dropped.
+        // One has consented and been recorded; the other never agreed to anything.
+        let base = std::env::temp_dir().join(format!("nb-isolate-{}", std::process::id()));
+        let db = crate::db::open_at(Path::new(":memory:")).unwrap();
+        db.migrate().unwrap();
+        let consented_guest = "Guest Mensah";
+        let other_guest = "Guest-Mensah";
+
+        let theirs = dir_for(&base, consented_guest);
+        set_consent(&db, consented_guest, true).unwrap();
+        save_session(&theirs, "0000000000001", &[0.0f32; 1600], "{}", MAX_KEEP).unwrap();
+
+        // The other guest has no say over recordings that are not theirs.
+        let dir = dir_for(&base, other_guest);
+        assert!(!consented(&db, other_guest));
+        assert_eq!(forget(&db, &dir, other_guest).unwrap(), 0, "nothing of theirs to forget");
+        assert_eq!(list_audio(&theirs).len(), 1, "the other guest's sermon must still be here");
+        assert!(consented(&db, consented_guest), "and their consent must be untouched");
+        // Nor can they see it.
+        assert!(summaries(&dir).is_empty(), "one guest must not be shown another's services");
+
         std::fs::remove_dir_all(&base).ok();
     }
 

@@ -1066,7 +1066,17 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     } else {
         None
     };
-    state.listening.store(true, Ordering::SeqCst);
+    // Claim the listen loop atomically. The early return above is only a courtesy: two
+    // starts arriving together (a double-click, or the console and the phone remote at
+    // once) could both pass it and spawn a loop each — two mics open, doubled events,
+    // and two recorders writing one service.
+    if state
+        .listening
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Ok(()); // already listening — the same answer the early return gives
+    }
     let flag = state.listening.clone();
     let app2 = app.clone();
     std::thread::spawn(move || {
@@ -1158,12 +1168,17 @@ pub fn review_sessions(
     Ok(crate::sessions::summaries(&session_dir(&app, &state)?))
 }
 
-/// Approve a reviewed service, keeping only the moments the operator left in place.
-/// Until this happens the service sits on disk and teaches the app nothing.
+/// Approve a reviewed service: the operator has seen what it captured and is content
+/// for the app to learn from it. Until this happens the service sits on disk and
+/// teaches the app nothing.
+///
+/// Approval is of the whole service, because learning listens to the whole recording —
+/// it works out for itself what was read aloud rather than being handed the moments.
+/// The moments are the operator's evidence for deciding, and the record of what the app
+/// did; they are left exactly as they were captured.
 #[tauri::command]
 pub fn approve_session(
     name: String,
-    moments: Vec<crate::sessions::Moment>,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
@@ -1171,7 +1186,6 @@ pub fn approve_session(
     let audio = crate::sessions::audio_named(&dir, &name)
         .ok_or_else(|| format!("That recording is no longer here ({name})."))?;
     let mut labels = crate::sessions::read_labels(&audio);
-    labels.moments = moments;
     labels.approved = true;
     crate::sessions::write_labels(&audio, &labels).map_err(|e| e.to_string())
 }
@@ -1304,7 +1318,17 @@ pub fn learn_now(app: tauri::AppHandle) -> Result<(), String> {
                 return Err(b.message().to_string());
             }
         }
-        state.learning.store(true, Ordering::SeqCst);
+        // Claim the pass atomically. Two clicks arriving together must not both get
+        // past the check above and start their own hours-long decode of the same
+        // services — and the first to finish would clear the flag under the second,
+        // stopping it with a reason that was never true.
+        if state
+            .learning
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(crate::idle::Blocked::AlreadyLearning.message().to_string());
+        }
     }
     let app2 = app.clone();
     std::thread::spawn(move || {
@@ -1473,8 +1497,15 @@ pub fn reset_profile_to_baked(
 
 /// Log one moment from the live service (auto-projected, operator-corrected, confirmed).
 /// Kept in memory and written into the session recording when listening stops.
+///
+/// Ignored unless a service is actually being recorded. The console already gates this,
+/// but a moment ends up in a person's session file, so the rule that nothing is written
+/// about an unrecorded service is enforced here rather than trusted to the caller.
 #[tauri::command]
 pub fn record_moment(moment: crate::sessions::Moment, state: tauri::State<'_, AppState>) {
+    if !state.recording.load(Ordering::SeqCst) || !state.listening.load(Ordering::SeqCst) {
+        return;
+    }
     if let Ok(mut m) = state.moments.lock() {
         m.push(moment);
     }
@@ -1645,15 +1676,29 @@ fn learn_sermons(
     {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        learn::save_settings(&db, &target_model, &profile, &learned.decode)
-            .map_err(|e| e.to_string())?;
-        learn::save_room(&db, &profile, &learned.room).map_err(|e| e.to_string())?;
+        // Go in through the same door as every other change to a speaker, so what the
+        // wizard replaces is kept and "Undo last change" can put it back. A wizard run
+        // that makes a speaker worse is otherwise unrecoverable for a guest, who has no
+        // shipped version to fall back on.
+        let model_file = target_model
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| crate::flavor::model_file(&kind));
+        let mut next = crate::profile_seed::capture(&db, &profile);
+        next.decode.insert(
+            model_file,
+            crate::profile_seed::DecodeSeed::from_decode(&learned.decode),
+        );
+        next.room = Some(learned.room.speech_above);
         if let Some(code) = &learned.translation {
-            learn::save_translation(&db, &profile, code).map_err(|e| e.to_string())?;
+            next.translation = Some(code.clone());
         }
+        // Names are added to what this speaker already had, never replacing it: the
+        // manglings learned on earlier recordings are still true of them.
         for (word, osis) in &learned.aliases {
-            learn::save_book_name(&db, &profile, word, osis).map_err(|e| e.to_string())?;
+            next.aliases.entry(word.clone()).or_insert_with(|| osis.clone());
         }
+        crate::relearn::install(&db, &profile, &next).map_err(|e| e.to_string())?;
         // In force straight away, without waiting for the next listen.
         crate::books::set_learned_names(learn::book_names(&db, &profile));
     }
@@ -1699,6 +1744,11 @@ pub fn set_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Res
     if name.is_empty() {
         return Err("Give the voice a name.".into());
     }
+    // A speaker's settings are stored under keys built as `alias:<name>:<word>`, so a
+    // colon in the name would let one speaker's learned words be read as another's.
+    if name.contains(':') {
+        return Err("A speaker's name can't contain a colon — use a dash instead.".into());
+    }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())?;
     // Recording is armed for a person, not for the app. A guest stepping up must never
@@ -1729,7 +1779,12 @@ pub fn remove_voice_profile(
     let _ = crate::sessions::forget(&db, &dir, name);
     let _ = crate::relearn::drop_proposal(&db, name);
     let _ = crate::profile_seed::clear(&db, name);
-    crate::calibrate::remove_profile(&db, name).map_err(|e| e.to_string())
+    crate::calibrate::remove_profile(&db, name).map_err(|e| e.to_string())?;
+    // Removing the active speaker falls the app back to the President. Recording was
+    // armed for the person who just left, so it must not carry over to whoever the app
+    // lands on — being recorded is something each speaker agrees to for themselves.
+    state.recording.store(false, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Record one line of the script: waits for the speaker, endpoints on silence

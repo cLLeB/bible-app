@@ -260,9 +260,11 @@ export interface SessionSummary {
 export const reviewSessions = (): Promise<SessionSummary[]> =>
   invoke<SessionSummary[]>("review_sessions");
 
-/** Approve a reviewed service, keeping only the moments the operator left in. */
-export const approveSession = (name: string, moments: Moment[]): Promise<void> =>
-  invoke<void>("approve_session", { name, moments });
+/** Let the app learn from this service. Approval is of the whole recording: learning
+ *  listens to it and works out what was read aloud for itself, so there is no way to
+ *  approve part of one. */
+export const approveSession = (name: string): Promise<void> =>
+  invoke<void>("approve_session", { name });
 
 export const discardSession = (name: string): Promise<void> =>
   invoke<void>("discard_session", { name });

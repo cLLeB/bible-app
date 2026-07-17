@@ -5,7 +5,6 @@ import {
   learnNow,
   learningStatus,
   rejectProposal,
-  resetProfileToBaked,
   rollbackProfile,
   stopLearning,
   type LearnProgress,
@@ -93,7 +92,10 @@ export function LearningPanel() {
   const { proposal } = status;
 
   // Nothing recorded and approved, nothing proposed, nothing to undo: the church has
-  // not opted into any of this, so the console says nothing about it.
+  // not opted into any of this, so the console says nothing about it. Putting a speaker
+  // back as they shipped lives with the speaker, in Voice profiles — it has to be
+  // reachable even when there is nothing to learn from, which is exactly when this
+  // panel is silent.
   if (status.approved === 0 && !proposal && !status.canRollback && !status.running) return null;
 
   return (
@@ -182,37 +184,17 @@ export function LearningPanel() {
         )
       )}
 
-      {(status.canRollback || status.canReset) && (
+      {status.canRollback && (
         <div className="flex flex-wrap items-center gap-1.5 border-t pt-1.5">
           <span className="text-xs text-[var(--muted)]">If it got worse:</span>
-          {status.canRollback && (
-            <button
-              onClick={() => void act(rollbackProfile)}
-              disabled={busy}
-              className="btn btn-sm"
-              title="Put back the settings in force before the last change"
-            >
-              Undo last change
-            </button>
-          )}
-          {status.canReset && (
-            <button
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `Put ${status.profile} back exactly as the app shipped, discarding everything this machine has learnt about them?`,
-                  )
-                ) {
-                  void act(resetProfileToBaked);
-                }
-              }}
-              disabled={busy}
-              className="btn btn-sm"
-              title="Discard all local learning for this speaker"
-            >
-              Reset to as shipped
-            </button>
-          )}
+          <button
+            onClick={() => void act(rollbackProfile)}
+            disabled={busy}
+            className="btn btn-sm"
+            title="Put back the settings in force before the last change"
+          >
+            Undo last change
+          </button>
         </div>
       )}
     </section>

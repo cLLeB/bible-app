@@ -8,17 +8,19 @@ import {
   type SessionSummary,
 } from "../api";
 
-// What each kind of moment is worth to the app, in the operator's words. The order
-// here is the order they're explained in, strongest evidence first.
+// What happened at each moment, in the operator's words. These describe the service —
+// they are how you judge whether it went well enough to be worth learning from. They
+// are not a lever on the learning itself: it listens to the whole recording and works
+// out what was read aloud for itself.
 const KINDS: Record<Moment["kind"], { label: string; hint: string; tone: string }> = {
   confirmed: {
     label: "confirmed",
-    hint: "The app found it and the preacher read it aloud — the strongest lesson.",
+    hint: "The app found it and the preacher read it aloud.",
     tone: "tint-good",
   },
   corrected: {
     label: "corrected",
-    hint: "The app got it wrong and you fixed it — it learns most from these.",
+    hint: "The app put up the wrong verse and you replaced it.",
     tone: "tint-warn",
   },
   operator: {
@@ -46,21 +48,23 @@ function when(name: string): string {
   });
 }
 
-/** A stable identity for one moment within its service, so removing the third row
- *  removes the third row and not another one that happens to name the same verse. */
+/** A stable identity for one moment within its service, so two moments naming the same
+ *  verse stay distinct rows. */
 const momentKey = (m: Moment, i: number): string => `${i}-${m.kind}-${m.reference}`;
 
 /**
  * The end-of-service review. A recorded service teaches the app nothing until the
- * operator has looked at what it captured and approved it: they can drop any moment
- * that misrepresents what happened, approve the rest, or throw the service away.
+ * operator has looked at what it captured and approved it — a service where the app
+ * did badly, or where the wrong person was on the microphone, is one to throw away.
+ *
+ * The choice is over the whole service, not moment by moment: learning listens to the
+ * recording and works out what was read aloud for itself, so there is no such thing as
+ * approving half of one. The moments are shown as what happened, to decide on.
  * Everything here is on this machine.
  */
 export function ServiceReview() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  // Moments the operator has struck out, per service, before approving.
-  const [dropped, setDropped] = useState<Record<string, Set<string>>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,28 +86,11 @@ export function ServiceReview() {
   const pending = sessions.filter((s) => !s.approved);
   if (sessions.length === 0) return null;
 
-  function isDropped(name: string, key: string): boolean {
-    return dropped[name]?.has(key) ?? false;
-  }
-
-  function toggleDropped(name: string, key: string): void {
-    setDropped((prev) => {
-      const next = new Set(prev[name] ?? []);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return { ...prev, [name]: next };
-    });
-  }
-
-  function keptMoments(s: SessionSummary): Moment[] {
-    return s.moments.filter((m, i) => !isDropped(s.name, momentKey(m, i)));
-  }
-
   async function approve(s: SessionSummary): Promise<void> {
     setBusy(s.name);
     setError(null);
     try {
-      await approveSession(s.name, keptMoments(s));
+      await approveSession(s.name);
       load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -143,20 +130,21 @@ export function ServiceReview() {
       {error && <p className="tint tint-bad rounded p-2 text-sm">{error}</p>}
 
       {sessions.map((s) => {
-        const kept = keptMoments(s).length;
+        const wrong = s.moments.filter((m) => m.kind === "corrected").length;
         return (
           <div key={s.name} className="rounded border" style={{ background: "var(--surface)" }}>
             <div className="flex flex-wrap items-center gap-2 p-2">
               <button
                 onClick={() => setOpen(open === s.name ? null : s.name)}
                 className="text-sm font-semibold"
-                title="Show what was captured"
+                title="Show what happened during this service"
               >
                 {open === s.name ? "▾" : "▸"} {when(s.name)}
               </button>
               <span className="text-xs text-[var(--muted)]">
-                {s.minutes < 1 ? "under a minute" : `${Math.round(s.minutes)} min`} · {kept} of{" "}
-                {s.moments.length} moments
+                {s.minutes < 1 ? "under a minute" : `${Math.round(s.minutes)} min`} ·{" "}
+                {s.moments.length} verse{s.moments.length === 1 ? "" : "s"}
+                {wrong > 0 ? ` · you corrected ${wrong}` : ""}
               </span>
               {s.approved ? (
                 <span className="tint-strong tint-good ml-auto rounded px-1.5 py-0.5 text-[10px]">
@@ -188,18 +176,14 @@ export function ServiceReview() {
               <div className="space-y-1 border-t p-2">
                 {s.moments.length === 0 ? (
                   <p className="text-xs text-[var(--muted)]">
-                    Nothing was projected during this service, so there is nothing to learn from it.
+                    No scripture went on the screen during this service. If nothing was read
+                    aloud either, there is nothing here to learn from.
                   </p>
                 ) : (
                   s.moments.map((m, i) => {
-                    const key = momentKey(m, i);
-                    const out = isDropped(s.name, key);
                     const kind = KINDS[m.kind] ?? KINDS.auto;
                     return (
-                      <div
-                        key={key}
-                        className={`flex items-start gap-2 rounded p-1.5 text-xs ${out ? "opacity-40" : ""}`}
-                      >
+                      <div key={momentKey(m, i)} className="flex items-start gap-2 rounded p-1.5 text-xs">
                         <span
                           className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${kind.tone}`}
                           title={kind.hint}
@@ -207,7 +191,7 @@ export function ServiceReview() {
                           {kind.label}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className={`font-semibold ${out ? "line-through" : ""}`}>{m.reference}</span>
+                          <span className="font-semibold">{m.reference}</span>
                           {m.replaced && (
                             <span className="text-[var(--muted)]"> — replaced {m.replaced}</span>
                           )}
@@ -217,15 +201,6 @@ export function ServiceReview() {
                             </span>
                           )}
                         </span>
-                        {!s.approved && (
-                          <button
-                            onClick={() => toggleDropped(s.name, key)}
-                            className="btn btn-sm"
-                            title={out ? "Keep this one after all" : "Don't learn from this one"}
-                          >
-                            {out ? "undo" : "drop"}
-                          </button>
-                        )}
                       </div>
                     );
                   })
