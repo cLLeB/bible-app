@@ -2350,6 +2350,9 @@ pub fn add_media(
             let Some(kind) = crate::media::kind_of(path) else { continue };
             db.add_media(path, &crate::media::title_of(path), kind)
                 .map_err(|e| e.to_string())?;
+            // The picker reaches drives the asset scope does not, so a file is
+            // allowed the moment the operator chooses it.
+            crate::media::allow_path(&app, path);
             added += 1;
         }
     }

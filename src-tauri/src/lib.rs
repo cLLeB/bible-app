@@ -157,6 +157,11 @@ pub fn run() {
                 learning: Arc::new(AtomicBool::new(false)),
             });
 
+            // The asset-protocol scope is rebuilt every run, so files the
+            // operator added from outside their user folders have to be allowed
+            // again before the first cue, not on next use.
+            media::allow_known_paths(app.handle());
+
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let result = seed_library(&handle);

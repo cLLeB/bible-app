@@ -115,6 +115,40 @@ pub fn state_for(path: &str, title: &str, kind: &str) -> ProjectionState {
     }
 }
 
+/// Let the projection window actually load this file.
+///
+/// The asset protocol is scoped, and the configured scope covers the user's own
+/// folders. Church media does not live there: it lives on a second drive or a
+/// mapped NAS share, which the picker will happily add and the webview would
+/// then refuse to load, showing black. Rather than open the scope to the whole
+/// disk, each file the operator deliberately adds is allowed by name.
+///
+/// Failures are ignored on purpose: a path that cannot be allowed will surface
+/// as that item failing to display, which is information the operator can act
+/// on, where a startup error about a file they have forgotten about is not.
+pub fn allow_path(app: &AppHandle, path: &str) {
+    let _ = app.asset_protocol_scope().allow_file(path);
+}
+
+/// Re-allow everything the library already holds. The scope is per-run, so
+/// without this a file added last Sunday is refused after the next restart.
+pub fn allow_known_paths(app: &AppHandle) {
+    for item in list(app) {
+        allow_path(app, &item.path);
+    }
+    // Theme backgrounds are chosen from the same kind of folder and were
+    // scoped the same way.
+    let state = app.state::<AppState>();
+    // Bound to a local so the guard drops before `state` does.
+    let src = match state.settings.lock() {
+        Ok(ref s) => s.theme.background.src.clone(),
+        Err(_) => String::new(),
+    };
+    if !src.trim().is_empty() {
+        allow_path(app, &src);
+    }
+}
+
 pub fn list(app: &AppHandle) -> Vec<MediaItem> {
     let state = app.state::<AppState>();
     let rows = match state.db.lock() {
