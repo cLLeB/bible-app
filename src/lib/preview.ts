@@ -1,4 +1,5 @@
 import type { ProjectionState } from "../api";
+import { coversScreen } from "./projection";
 
 /** What a staged item reads as: the big text, and the caption under it. */
 export interface PreviewLines {
@@ -18,31 +19,34 @@ export interface PreviewLines {
  * that silently previews as blank is a broken promise.
  */
 export function previewLines(state: ProjectionState): PreviewLines {
+  // `visual` is the same question the projection window asks when it decides
+  // how to size its content wrapper, so the two share one answer.
+  const visual = coversScreen(state);
   switch (state.kind) {
     case "verse":
     case "song":
-      return { body: state.text, caption: state.caption, visual: false };
+      return { body: state.text, caption: state.caption, visual };
     case "parallel":
       return {
         body: `${state.primaryText}\n\n${state.secondaryText}`,
         caption: `${state.caption} (${state.primaryCode} / ${state.secondaryCode})`,
-        visual: false,
+        visual,
       };
     case "message":
-      return { body: state.text, caption: "", visual: false };
+      return { body: state.text, caption: "", visual };
     case "countdown":
-      return { body: "0:00", caption: state.label, visual: false };
+      return { body: "0:00", caption: state.label, visual };
     case "image":
-      return { body: "", caption: "Image", visual: true };
+      return { body: "", caption: "Image", visual };
     case "video":
-      return { body: "", caption: `Video · ${state.title}`, visual: true };
+      return { body: "", caption: `Video · ${state.title}`, visual };
     case "logo":
-      return { body: "✝", caption: "Logo", visual: false };
+      return { body: "✝", caption: "Logo", visual };
     case "blackout":
-      return { body: "", caption: "Blackout", visual: false };
+      return { body: "", caption: "Blackout", visual };
     case "blank":
     default:
-      return { body: "", caption: "Blank", visual: false };
+      return { body: "", caption: "Blank", visual };
   }
 }
 

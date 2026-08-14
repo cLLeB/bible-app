@@ -60,12 +60,16 @@ CREATE TABLE IF NOT EXISTS song_usage (
 -- video and have no use for a second copy inside an app database. `path` is
 -- unique so adding the same folder twice is a no-op rather than a pile of
 -- duplicates, and `sort` is what the slideshow walks in order.
+-- `deck` groups the pages of one imported document. Empty for a standalone
+-- file. It is what makes stepping through a deck different from walking the
+-- whole library: next/previous stay inside the document you are presenting.
 CREATE TABLE IF NOT EXISTS media (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     kind TEXT NOT NULL,
-    sort INTEGER NOT NULL
+    sort INTEGER NOT NULL,
+    deck TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_media_sort ON media (sort);
 "#;
@@ -158,6 +162,10 @@ impl Db {
         let _ = self
             .conn
             .execute("ALTER TABLE songs ADD COLUMN built_in INTEGER NOT NULL DEFAULT 0", []);
+        // Media libraries created before decks existed (ignore if already present).
+        let _ = self
+            .conn
+            .execute("ALTER TABLE media ADD COLUMN deck TEXT NOT NULL DEFAULT ''", []);
         Ok(())
     }
 
@@ -559,7 +567,13 @@ impl Db {
     /// Add a file, or return the existing row's id when it is already in the
     /// library. Re-adding a folder is a normal thing to do (someone dropped in
     /// one new clip), so it must not multiply what is already there.
-    pub fn add_media(&self, path: &str, title: &str, kind: &str) -> rusqlite::Result<i64> {
+    pub fn add_media(
+        &self,
+        path: &str,
+        title: &str,
+        kind: &str,
+        deck: &str,
+    ) -> rusqlite::Result<i64> {
         if let Some(id) = self.media_id_for_path(path)? {
             return Ok(id);
         }
@@ -567,8 +581,8 @@ impl Db {
             .conn
             .query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM media", [], |r| r.get(0))?;
         self.conn.execute(
-            "INSERT INTO media (path, title, kind, sort) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![path, title, kind, next],
+            "INSERT INTO media (path, title, kind, sort, deck) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![path, title, kind, next, deck],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -582,12 +596,14 @@ impl Db {
         }
     }
 
-    /// The library in slideshow order: (id, path, title, kind).
-    pub fn list_media(&self) -> rusqlite::Result<Vec<(i64, String, String, String)>> {
+    /// The library in running order: (id, path, title, kind, deck).
+    pub fn list_media(&self) -> rusqlite::Result<Vec<(i64, String, String, String, String)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path, title, kind FROM media ORDER BY sort, id")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            .prepare("SELECT id, path, title, kind, deck FROM media ORDER BY sort, id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
         rows.collect()
     }
 

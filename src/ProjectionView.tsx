@@ -5,11 +5,13 @@ import {
   getAlert,
   getProjection,
   getProjectionSettings,
+  videoEnded,
   type Alert,
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
 import { alertVisible } from "./lib/alert";
+import { coversScreen } from "./lib/projection";
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
 
@@ -145,6 +147,10 @@ export function ProjectionView() {
             playsInline
             muted={state.muted}
             loop={state.looping}
+            // Only the element knows how long the clip is. Telling the backend
+            // lets an announcements loop move on at the video's own length
+            // instead of cutting it off at an image's dwell time.
+            onEnded={() => void videoEnded().catch(() => {})}
           />
         );
       case "message":
@@ -189,8 +195,8 @@ export function ProjectionView() {
   // goes truly dark, and behind full-screen media, which already covers them.
   // Decoding a looping background video underneath a playing bumper is work no
   // one can see, and a church laptop feels it.
-  const coversScreen = state.kind === "video" || state.kind === "image";
-  const media = state.kind === "blackout" || coversScreen ? null : mediaBackground(theme);
+  const fullScreen = coversScreen(state);
+  const media = state.kind === "blackout" || fullScreen ? null : mediaBackground(theme);
 
   // A stable signature of the *content* so the slide fades in only on real slide
   // changes — not on every countdown tick.
@@ -242,7 +248,18 @@ export function ProjectionView() {
           )}
         </>
       )}
-      <div key={contentKey} className="proj-fade relative z-10 flex flex-col items-center justify-center">
+      {/* Text sizes this wrapper by its own content. Full-screen media does not:
+          an absolutely-positioned child contributes no size, so the wrapper
+          collapsed to zero and `inset-0` inside it resolved to nothing at all,
+          which is why a projected image or video came out blank while verses
+          were fine. Media gets an explicitly full-screen wrapper instead.
+          Inline positioning, because two Tailwind position utilities on one
+          element are settled by stylesheet order rather than by class order. */}
+      <div
+        key={contentKey}
+        className="proj-fade z-10 flex flex-col items-center justify-center"
+        style={fullScreen ? { position: "absolute", inset: 0 } : { position: "relative" }}
+      >
         {body()}
       </div>
 

@@ -37,6 +37,9 @@ symphonia = { version = "0.5", features = ["mp3", "isomp4", "aac", "wav", "flac"
 strsim = "0.11"
 tiny_http = "0.12"
 ureq = { version = "2", features = ["json", "tls"] }
+# Rendered PDF pages cross the IPC boundary as text. Already in the lockfile as
+# a transitive dependency, so naming it here adds no download and no new code.
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 # Job object: guarantees the whisper server dies with us even if we are killed

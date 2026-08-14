@@ -14,6 +14,7 @@ import {
   setVideoPlayback,
   slideshowRunning,
   startSlideshow,
+  stepDeck,
   stopSlideshow,
   type MediaLibraryItem,
   type ProjectionState,
@@ -85,6 +86,24 @@ export function MediaPanel() {
 
   const video = live.kind === "video" ? live : null;
 
+  // Which deck, if any, the thing currently on screen belongs to. Matched by
+  // path so it survives a rename, and so it works after a restart when nothing
+  // in this component remembers what was clicked.
+  function deckOf(state: ProjectionState): string {
+    const src = state.kind === "image" ? state.src : state.kind === "video" ? state.src : "";
+    return items.find((m) => m.path === src)?.deck ?? "";
+  }
+
+  async function step(forward: boolean): Promise<void> {
+    const src = live.kind === "image" || live.kind === "video" ? live.src : "";
+    const here = items.find((m) => m.path === src);
+    if (!here) return;
+    await guard(async () => {
+      const moved = await stepDeck(here.id, forward);
+      if (!moved) setError(forward ? "That is the last page." : "That is the first page.");
+    });
+  }
+
   return (
     <section className="space-y-3">
       <h2 className="panel-title">Media</h2>
@@ -142,11 +161,36 @@ export function MediaPanel() {
         </div>
       )}
 
+      {deckOf(live) && (
+        <div className="rounded border p-2" style={{ borderColor: "var(--border)" }}>
+          <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
+            Presenting deck · {deckOf(live)}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button onClick={() => void step(false)} className="btn btn-sm">
+              ◀ Previous page
+            </button>
+            <button onClick={() => void step(true)} className="btn btn-sm">
+              Next page ▶
+            </button>
+            <span className="text-xs text-[var(--faint)]">
+              stays inside this document
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="rounded border p-2" style={{ borderColor: "var(--border)" }}>
-        <div className="text-xs uppercase tracking-wide text-[var(--faint)]">Slideshow</div>
+        <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
+          Announcements loop
+        </div>
+        <p className="mt-1 text-xs text-[var(--faint)]">
+          Walks the library on a timer. Images are held for the dwell time; a video plays to
+          its own end before the loop moves on.
+        </p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <label className="flex items-center gap-1">
-            <span className="text-[var(--muted)]">Hold each</span>
+            <span className="text-[var(--muted)]">Hold each image</span>
             <input
               value={seconds}
               onChange={(e) => setSeconds(e.target.value)}

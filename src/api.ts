@@ -111,6 +111,8 @@ export interface MediaLibraryItem {
   path: string;
   title: string;
   kind: "image" | "video";
+  /** The document this page came from; empty for a standalone file. */
+  deck: string;
   present: boolean;
 }
 
@@ -132,6 +134,21 @@ export const moveMedia = (id: number, up: boolean): Promise<MediaLibraryItem[]> 
 
 export const projectMedia = (id: number): Promise<MediaLibraryItem> =>
   invoke<MediaLibraryItem>("project_media", { id });
+
+/** Store one rendered deck page as a library image. */
+export const importSlide = (
+  deck: string,
+  index: number,
+  pngBase64: string,
+): Promise<MediaLibraryItem> =>
+  invoke<MediaLibraryItem>("import_slide", { deck, index, pngBase64 });
+
+/** Step to the previous/next page within the same deck. Null at either end. */
+export const stepDeck = (id: number, forward: boolean): Promise<MediaLibraryItem | null> =>
+  invoke<MediaLibraryItem | null>("step_deck", { id, forward });
+
+/** The projection window reporting that the live video reached its end. */
+export const videoEnded = (): Promise<void> => invoke<void>("video_ended");
 
 /** Transport for the video already on screen; all three travel together. */
 export const setVideoPlayback = (

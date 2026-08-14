@@ -17,6 +17,7 @@
 
 use crate::commands::AppState;
 use crate::events::{ProjectionState, StageSlot};
+use base64::Engine;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +48,9 @@ pub struct MediaItem {
     pub path: String,
     pub title: String,
     pub kind: String,
+    /// The document this page came from, empty for a standalone file. Pages of
+    /// one deck stay together, and stepping moves inside it.
+    pub deck: String,
     /// False when the file is no longer where it was added from. The operator
     /// finds out in the library, not when it fails to appear on the wall.
     pub present: bool,
@@ -115,6 +119,38 @@ pub fn state_for(path: &str, title: &str, kind: &str) -> ProjectionState {
     }
 }
 
+/// A file-system-safe folder name for a deck, so two imports of "Sunday.pdf"
+/// and "sunday .pdf" cannot collide or escape the slides folder.
+pub fn slug(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    let trimmed = cleaned.trim_matches('-').to_string();
+    let short: String = trimmed.chars().take(60).collect();
+    if short.is_empty() {
+        "deck".into()
+    } else {
+        short
+    }
+}
+
+/// Where rendered slide pages live: inside the app's own data directory, so a
+/// deck imported on Saturday is still there on Sunday and survives a restart.
+/// The previous approach kept pages only as data URLs in a React component,
+/// which meant re-importing before every service and pushing megabytes of text
+/// through the event channel on every single page change.
+pub fn slides_dir(app: &AppHandle, deck: &str) -> Result<std::path::PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("slides")
+        .join(slug(deck));
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    Ok(base)
+}
+
 /// Let the projection window actually load this file.
 ///
 /// The asset protocol is scoped, and the configured scope covers the user's own
@@ -149,6 +185,36 @@ pub fn allow_known_paths(app: &AppHandle) {
     }
 }
 
+/// Write one rendered page to disk and put it in the library, so a deck's pages
+/// are ordinary media: previewable, projectable, orderable, and usable as
+/// service cues or slideshow items like anything else.
+pub fn save_slide(
+    app: &AppHandle,
+    deck: &str,
+    index: u32,
+    encoded: &str,
+) -> Result<MediaItem, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| "That page could not be decoded.".to_string())?;
+    let dir = slides_dir(app, deck)?;
+    // Zero-padded so a 100-page deck still sorts as a human reads it.
+    let path = dir.join(format!("page-{index:03}.png"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let path_str = path.to_string_lossy().to_string();
+    let title = format!("{} · {}", deck.trim(), index);
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.add_media(&path_str, &title, "image", deck.trim()).map_err(|e| e.to_string())?;
+    }
+    allow_path(app, &path_str);
+    list(app)
+        .into_iter()
+        .find(|m| m.path == path_str)
+        .ok_or_else(|| "The page was written but not listed.".to_string())
+}
+
 pub fn list(app: &AppHandle) -> Vec<MediaItem> {
     let state = app.state::<AppState>();
     let rows = match state.db.lock() {
@@ -156,14 +222,34 @@ pub fn list(app: &AppHandle) -> Vec<MediaItem> {
         Err(_) => Vec::new(),
     };
     rows.into_iter()
-        .map(|(id, path, title, kind)| MediaItem {
+        .map(|(id, path, title, kind, deck)| MediaItem {
             present: Path::new(&path).exists(),
             id,
             path,
             title,
             kind,
+            deck,
         })
         .collect()
+}
+
+/// Move to the previous or next page of the same deck, and show it.
+///
+/// This is what stepping through a deck means, and it is a different thing from
+/// the announcements loop: next and previous stay inside the document being
+/// presented rather than wandering into whatever else is in the library.
+/// Returns None at either end of the deck, or for a standalone file.
+pub fn step_deck(app: &AppHandle, id: i64, forward: bool) -> Option<MediaItem> {
+    let items = list(app);
+    let current = items.iter().find(|m| m.id == id)?;
+    if current.deck.is_empty() {
+        return None;
+    }
+    let pages: Vec<&MediaItem> = items.iter().filter(|m| m.deck == current.deck).collect();
+    let at = pages.iter().position(|m| m.id == id)?;
+    let target = if forward { at.checked_add(1)? } else { at.checked_sub(1)? };
+    let wanted = pages.get(target)?.id;
+    present(app, wanted).ok()
 }
 
 /// Put one library item on the screen, and name it on the stage monitor with
@@ -203,8 +289,17 @@ fn kind_label(kind: &str) -> &'static str {
     }
 }
 
-/// Start walking the library. Idempotent: starting a running slideshow is a
-/// no-op rather than a second thread racing the first for the screen.
+/// Longest a loop will wait on a video before giving up on hearing that it
+/// ended. A file the projection window cannot decode would otherwise hold the
+/// loop forever, which on a Sunday morning looks exactly like a crash.
+const VIDEO_PATIENCE: Duration = Duration::from_secs(60 * 20);
+
+/// Start the announcements loop. Idempotent: starting a running loop is a no-op
+/// rather than a second thread racing the first for the screen.
+///
+/// A timer is the wrong unit for a video, so the loop does not use one there: a
+/// video is held until it reports that it ended, then the loop moves on. The
+/// dwell time governs images, which have no natural length of their own.
 pub fn start_slideshow(
     app: AppHandle,
     running: Arc<AtomicBool>,
@@ -238,7 +333,8 @@ pub fn start_slideshow(
                 pos = 0;
             }
             // Skip anything that has gone missing rather than stopping dead.
-            if present_at(&app, &items, pos).is_err() {
+            let shown = present_at(&app, &items, pos);
+            if shown.is_err() {
                 match next_index(pos, items.len(), looping) {
                     Some(n) if n != 0 || looping => {
                         pos = n;
@@ -247,7 +343,13 @@ pub fn start_slideshow(
                     _ => break,
                 }
             }
-            if !sleep_unless_stopped(&running, dwell) {
+            let is_video = shown.map(|m| m.kind == "video").unwrap_or(false);
+            let held = if is_video {
+                wait_for_video(&app, &running)
+            } else {
+                sleep_unless_stopped(&running, dwell)
+            };
+            if !held {
                 break;
             }
             match next_index(pos, items.len(), looping) {
@@ -259,6 +361,26 @@ pub fn start_slideshow(
         let _ = app.emit("slideshow-changed", false);
     });
     Ok(())
+}
+
+/// Hold until the projection window says the video ended, the operator stops,
+/// or patience runs out. False when stopped.
+fn wait_for_video(app: &AppHandle, running: &Arc<AtomicBool>) -> bool {
+    let ended = app.state::<AppState>().video_ended.clone();
+    ended.store(false, Ordering::SeqCst);
+    let deadline = std::time::Instant::now() + VIDEO_PATIENCE;
+    loop {
+        if !running.load(Ordering::SeqCst) {
+            return false;
+        }
+        if ended.load(Ordering::SeqCst) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return true;
+        }
+        std::thread::sleep(TICK);
+    }
 }
 
 /// Sleep `seconds`, waking often enough to notice a stop. False when stopped.
@@ -299,6 +421,22 @@ mod tests {
         for ext in IMAGE_EXT.iter().chain(VIDEO_EXT.iter()) {
             assert!(ts.contains(&format!("\"{ext}\"")), "{ext} is missing from src/lib/media.ts");
         }
+    }
+
+    #[test]
+    fn deck_folders_cannot_collide_or_escape() {
+        assert_eq!(slug("Sunday Morning"), "sunday-morning");
+        // Two decks that differ only by punctuation must not share a folder in
+        // a way that lets one overwrite the other's pages.
+        assert_ne!(slug("Sunday Morning"), slug("SundayMorning"));
+        // Nothing that could climb out of the slides directory survives.
+        for hostile in ["../../etc/passwd", "..\\..\\windows", "C:/Windows/system32"] {
+            let s = slug(hostile);
+            assert!(!s.contains('/') && !s.contains('\\') && !s.contains(".."), "got {s}");
+        }
+        assert_eq!(slug(""), "deck");
+        assert_eq!(slug("///"), "deck");
+        assert!(slug(&"x".repeat(500)).len() <= 60);
     }
 
     #[test]
@@ -344,11 +482,11 @@ mod tests {
     fn library_rows_survive_add_reorder_and_remove() {
         let db = crate::db::open_in_memory().unwrap();
         db.migrate().unwrap();
-        let a = db.add_media("/m/a.png", "A", "image").unwrap();
-        let b = db.add_media("/m/b.mp4", "B", "video").unwrap();
+        let a = db.add_media("/m/a.png", "A", "image", "").unwrap();
+        let b = db.add_media("/m/b.mp4", "B", "video", "").unwrap();
 
         // Adding the same folder again must not multiply what is there.
-        assert_eq!(db.add_media("/m/a.png", "A", "image").unwrap(), a);
+        assert_eq!(db.add_media("/m/a.png", "A", "image", "").unwrap(), a);
         assert_eq!(db.list_media().unwrap().len(), 2);
 
         assert!(db.move_media(b, true).unwrap(), "B should move up");
@@ -365,5 +503,22 @@ mod tests {
         db.remove_media(a).unwrap();
         assert_eq!(db.list_media().unwrap().len(), 1);
         assert!(db.media_at(a).unwrap().is_none());
+    }
+
+    #[test]
+    fn deck_pages_stay_grouped_and_standalone_files_are_loose() {
+        // Stepping through a deck must not wander into the rest of the library,
+        // which is the whole difference between presenting a document and
+        // running an announcements loop.
+        let db = crate::db::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        db.add_media("/s/sermon/page-001.png", "Sermon · 1", "image", "Sermon").unwrap();
+        db.add_media("/s/sermon/page-002.png", "Sermon · 2", "image", "Sermon").unwrap();
+        db.add_media("/m/loose.png", "Loose", "image", "").unwrap();
+
+        let rows = db.list_media().unwrap();
+        let decks: Vec<String> = rows.iter().map(|(.., deck)| deck.clone()).collect();
+        assert_eq!(decks, vec!["Sermon", "Sermon", ""]);
+        assert_eq!(rows.iter().filter(|(.., d)| d == "Sermon").count(), 2);
     }
 }

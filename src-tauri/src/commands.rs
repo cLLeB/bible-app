@@ -21,7 +21,10 @@ pub struct AppState {
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub recording: Arc<AtomicBool>,      // record this service for learning?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
-    pub slideshow: Arc<AtomicBool>,      // media slideshow advancing?
+    pub slideshow: Arc<AtomicBool>,      // announcements loop advancing?
+    // Set by the projection window when the live video reaches its end, so the
+    // loop can move on at the clip's own length instead of an image's timer.
+    pub video_ended: Arc<AtomicBool>,
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
     // Operator corrections: description signature -> chosen verse, so a repeated
     // paraphrase is ranked toward what the operator picked last time.
@@ -2348,7 +2351,8 @@ pub fn add_media(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         for path in &paths {
             let Some(kind) = crate::media::kind_of(path) else { continue };
-            db.add_media(path, &crate::media::title_of(path), kind)
+            // Standalone files belong to no deck.
+            db.add_media(path, &crate::media::title_of(path), kind, "")
                 .map_err(|e| e.to_string())?;
             // The picker reaches drives the asset scope does not, so a file is
             // allowed the moment the operator chooses it.
@@ -2404,6 +2408,18 @@ pub fn move_media(
     Ok(crate::media::list(&app))
 }
 
+/// Store one rendered PDF/deck page as a library image. Called once per page so
+/// a long deck reports progress and a failure names the page that failed.
+#[tauri::command]
+pub fn import_slide(
+    app: tauri::AppHandle,
+    deck: String,
+    index: u32,
+    png_base64: String,
+) -> Result<crate::media::MediaItem, String> {
+    crate::media::save_slide(&app, &deck, index, &png_base64)
+}
+
 #[tauri::command]
 pub fn project_media(app: tauri::AppHandle, id: i64) -> Result<crate::media::MediaItem, String> {
     crate::media::present(&app, id)
@@ -2441,6 +2457,23 @@ pub fn set_video_playback(
 pub fn seek_video(app: tauri::AppHandle, position_ms: i64) -> Result<(), String> {
     app.emit_to("projection", "video-seek", position_ms.max(0))
         .map_err(|e| e.to_string())
+}
+
+/// Step to the previous/next page of the deck the given page belongs to.
+#[tauri::command]
+pub fn step_deck(
+    app: tauri::AppHandle,
+    id: i64,
+    forward: bool,
+) -> Option<crate::media::MediaItem> {
+    crate::media::step_deck(&app, id, forward)
+}
+
+/// The projection window reporting that the live video reached its end, so an
+/// announcements loop can move on at the clip's own length.
+#[tauri::command]
+pub fn video_ended(state: tauri::State<'_, AppState>) {
+    state.video_ended.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -2558,6 +2591,7 @@ mod tests {
             recording: Arc::new(AtomicBool::new(false)),
             remote_running: Arc::new(AtomicBool::new(false)),
             slideshow: Arc::new(AtomicBool::new(false)),
+            video_ended: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),
             learned: Mutex::new(std::collections::HashMap::new()),
             moments: Mutex::new(Vec::new()),
