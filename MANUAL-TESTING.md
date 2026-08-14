@@ -222,8 +222,14 @@ On **Prepare → Media**.
   one and stopping on the other is correct behaviour, not a bug.
 - A missing file is skipped by a running slideshow instead of stopping it.
 
+- **＋ adds an item to the service order**, so one run sheet can hold songs, scripture and
+  video together and the arrow keys walk straight through it. Media cues remember the library
+  id rather than the file path, so renaming an item later does not break a saved template.
+
 Worth trying deliberately: start a slideshow, switch to the Live tab, and confirm it is still
 advancing. That is the case an in-screen timer would get wrong.
+
+Then build a run order of song → video → verse and step the whole thing with the arrow keys.
 
 ---
 

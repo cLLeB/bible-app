@@ -1,15 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { VersePayload } from "./api";
+import { usableCues } from "./lib/serviceCues";
 
 export type Cue =
   | { id: string; type: "verse"; verse: VersePayload }
-  | { id: string; type: "song"; songId: number; title: string };
+  | { id: string; type: "song"; songId: number; title: string }
+  // Media cues store the library id, not the path: renaming or moving a file is
+  // then a library concern, and a run order saved as a template last month
+  // still points at the right item.
+  | { id: string; type: "media"; mediaId: number; title: string; kind: "image" | "video" };
 
 interface ServiceState {
   cues: Cue[];
   addVerse: (verse: VersePayload) => void;
   addSong: (songId: number, title: string) => void;
+  addMedia: (mediaId: number, title: string, kind: "image" | "video") => void;
   remove: (id: string) => void;
   move: (id: string, dir: -1 | 1) => void;
   clear: () => void;
@@ -59,6 +65,8 @@ export const useServiceStore = create<ServiceState>()(
         set((s) => ({ cues: [...s.cues, { id: uid(), type: "verse", verse }] })),
       addSong: (songId, title) =>
         set((s) => ({ cues: [...s.cues, { id: uid(), type: "song", songId, title }] })),
+      addMedia: (mediaId, title, kind) =>
+        set((s) => ({ cues: [...s.cues, { id: uid(), type: "media", mediaId, title, kind }] })),
       remove: (id) => set((s) => ({ cues: s.cues.filter((c) => c.id !== id) })),
       move: (id, dir) =>
         set((s) => {
@@ -76,17 +84,11 @@ export const useServiceStore = create<ServiceState>()(
       name: "service-order",
       version: 1,
       partialize: (s) => ({ cues: s.cues }),
-      // Older builds stored verse cues without `bookOsis`, which can't project.
-      // Drop any incomplete cue so the run sheet only holds usable items.
-      migrate: (persisted) => {
-        const raw = (persisted as { cues?: Cue[] } | undefined)?.cues ?? [];
-        const cues = raw.filter((c) =>
-          c && c.type === "song"
-            ? c.songId != null
-            : Boolean(c && c.type === "verse" && c.verse?.bookOsis != null),
-        );
-        return { cues };
-      },
+      // Stored run orders outlive the builds that wrote them, so the rule for
+      // what survives lives in one tested place.
+      migrate: (persisted) => ({
+        cues: usableCues((persisted as { cues?: unknown[] } | undefined)?.cues ?? []),
+      }),
     },
   ),
 );

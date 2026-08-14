@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   getSongSlides,
   presentCoords,
+  projectMedia,
   projectSlide,
   projectVerse,
   setStage,
@@ -48,6 +49,11 @@ export function ServicePanel() {
     const cue = st.current.cues[i];
     if (!cue) return null;
     if (cue.type === "verse") return verseSlot(cue.verse);
+    // Media has no lyrics to preview, so the platform team gets its name and
+    // kind — enough to know a video is coming and not to start singing.
+    if (cue.type === "media") {
+      return { text: cue.title, caption: cue.kind === "video" ? "Video" : "Image" };
+    }
     const s = await getSongSlides(cue.songId).catch(() => [] as Slide[]);
     return slideSlot(s[0]?.text ?? "", cue.title);
   }
@@ -76,6 +82,14 @@ export function ServicePanel() {
             : (await projectVerse(v), v);
         useScriptureStore.getState().setCurrent(shown);
         current = verseSlot(shown);
+        next = await cueSlot(index + 1);
+      } else if (cue.type === "media") {
+        setSlides([]);
+        setSlide(0);
+        // Project by library id so a renamed or re-pointed item still resolves,
+        // and so a run order saved as a template keeps working.
+        const shown = await projectMedia(cue.mediaId);
+        current = { text: shown.title, caption: shown.kind === "video" ? "Video" : "Image" };
         next = await cueSlot(index + 1);
       } else {
         const s =
@@ -134,8 +148,11 @@ export function ServicePanel() {
   }, []);
 
   const nextCue = cues[item < 0 ? 0 : item + 1];
-  const cueLabel = (c: Cue): string =>
-    c.type === "verse" ? `📖 ${c.verse.reference}` : `🎵 ${c.title}`;
+  const cueLabel = (c: Cue): string => {
+    if (c.type === "verse") return `📖 ${c.verse.reference}`;
+    if (c.type === "media") return `${c.kind === "video" ? "🎬" : "🖼"} ${c.title}`;
+    return `🎵 ${c.title}`;
+  };
 
   return (
     <section className="space-y-2">
@@ -235,15 +252,15 @@ export function ServicePanel() {
                 }`}
               >
                 <span className="mr-2 text-xs text-[var(--faint)]">{i + 1}</span>
-                {cue.type === "verse" ? (
-                  <span>📖 {cue.verse.reference}</span>
-                ) : (
+                {cue.type === "song" ? (
                   <span>
                     🎵 {cue.title}
                     {i === item && slides.length ? (
                       <span className="text-gray-500"> · slide {slide + 1}/{slides.length}</span>
                     ) : null}
                   </span>
+                ) : (
+                  <span>{cueLabel(cue)}</span>
                 )}
               </button>
               <button onClick={() => move(cue.id, -1)} className="icon-btn" title="Move up">↑</button>

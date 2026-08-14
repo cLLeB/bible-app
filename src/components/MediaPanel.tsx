@@ -19,6 +19,7 @@ import {
   type ProjectionState,
 } from "../api";
 import { clampInterval, MEDIA_EXTENSIONS, SLIDESHOW_DEFAULT_SECONDS } from "../lib/media";
+import { useServiceStore } from "../services";
 
 /**
  * The media library, the video transport, and the slideshow.
@@ -36,6 +37,7 @@ export function MediaPanel() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const addToService = useServiceStore((s) => s.addMedia);
 
   useEffect(() => {
     listMedia().then(setItems).catch(() => {});
@@ -220,6 +222,13 @@ export function MediaPanel() {
               className="btn btn-sm"
             >
               Project
+            </button>
+            <button
+              onClick={() => addToService(m.id, m.title, m.kind)}
+              className="btn btn-sm"
+              title="Add to the service run order"
+            >
+              ＋
             </button>
             <button
               onClick={() => void guard(async () => setItems(await moveMedia(m.id, true)))}
