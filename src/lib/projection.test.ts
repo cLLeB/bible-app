@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { coversScreen } from "./projection";
+import { coversScreen, needsAssetUrl } from "./projection";
 
 describe("coversScreen", () => {
   it("is true for the kinds that fill the screen with a picture", () => {
@@ -25,6 +25,42 @@ describe("coversScreen", () => {
     expect(coversScreen({ kind: "blank" })).toBe(false);
     expect(coversScreen({ kind: "blackout" })).toBe(false);
     expect(coversScreen({ kind: "logo" })).toBe(false);
+  });
+});
+
+describe("needsAssetUrl", () => {
+  it("converts the file paths media now arrives as", () => {
+    // Deck pages are written to disk and referenced by absolute path. A webview
+    // cannot load one directly, which is why a page previewed perfectly and
+    // projected as a blank screen.
+    expect(needsAssetUrl("C:\\Users\\a\\AppData\\Roaming\\app\\slides\\deck\\page-001.png")).toBe(true);
+    expect(needsAssetUrl("D:/church/media/bumper.mp4")).toBe(true);
+  });
+
+  it("leaves alone what a webview can already load", () => {
+    expect(needsAssetUrl("data:image/png;base64,iVBOR")).toBe(false);
+    expect(needsAssetUrl("blob:http://localhost/abc")).toBe(false);
+    expect(needsAssetUrl("https://example.org/a.png")).toBe(false);
+    expect(needsAssetUrl("asset://localhost/a.png")).toBe(false);
+    expect(needsAssetUrl("/newbreed_logo.png")).toBe(false);
+  });
+
+  it("does not try to convert nothing", () => {
+    expect(needsAssetUrl("")).toBe(false);
+    expect(needsAssetUrl("   ")).toBe(false);
+  });
+});
+
+describe("both windows load media the same way", () => {
+  it("neither passes a raw src straight to an element", () => {
+    // The bug this pins: the projection window kept passing state.src directly
+    // while the preview pane converted it, so the two disagreed about the same
+    // file and only one of them showed it.
+    const view = readFileSync(new URL("../ProjectionView.tsx", import.meta.url), "utf8");
+    const pane = readFileSync(new URL("../components/PreviewPane.tsx", import.meta.url), "utf8");
+    expect(view).not.toContain("src={state.src}");
+    expect(view).toContain("needsAssetUrl");
+    expect(pane).toContain("needsAssetUrl");
   });
 });
 

@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "../lib/theme";
 import { previewLabel, previewLines } from "../lib/preview";
+import { needsAssetUrl } from "../lib/projection";
 import { defaultProjectionSettings } from "../lib/themeDefaults";
 import { usePreviewStore } from "../services";
 
@@ -101,7 +102,7 @@ export function PreviewPane() {
 
         {staged.kind === "image" && (
           <img
-            src={staged.src.startsWith("data:") ? staged.src : convertFileSrc(staged.src)}
+            src={needsAssetUrl(staged.src) ? convertFileSrc(staged.src) : staged.src}
             alt=""
             className="absolute inset-0 h-full w-full"
             style={{ objectFit: "contain", background: "#000000" }}

@@ -11,7 +11,7 @@ import {
   type ProjectionState,
 } from "./api";
 import { alertVisible } from "./lib/alert";
-import { coversScreen } from "./lib/projection";
+import { coversScreen, needsAssetUrl } from "./lib/projection";
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
 
@@ -23,6 +23,11 @@ function useNow(active: boolean): number {
     return () => clearInterval(id);
   }, [active]);
   return now;
+}
+
+/** A source this window can actually load, whatever form it arrived in. */
+function assetSrc(src: string): string {
+  return needsAssetUrl(src) ? convertFileSrc(src) : src;
 }
 
 function formatRemaining(ms: number): string {
@@ -127,7 +132,7 @@ export function ProjectionView() {
       case "image":
         return (
           <img
-            src={state.src}
+            src={assetSrc(state.src)}
             alt=""
             className="absolute inset-0 h-full w-full"
             style={{ objectFit: "contain" }}
@@ -140,7 +145,7 @@ export function ProjectionView() {
             // Keyed on the file so choosing a different video mounts a fresh
             // element, while mute/loop/pause only update this one.
             key={state.src}
-            src={convertFileSrc(state.src)}
+            src={assetSrc(state.src)}
             className="absolute inset-0 h-full w-full"
             style={{ objectFit: "contain", background: "#000000" }}
             autoPlay
