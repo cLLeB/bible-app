@@ -70,6 +70,55 @@ pub fn should_fill(target: Option<&DisplayInfo>) -> bool {
     matches!(target, Some(display) if !display.primary)
 }
 
+/// A fingerprint of the current screens: what they are, where, and how big.
+///
+/// Comparing this is how a TV being plugged in is noticed. Name alone is not
+/// enough, because a resolution change moves the output window's whole
+/// coordinate space without any screen appearing or disappearing.
+pub fn signature(displays: &[DisplayInfo]) -> String {
+    displays
+        .iter()
+        .map(|d| format!("{}@{},{};{}x{}", d.name, d.x, d.y, d.width, d.height))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// How often to look. Plugging in a TV is a physical act nobody does twice a
+/// second, and enumerating a handful of monitors is far cheaper than the poll
+/// interval implies.
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Notice screens coming and going, and follow them.
+///
+/// There is no cross-platform display-change event to subscribe to, so this
+/// asks. The alternative is what every other church app does, which is to make
+/// the operator find a Refresh button at the moment they are least able to look
+/// for one: the TV has just been plugged in and the service is starting.
+///
+/// Output is only re-placed when it is already showing. Noticing a screen must
+/// never be a reason to put something in front of a congregation.
+pub fn watch(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = signature(&crate::commands::displays_now(&app));
+        loop {
+            std::thread::sleep(WATCH_EVERY);
+            let displays = crate::commands::displays_now(&app);
+            let now = signature(&displays);
+            if now == last {
+                continue;
+            }
+            last = now;
+            let _ = tauri::Emitter::emit(&app, "displays-changed", &displays);
+            let showing = tauri::Manager::get_webview_window(&app, "projection")
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false);
+            if showing {
+                let _ = crate::commands::place_projection_window(&app);
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +173,33 @@ mod tests {
         assert!(should_fill(Some(&tv)));
         assert!(!should_fill(Some(&laptop)), "fullscreen would bury the console");
         assert!(!should_fill(None));
+    }
+
+    #[test]
+    fn plugging_a_tv_in_changes_the_fingerprint() {
+        let laptop = vec![display("Laptop", true)];
+        let with_tv = vec![display("Laptop", true), display("HDMI TV", false)];
+        assert_ne!(signature(&laptop), signature(&with_tv));
+        // Unplugging is the same event in reverse, and must be noticed too.
+        assert_eq!(signature(&laptop), signature(&[display("Laptop", true)]));
+    }
+
+    #[test]
+    fn a_resolution_change_counts_as_a_change() {
+        // The screens are the same screens, but the output window's coordinate
+        // space has moved under it, so its position is now wrong.
+        let before = vec![display("HDMI TV", false)];
+        let mut after = before.clone();
+        after[0].width = 3840;
+        after[0].height = 2160;
+        assert_ne!(signature(&before), signature(&after));
+    }
+
+    #[test]
+    fn nothing_connected_is_a_stable_fingerprint_not_a_wobble() {
+        // An empty answer during a mode switch must not read as a change on
+        // every poll, or output would be re-placed continuously.
+        assert_eq!(signature(&[]), signature(&[]));
     }
 
     #[test]

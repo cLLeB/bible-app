@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { listen } from "@tauri-apps/api/event";
 import {
   listDisplays,
   setOutputDisplay,
@@ -37,6 +38,12 @@ export function OutputsPanel() {
 
   useEffect(() => {
     void loadDisplays();
+    // The app watches for screens arriving and leaving, so this list follows a
+    // TV being plugged in without anyone pressing Refresh.
+    const sub = listen<DisplayInfo[]>("displays-changed", (e) => setDisplays(e.payload));
+    return () => {
+      sub.then((f) => f());
+    };
   }, [loadDisplays]);
 
   async function pickDisplay(name: string): Promise<void> {

@@ -164,6 +164,10 @@ pub fn run() {
             // again before the first cue, not on next use.
             media::allow_known_paths(app.handle());
 
+            // Follow screens being plugged in and out, so a TV connected while
+            // the app is open is picked up without anyone hunting for Refresh.
+            displays::watch(app.handle().clone());
+
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let result = seed_library(&handle);

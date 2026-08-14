@@ -852,6 +852,13 @@ fn preferred_display(app: &tauri::AppHandle) -> Option<String> {
 /// every cue, and dragging the window onto whatever virtual desktop the
 /// operator is using, is what output windows must not do.
 fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
+    place_projection_window(app)
+}
+
+/// Place and reveal the output window. Separate from the projection path so the
+/// display watcher can re-place a window that is already showing without
+/// pretending something new is being projected.
+pub(crate) fn place_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     let win = app
         .get_webview_window("projection")
         .ok_or_else(|| "projection window not found".to_string())?;
