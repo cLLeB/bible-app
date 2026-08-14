@@ -3,8 +3,16 @@ import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { deckAsPdf, importSlide, listConverters, setConverter } from "../api";
+import {
+  deckAsPdf,
+  importSlide,
+  listConverters,
+  projectMedia,
+  setConverter,
+  type MediaLibraryItem,
+} from "../api";
 import { titleFromPath } from "../lib/media";
+import { usePreviewStore } from "../services";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -30,6 +38,11 @@ export function PdfImport() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [converters, setConverters] = useState<[string, string][]>([]);
+  // The pages from the last import, shown right here. They live in Media, but
+  // sending the operator to another panel to find what they just imported is a
+  // handoff with nothing at the end of it.
+  const [pages, setPages] = useState<MediaLibraryItem[]>([]);
+  const stagePreview = usePreviewStore((s) => s.stage);
 
   useEffect(() => {
     listConverters().then(setConverters).catch(() => {});
@@ -58,7 +71,9 @@ export function PdfImport() {
     if (!picked || Array.isArray(picked)) return;
 
     setBusy(true);
+    setPages([]);
     const deck = titleFromPath(picked);
+    const added: MediaLibraryItem[] = [];
     try {
       // PowerPoint becomes a PDF first; a PDF is handed straight back, so this
       // is one action either way and the operator never has to know which.
@@ -83,12 +98,14 @@ export function PdfImport() {
         await page.render({ canvas, canvasContext: ctx, viewport }).promise;
         // One page at a time: a long deck reports real progress, a failure
         // names the page that failed, and nothing holds the whole deck at once.
-        await importSlide(deck, i, payload(canvas.toDataURL("image/png")));
+        added.push(await importSlide(deck, i, payload(canvas.toDataURL("image/png"))));
+        setPages([...added]);
         canvas.width = 0;
         canvas.height = 0;
       }
       setStatus(
-        `${pdf.numPages} page${pdf.numPages === 1 ? "" : "s"} added to Media as "${deck}".`,
+        `${pdf.numPages} page${pdf.numPages === 1 ? "" : "s"} ready. They are also in Media, ` +
+          `where they can be reordered or added to a service order.`,
       );
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -129,6 +146,41 @@ export function PdfImport() {
       </div>
 
       {status && <p className="text-sm text-[var(--muted)]">{status}</p>}
+
+      {pages.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+          {pages.map((page, i) => (
+            <div
+              key={page.id}
+              className="overflow-hidden rounded border"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <img
+                src={convertFileSrc(page.path)}
+                alt={`Page ${i + 1}`}
+                className="block h-auto w-full"
+                style={{ background: "#000" }}
+              />
+              <div className="flex items-center gap-1 p-1">
+                <span className="mr-auto pl-1 text-xs text-[var(--faint)]">{i + 1}</span>
+                <button
+                  onClick={() => stagePreview({ kind: "image", src: page.path })}
+                  className="btn btn-sm"
+                  title="Show it in the preview pane"
+                >
+                  Preview
+                </button>
+                <button
+                  onClick={() => void projectMedia(page.id).catch(() => {})}
+                  className="btn btn-sm btn-primary"
+                >
+                  Project
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
