@@ -191,12 +191,27 @@ itself, not in the part of the app the phone can reach.
 
 ---
 
-## 6. Second monitor behavior
+## 6. The congregation screen (TV / projector)
 
-- With a second monitor plugged in, the Projection screen should jump to it and go fullscreen.
-- With only one monitor, it goes fullscreen on your main screen (use Alt+Tab to get back).
+The normal setup — laptop open, TV on HDMI — should need no configuration at all.
+
+- **Plug the TV in whenever you like**, before or after opening the app, and project. The app
+  checks the connected screens every couple of seconds, so a TV that arrives mid-service is
+  picked up without pressing anything. It only *moves* output that is already showing;
+  plugging in while the screen is blanked leaves it blanked.
+- **Output never takes keyboard focus.** You can keep typing in the console while it is live.
+  If projecting ever steals your caret or drags the output window onto your desktop, that is a
+  bug — it used to do exactly that.
+- The screen is chosen as *the one you are not using*, not "monitor 2". **Outputs →
+  Congregation screen** lists every connected screen with its resolution and marks the laptop,
+  and you can name one explicitly if a venue has several. A named screen that is later
+  unplugged falls back rather than projecting into nowhere.
+- **With only the laptop screen**, output opens as a normal 960×540 window instead of covering
+  the console. Burying the thing you drive it from is worse than showing a window.
 - **Closing** the projection or stage window doesn't destroy it — projecting again brings it
   right back. (This is intentional so an accidental close mid-service doesn't kill the screen.)
+
+Worth testing on purpose: project something, then plug and unplug the TV while it is live.
 
 ---
 
@@ -273,7 +288,10 @@ the same clip playing out of step is the last thing you want mid-service).
   close quotes are. The stronger AI paraphrase engine is planned but not built.
 - **Only WEB is loaded by default.** Multiple translations are supported, but you'd need to add
   the extra Bible files yourself.
-- No importing from CCLI/SongSelect or PowerPoint yet.
+- No importing from CCLI/SongSelect. PowerPoint **is** supported now (section 6.5), but it
+  needs LibreOffice, ONLYOFFICE or PowerPoint installed to do the conversion; there is no
+  renderer bundled, because one would add hundreds of megabytes to the installer.
+- No audio-only playback yet (background beds, stingers). Video carries its own sound.
 - No printing, no cloud sync (by design — this is an offline tool).
 
 ---
