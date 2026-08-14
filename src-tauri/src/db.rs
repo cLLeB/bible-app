@@ -56,6 +56,18 @@ CREATE TABLE IF NOT EXISTS song_usage (
     ts TEXT NOT NULL,
     PRIMARY KEY (song_id, day)
 );
+-- The media library holds *references*, never copies: churches keep gigabytes of
+-- video and have no use for a second copy inside an app database. `path` is
+-- unique so adding the same folder twice is a no-op rather than a pile of
+-- duplicates, and `sort` is what the slideshow walks in order.
+CREATE TABLE IF NOT EXISTS media (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sort INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_sort ON media (sort);
 "#;
 
 #[cfg_attr(not(test), allow(dead_code))] // used by unit tests
@@ -540,6 +552,95 @@ impl Db {
         let mut stmt = self.conn.prepare("SELECT code, name FROM translations ORDER BY code")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
+    }
+
+    // ---- Media library ----
+
+    /// Add a file, or return the existing row's id when it is already in the
+    /// library. Re-adding a folder is a normal thing to do (someone dropped in
+    /// one new clip), so it must not multiply what is already there.
+    pub fn add_media(&self, path: &str, title: &str, kind: &str) -> rusqlite::Result<i64> {
+        if let Some(id) = self.media_id_for_path(path)? {
+            return Ok(id);
+        }
+        let next: i64 = self
+            .conn
+            .query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM media", [], |r| r.get(0))?;
+        self.conn.execute(
+            "INSERT INTO media (path, title, kind, sort) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![path, title, kind, next],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    fn media_id_for_path(&self, path: &str) -> rusqlite::Result<Option<i64>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM media WHERE path = ?1")?;
+        let mut rows = stmt.query([path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The library in slideshow order: (id, path, title, kind).
+    pub fn list_media(&self) -> rusqlite::Result<Vec<(i64, String, String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, path, title, kind FROM media ORDER BY sort, id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        rows.collect()
+    }
+
+    pub fn media_at(&self, id: i64) -> rusqlite::Result<Option<(String, String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT path, title, kind FROM media WHERE id = ?1")?;
+        let mut rows = stmt.query([id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some((row.get(0)?, row.get(1)?, row.get(2)?))),
+            None => Ok(None),
+        }
+    }
+
+    pub fn remove_media(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM media WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn rename_media(&self, id: i64, title: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("UPDATE media SET title = ?2 WHERE id = ?1", rusqlite::params![id, title])?;
+        Ok(())
+    }
+
+    /// Swap one item with its neighbour in slideshow order. Returns false at the
+    /// ends of the list, where there is nothing to swap with.
+    pub fn move_media(&self, id: i64, up: bool) -> rusqlite::Result<bool> {
+        let order = self.list_media()?;
+        let Some(pos) = order.iter().position(|(row_id, ..)| *row_id == id) else {
+            return Ok(false);
+        };
+        let other = if up {
+            if pos == 0 {
+                return Ok(false);
+            }
+            pos - 1
+        } else {
+            if pos + 1 >= order.len() {
+                return Ok(false);
+            }
+            pos + 1
+        };
+        // Rewrite the whole column from the reordered list. The library is a
+        // handful of items, and this cannot leave two rows sharing a position
+        // the way swapping a pair of `sort` values can after a failed delete.
+        let mut ids: Vec<i64> = order.iter().map(|(row_id, ..)| *row_id).collect();
+        ids.swap(pos, other);
+        for (i, row_id) in ids.iter().enumerate() {
+            self.conn.execute(
+                "UPDATE media SET sort = ?2 WHERE id = ?1",
+                rusqlite::params![row_id, i as i64 + 1],
+            )?;
+        }
+        Ok(true)
     }
 
     pub fn get_song_title(&self, song_id: i64) -> rusqlite::Result<Option<String>> {

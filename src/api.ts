@@ -39,6 +39,14 @@ export type ProjectionState =
   | { kind: "song"; text: string; caption: string }
   | { kind: "image"; src: string }
   | {
+      kind: "video";
+      src: string;
+      title: string;
+      paused: boolean;
+      muted: boolean;
+      looping: boolean;
+    }
+  | {
       kind: "parallel";
       primaryText: string;
       primaryCode: string;
@@ -94,6 +102,53 @@ export const setProjection = (next: ProjectionState): Promise<void> =>
 /** Project a full-screen image (data URL or path) — e.g. a rendered PDF page. */
 export const projectImage = (src: string): Promise<void> =>
   setProjection({ kind: "image", src });
+
+// ---- Media library ----
+
+/** One item in the media library. `present` is false once the file has moved. */
+export interface MediaLibraryItem {
+  id: number;
+  path: string;
+  title: string;
+  kind: "image" | "video";
+  present: boolean;
+}
+
+export const listMedia = (): Promise<MediaLibraryItem[]> =>
+  invoke<MediaLibraryItem[]>("list_media");
+
+/** Add files by absolute path; returns the refreshed library. */
+export const addMedia = (paths: string[]): Promise<MediaLibraryItem[]> =>
+  invoke<MediaLibraryItem[]>("add_media", { paths });
+
+export const removeMedia = (id: number): Promise<MediaLibraryItem[]> =>
+  invoke<MediaLibraryItem[]>("remove_media", { id });
+
+export const renameMedia = (id: number, title: string): Promise<MediaLibraryItem[]> =>
+  invoke<MediaLibraryItem[]>("rename_media", { id, title });
+
+export const moveMedia = (id: number, up: boolean): Promise<MediaLibraryItem[]> =>
+  invoke<MediaLibraryItem[]>("move_media", { id, up });
+
+export const projectMedia = (id: number): Promise<MediaLibraryItem> =>
+  invoke<MediaLibraryItem>("project_media", { id });
+
+/** Transport for the video already on screen; all three travel together. */
+export const setVideoPlayback = (
+  paused: boolean,
+  muted: boolean,
+  looping: boolean,
+): Promise<void> => invoke<void>("set_video_playback", { paused, muted, looping });
+
+export const seekVideo = (positionMs: number): Promise<void> =>
+  invoke<void>("seek_video", { positionMs });
+
+export const slideshowRunning = (): Promise<boolean> => invoke<boolean>("slideshow_running");
+
+export const startSlideshow = (seconds: number, looping: boolean): Promise<void> =>
+  invoke<void>("start_slideshow", { seconds, looping });
+
+export const stopSlideshow = (): Promise<void> => invoke<void>("stop_slideshow");
 
 export const getProjectionSettings = (): Promise<ProjectionSettings> =>
   invoke<ProjectionSettings>("get_projection_settings");

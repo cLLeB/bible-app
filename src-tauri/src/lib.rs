@@ -11,6 +11,7 @@ mod events;
 pub mod idle;
 pub mod knowledge;
 pub mod learn;
+pub mod media;
 pub mod pjlink;
 pub mod planning_center;
 pub mod profile_seed;
@@ -149,6 +150,7 @@ pub fn run() {
                 listening: Arc::new(AtomicBool::new(false)),
                 recording: Arc::new(AtomicBool::new(false)),
                 remote_running: Arc::new(AtomicBool::new(false)),
+                slideshow: Arc::new(AtomicBool::new(false)),
                 cursor: Mutex::new(None),
                 learned: Mutex::new(std::collections::HashMap::new()),
                 moments: Mutex::new(Vec::new()),
@@ -279,6 +281,17 @@ pub fn run() {
             commands::record_calibration_line,
             commands::run_calibration,
             commands::start_remote,
+            commands::list_media,
+            commands::add_media,
+            commands::remove_media,
+            commands::rename_media,
+            commands::move_media,
+            commands::project_media,
+            commands::set_video_playback,
+            commands::seek_video,
+            commands::slideshow_running,
+            commands::start_slideshow,
+            commands::stop_slideshow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

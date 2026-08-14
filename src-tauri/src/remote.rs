@@ -117,6 +117,9 @@ fn describe(state: &ProjectionState) -> String {
             format!("On screen: {caption} ({primary_code} / {secondary_code})")
         }
         ProjectionState::Image { .. } => "Image".into(),
+        ProjectionState::Video { title, paused, .. } => {
+            format!("Video: {title}{}", if *paused { " (paused)" } else { "" })
+        }
         ProjectionState::Message { text } => format!("Message: {text}"),
         ProjectionState::Countdown { label, .. } => format!("Countdown: {label}"),
         ProjectionState::Logo => "Logo".into(),
@@ -134,7 +137,9 @@ fn state_json(app: &AppHandle) -> String {
         Err(_) => "…".into(),
     };
     let listening = state.listening.load(Ordering::SeqCst);
-    serde_json::json!({ "summary": summary, "listening": listening }).to_string()
+    let slideshow = state.slideshow.load(Ordering::SeqCst);
+    serde_json::json!({ "summary": summary, "listening": listening, "slideshow": slideshow })
+        .to_string()
 }
 
 /// What the projection *looks* like: active theme plus font scale. The mirror
@@ -157,6 +162,16 @@ fn translations_json(app: &AppHandle) -> String {
     let active = state.active_translation();
     let list = crate::commands::list_translations(state).unwrap_or_default();
     serde_json::json!({ "active": active, "list": list }).to_string()
+}
+
+/// The media library, trimmed to what a phone needs to tap one item.
+fn media_json(app: &AppHandle) -> String {
+    let brief: Vec<_> = crate::media::list(app)
+        .into_iter()
+        .filter(|m| m.present)
+        .map(|m| serde_json::json!({ "id": m.id, "title": m.title, "kind": m.kind }))
+        .collect();
+    serde_json::to_string(&brief).unwrap_or_else(|_| "[]".into())
 }
 
 fn search_json(app: &AppHandle, query: &str) -> String {
@@ -213,7 +228,12 @@ pub fn start(app: AppHandle, running: Arc<AtomicBool>) -> Result<Vec<String>, St
                 "text/html; charset=utf-8"
             } else if matches!(
                 path.as_str(),
-                "/api/projection" | "/api/appearance" | "/api/translations" | "/api/state" | "/api/search"
+                "/api/projection"
+                    | "/api/appearance"
+                    | "/api/translations"
+                    | "/api/media"
+                    | "/api/state"
+                    | "/api/search"
             ) {
                 "application/json; charset=utf-8"
             } else {
@@ -244,6 +264,7 @@ fn route(app: &AppHandle, method: &str, path: &str, body: &str) -> (u16, String)
         ("GET", "/api/projection") => (200, projection_json(app)),
         ("GET", "/api/appearance") => (200, appearance_json(app)),
         ("GET", "/api/translations") => (200, translations_json(app)),
+        ("GET", "/api/media") => (200, media_json(app)),
         ("GET", "/api/state") => (200, state_json(app)),
 
         // The operator is at the projector when the preacher steps up, not at
@@ -289,6 +310,34 @@ fn route(app: &AppHandle, method: &str, path: &str, body: &str) -> (u16, String)
         ("POST", "/api/blank") => {
             let _ = project_via_handle(app, ProjectionState::Blank);
             (200, "ok".into())
+        }
+
+        // Put one library item on the screen, by id.
+        ("POST", "/api/media") => match body.parse::<i64>() {
+            Ok(id) => match crate::media::present(app, id) {
+                Ok(m) => (200, m.title),
+                Err(e) => (400, e),
+            },
+            Err(_) => (400, "Unknown media item.".into()),
+        },
+
+        // The slideshow runs in the app, not in this page, so the phone starts
+        // and stops the same run the console sees.
+        ("POST", "/api/slideshow") => {
+            let running = app.state::<AppState>().slideshow.clone();
+            if body == "stop" {
+                crate::media::stop_slideshow(app, &running);
+                return (200, "stopped".into());
+            }
+            match crate::media::start_slideshow(
+                app.clone(),
+                running,
+                crate::media::DEFAULT_SECONDS,
+                true,
+            ) {
+                Ok(()) => (200, "running".into()),
+                Err(e) => (400, e),
+            }
         }
 
         ("POST", "/api/search") => {

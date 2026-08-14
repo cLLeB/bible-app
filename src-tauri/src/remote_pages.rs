@@ -125,6 +125,14 @@ button:active{opacity:.65}
     <div id="hits" class="hits"></div>
   </div>
 
+  <div class="sec" id="mediasec" hidden>
+    <div class="lbl">Media</div>
+    <div class="row">
+      <button id="ssbtn" onclick="slideshow()">▶ Slideshow</button>
+    </div>
+    <div id="mlist" class="hits"></div>
+  </div>
+
   <div class="sec">
     <div class="lbl">Screen</div>
     <div class="row">
@@ -210,6 +218,38 @@ async function loadTranslations(){
  });
  $('cmp').hidden=false;
 }
+// Media lives in the app, so the phone only lists it and taps one. The library
+// is loaded once: it changes at the desk before a service, not from here.
+async function loadMedia(){
+ var r=await req('/api/media'); if(!r.ok)return;
+ var list=await r.json(); if(!list.length)return;
+ var box=$('mlist'); box.textContent='';
+ list.forEach(function(m){
+  var b=document.createElement('button');
+  var t=document.createElement('b'); t.textContent=m.kind==='video'?'Video':'Image';
+  b.appendChild(t); b.appendChild(document.createTextNode(' · '+m.title));
+  b.onclick=function(){playMedia(m.id)};
+  box.appendChild(b);
+ });
+ $('mediasec').hidden=false;
+}
+async function playMedia(id){
+ var r=await req('/api/media',{method:'POST',body:String(id)});
+ err(r.ok?'':await r.text()); kick();
+}
+var sliding=false;
+async function slideshow(){
+ var r=await req('/api/slideshow',{method:'POST',body:sliding?'stop':'start'});
+ var t=await r.text();
+ if(!r.ok){err(t);return}
+ setSlideshow(t==='running'); err('');
+}
+function setSlideshow(on){
+ sliding=on;
+ var b=$('ssbtn');
+ b.textContent=on?'■ Stop slideshow':'▶ Slideshow';
+ b.className=on?'stop':'';
+}
 function themeIsDark(){
  var t=document.documentElement.getAttribute('data-theme');
  return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
@@ -250,6 +290,7 @@ async function refresh(){
  // The laptop is the source of truth for whether it is listening, so a reload,
  // or someone starting it at the laptop, never leaves this button lying.
  if(s.listening!==listening)setListening(s.listening);
+ if(s.slideshow!==sliding)setSlideshow(s.slideshow);
  $('dot').className='dot on';
 }
 // Nudge the next poll after an action instead of adding a second timer.
@@ -270,6 +311,7 @@ var mq=matchMedia('(prefers-color-scheme: dark)');
 if(mq.addEventListener)mq.addEventListener('change',paintTheme);
 else if(mq.addListener)mq.addListener(paintTheme);
 loadTranslations().catch(function(){});
+loadMedia().catch(function(){});
 start();
 </script></body></html>"#;
 
@@ -411,6 +453,8 @@ mod tests {
             "function clearAlert(",
             "function both(",
             "function toggleTheme(",
+            "function slideshow(",
+            "function playMedia(",
         ] {
             assert!(page.contains(handler), "{handler} is wired to a button but not defined");
         }

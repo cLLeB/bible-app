@@ -34,6 +34,21 @@ pub enum ProjectionState {
     /// A full-screen image (e.g. a rendered PDF/PowerPoint page). `src` is a
     /// data URL or an asset-protocol path.
     Image { src: String },
+    /// A full-screen video. `src` is an absolute file path the projection window
+    /// converts to an asset URL; the file is never copied or re-encoded, so a
+    /// library of large videos costs nothing but the operator's own disk.
+    ///
+    /// Transport lives in the state rather than in a side channel: a window that
+    /// reopens mid-service reads `paused`/`muted`/`looping` and comes back the
+    /// way the operator left it. Seeking is the one exception, since it is an
+    /// instant rather than a condition.
+    Video {
+        src: String,
+        title: String,
+        paused: bool,
+        muted: bool,
+        looping: bool,
+    },
     /// The same verse in two translations, side by side.
     Parallel {
         primary_text: String,

@@ -200,6 +200,33 @@ itself, not in the part of the app the phone can reach.
 
 ---
 
+## 6.5. Media: images, video and the slideshow
+
+On **Prepare → Media**.
+
+- **Add files** takes images (jpg/png/gif/webp/…) and video (mp4/mov/webm/mkv/…). Nothing is
+  copied: the library remembers where the file lives. That keeps a gigabyte of video out of
+  the app database, and it means moving or deleting the original shows up as **File missing**
+  on the row rather than as a blank screen mid-service.
+- **Project** puts an item straight on the wall. Click a title to rename it; ▲▼ set the order
+  the slideshow walks; ✕ removes the row and leaves your file alone.
+- **Video controls** appear above the library while a video is live: Play/Pause, Restart,
+  sound on/off, and Loop. Muting or looping must *not* restart the clip — that is worth
+  checking on purpose.
+- **Slideshow** holds each item for the seconds you set and, with Repeat on, runs forever
+  (good for pre-service announcements). It runs **inside the app, not inside a screen**, so
+  it keeps advancing while you switch to Live, open the theme editor, or walk away. Stopping
+  leaves the last slide up rather than blanking.
+- The **phone remote** grew a Media section: tap any item to project it, and there is a
+  Slideshow start/stop button. It is the same slideshow the laptop is running, so starting on
+  one and stopping on the other is correct behaviour, not a bug.
+- A missing file is skipped by a running slideshow instead of stopping it.
+
+Worth trying deliberately: start a slideshow, switch to the Live tab, and confirm it is still
+advancing. That is the case an in-screen timer would get wrong.
+
+---
+
 ## 7. Things that are deliberately NOT done yet (don't be surprised)
 
 - **Reworded paraphrases** (very different words but same meaning) may not be caught yet — only

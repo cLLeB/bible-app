@@ -13,6 +13,7 @@ import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
+import { MediaPanel } from "./components/MediaPanel";
 import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
@@ -128,6 +129,9 @@ export default function App() {
               <div className="space-y-4">
                 <div className="card">
                   <SongsPanel />
+                </div>
+                <div className="card">
+                  <MediaPanel />
                 </div>
                 <div className="card">
                   <PdfImport />

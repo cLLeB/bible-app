@@ -21,6 +21,7 @@ pub struct AppState {
     pub listening: Arc<AtomicBool>,      // mic listen loop active?
     pub recording: Arc<AtomicBool>,      // record this service for learning?
     pub remote_running: Arc<AtomicBool>, // LAN remote server started?
+    pub slideshow: Arc<AtomicBool>,      // media slideshow advancing?
     pub cursor: Mutex<Option<Cursor>>,   // currently-presented scripture position
     // Operator corrections: description signature -> chosen verse, so a repeated
     // paraphrase is ranked toward what the operator picked last time.
@@ -1211,6 +1212,23 @@ pub fn set_stage(
     emit_stage(&app, &info)
 }
 
+/// Set the stage monitor's two slots from a handle, for the surfaces that run
+/// off the console's main thread (the media slideshow, the LAN remote).
+pub(crate) fn set_stage_handle(
+    app: &tauri::AppHandle,
+    current: Option<StageSlot>,
+    next: Option<StageSlot>,
+) {
+    let state = app.state::<AppState>();
+    let info = {
+        let Ok(mut s) = state.stage.lock() else { return };
+        s.current = current;
+        s.next = next;
+        s.clone()
+    };
+    let _ = emit_stage(app, &info);
+}
+
 /// Push (or clear, with an empty string) a private message to the platform team.
 #[tauri::command]
 pub fn set_stage_message(
@@ -2309,6 +2327,136 @@ pub fn start_remote(
     crate::remote::start(app, state.remote_running.clone())
 }
 
+// ---- Media library ----
+
+#[tauri::command]
+pub fn list_media(app: tauri::AppHandle) -> Vec<crate::media::MediaItem> {
+    crate::media::list(&app)
+}
+
+/// Add files to the library. Anything that is not an image or a video this can
+/// show is skipped rather than stored, because a library row that cannot be
+/// projected is only a trap for later.
+#[tauri::command]
+pub fn add_media(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<crate::media::MediaItem>, String> {
+    let mut added = 0usize;
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        for path in &paths {
+            let Some(kind) = crate::media::kind_of(path) else { continue };
+            db.add_media(path, &crate::media::title_of(path), kind)
+                .map_err(|e| e.to_string())?;
+            added += 1;
+        }
+    }
+    if added == 0 && !paths.is_empty() {
+        return Err("None of those files are images or videos this can show.".into());
+    }
+    Ok(crate::media::list(&app))
+}
+
+#[tauri::command]
+pub fn remove_media(app: tauri::AppHandle, id: i64) -> Result<Vec<crate::media::MediaItem>, String> {
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.remove_media(id).map_err(|e| e.to_string())?;
+    }
+    Ok(crate::media::list(&app))
+}
+
+#[tauri::command]
+pub fn rename_media(
+    app: tauri::AppHandle,
+    id: i64,
+    title: String,
+) -> Result<Vec<crate::media::MediaItem>, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("A title cannot be empty.".into());
+    }
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.rename_media(id, &title).map_err(|e| e.to_string())?;
+    }
+    Ok(crate::media::list(&app))
+}
+
+#[tauri::command]
+pub fn move_media(
+    app: tauri::AppHandle,
+    id: i64,
+    up: bool,
+) -> Result<Vec<crate::media::MediaItem>, String> {
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.move_media(id, up).map_err(|e| e.to_string())?;
+    }
+    Ok(crate::media::list(&app))
+}
+
+#[tauri::command]
+pub fn project_media(app: tauri::AppHandle, id: i64) -> Result<crate::media::MediaItem, String> {
+    crate::media::present(&app, id)
+}
+
+/// Transport for the video already on screen. All three flags travel together
+/// because they are one picture of how it should be playing.
+#[tauri::command]
+pub fn set_video_playback(
+    app: tauri::AppHandle,
+    paused: bool,
+    muted: bool,
+    looping: bool,
+) -> Result<(), String> {
+    let next = {
+        let state = app.state::<AppState>();
+        let cur = state.current.lock().map_err(|e| e.to_string())?;
+        match &*cur {
+            ProjectionState::Video { src, title, .. } => ProjectionState::Video {
+                src: src.clone(),
+                title: title.clone(),
+                paused,
+                muted,
+                looping,
+            },
+            _ => return Err("No video is on screen.".into()),
+        }
+    };
+    project_via_handle(&app, next)
+}
+
+/// Jump the live video to a position. An instant rather than a condition, so it
+/// travels as its own event instead of living in the projection state.
+#[tauri::command]
+pub fn seek_video(app: tauri::AppHandle, position_ms: i64) -> Result<(), String> {
+    app.emit_to("projection", "video-seek", position_ms.max(0))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn slideshow_running(state: tauri::State<'_, AppState>) -> bool {
+    state.slideshow.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+pub fn start_slideshow(app: tauri::AppHandle, seconds: u64, looping: bool) -> Result<(), String> {
+    let running = app.state::<AppState>().slideshow.clone();
+    crate::media::start_slideshow(app.clone(), running, seconds, looping)
+}
+
+#[tauri::command]
+pub fn stop_slideshow(app: tauri::AppHandle) {
+    let running = app.state::<AppState>().slideshow.clone();
+    crate::media::stop_slideshow(&app, &running);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2406,6 +2554,7 @@ mod tests {
             listening: Arc::new(AtomicBool::new(false)),
             recording: Arc::new(AtomicBool::new(false)),
             remote_running: Arc::new(AtomicBool::new(false)),
+            slideshow: Arc::new(AtomicBool::new(false)),
             cursor: Mutex::new(None),
             learned: Mutex::new(std::collections::HashMap::new()),
             moments: Mutex::new(Vec::new()),

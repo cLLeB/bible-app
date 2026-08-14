@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -46,6 +46,33 @@ export function ProjectionView() {
     ];
     return () => {
       subs.forEach((u) => u.then((f) => f()));
+    };
+  }, []);
+
+  // The live <video>, so transport can reach it without re-mounting the element
+  // (re-mounting would restart playback, which is the one thing a bumper must
+  // not do when the operator only pressed Mute).
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoState = state.kind === "video" ? state : null;
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !videoState) return;
+    if (videoState.paused) {
+      el.pause();
+    } else {
+      // Autoplay can be refused; a caught rejection keeps the window alive.
+      void el.play().catch(() => {});
+    }
+  }, [videoState?.paused, videoState?.src]);
+
+  useEffect(() => {
+    const sub = listen<number>("video-seek", (e) => {
+      const el = videoRef.current;
+      if (el) el.currentTime = Math.max(0, e.payload) / 1000;
+    });
+    return () => {
+      sub.then((f) => f());
     };
   }, []);
 
@@ -104,6 +131,22 @@ export function ProjectionView() {
             style={{ objectFit: "contain" }}
           />
         );
+      case "video":
+        return (
+          <video
+            ref={videoRef}
+            // Keyed on the file so choosing a different video mounts a fresh
+            // element, while mute/loop/pause only update this one.
+            key={state.src}
+            src={convertFileSrc(state.src)}
+            className="absolute inset-0 h-full w-full"
+            style={{ objectFit: "contain", background: "#000000" }}
+            autoPlay
+            playsInline
+            muted={state.muted}
+            loop={state.looping}
+          />
+        );
       case "message":
         return (
           <p className="max-w-6xl whitespace-pre-line" style={bodyCss}>
@@ -143,8 +186,11 @@ export function ProjectionView() {
   }
 
   // Media (image/video) backgrounds are hidden during blackout so the screen
-  // goes truly dark.
-  const media = state.kind === "blackout" ? null : mediaBackground(theme);
+  // goes truly dark, and behind full-screen media, which already covers them.
+  // Decoding a looping background video underneath a playing bumper is work no
+  // one can see, and a church laptop feels it.
+  const coversScreen = state.kind === "video" || state.kind === "image";
+  const media = state.kind === "blackout" || coversScreen ? null : mediaBackground(theme);
 
   // A stable signature of the *content* so the slide fades in only on real slide
   // changes — not on every countdown tick.
@@ -153,6 +199,8 @@ export function ProjectionView() {
       ? `${state.kind}:${state.caption}:${state.text}`
       : state.kind === "image"
         ? `image:${state.src.slice(0, 64)}`
+        : state.kind === "video"
+        ? `video:${state.src}`
         : state.kind === "parallel"
           ? `parallel:${state.caption}:${state.primaryCode}:${state.secondaryCode}`
           : state.kind === "message"
