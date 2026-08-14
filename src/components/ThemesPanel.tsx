@@ -126,7 +126,7 @@ export function ThemesPanel() {
                 borderColor: t.id === activeId ? "var(--accent, #3b82f6)" : "var(--border)",
                 borderWidth: t.id === activeId ? 2 : 1,
               }}
-              title={t.builtIn ? "Built-in — use New to make an editable copy" : "Custom theme"}
+              title={t.builtIn ? "Built-in: use New to make an editable copy" : "Custom theme"}
             >
               <span
                 className="inline-block h-4 w-4 rounded-full border"

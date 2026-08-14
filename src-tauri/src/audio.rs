@@ -458,6 +458,68 @@ mod tests {
             vec![r("Luke", 15, 3), r("Luke", 15, 11), r("Matt", 18, 12)]
         );
     }
+
+    // ---- Which inputs the app will open -------------------------------------
+    // The room microphone is allowed, but only ever on purpose. These tests pin
+    // the line between "the operator asked for the laptop's own mic" and "the
+    // app ended up on it by accident", because the second one looks exactly like
+    // working from the operator's chair.
+
+    use super::{is_machine_microphone, resolve_input, split_inputs};
+
+    #[test]
+    fn the_laptop_mic_is_told_apart_from_a_line_in_on_the_same_chip() {
+        // Its own microphone, however the driver names it.
+        assert!(is_machine_microphone("Microphone Array (Realtek(R) Audio)"));
+        assert!(is_machine_microphone("Internal Microphone"));
+        assert!(is_machine_microphone("Microphone (HD Webcam C270)"));
+        // A line-in on the onboard chip is a perfectly good desk feed and must
+        // survive: blocking it would kill a connection route we recommend.
+        assert!(!is_machine_microphone("Line In (Realtek(R) Audio)"));
+        assert!(!is_machine_microphone("Stereo Mix (Realtek(R) Audio)"));
+        assert!(!is_machine_microphone("USB Audio CODEC"));
+        assert!(!is_machine_microphone("XENYX Q802USB"));
+    }
+
+    #[test]
+    fn desk_feeds_and_room_mics_are_kept_in_separate_lists() {
+        // They are never merged into one list. A desk feed must never be one
+        // careless keystroke away from the room.
+        let all = vec![
+            "Line In (Realtek(R) Audio)".to_string(),
+            "Microphone Array (Realtek(R) Audio)".to_string(),
+            "XENYX Q802USB".to_string(),
+        ];
+        let (desk, room) = split_inputs(all);
+        assert_eq!(desk, vec!["Line In (Realtek(R) Audio)", "XENYX Q802USB"]);
+        assert_eq!(room, vec!["Microphone Array (Realtek(R) Audio)"]);
+    }
+
+    #[test]
+    fn nothing_is_opened_until_an_input_is_chosen() {
+        // No default, still. Not even to the room mic that is now on offer.
+        assert!(resolve_input(None, false).is_err());
+        assert!(resolve_input(Some(""), false).is_err());
+        assert!(resolve_input(None, true).is_err());
+    }
+
+    #[test]
+    fn the_room_mic_opens_only_when_it_was_asked_for() {
+        // Asked for: this is the demonstration, and it is allowed.
+        assert_eq!(resolve_input(Some("Internal Microphone"), true), Ok("Internal Microphone"));
+        // Not asked for: the name alone is not consent. This is the case that
+        // matters — a stale or hand-edited setting naming the laptop mic fails
+        // closed rather than quietly listening to the hall.
+        assert!(resolve_input(Some("Internal Microphone"), false).is_err());
+    }
+
+    #[test]
+    fn the_permission_does_not_leak_onto_the_desk_feed() {
+        // Consent to the room mic is not consent to anything else, and it never
+        // changes how a desk feed is treated.
+        assert_eq!(resolve_input(Some("XENYX Q802USB"), true), Ok("XENYX Q802USB"));
+        assert_eq!(resolve_input(Some("XENYX Q802USB"), false), Ok("XENYX Q802USB"));
+    }
 }
 
 /// Transcribe a clip, emit transcript (final only), and emit new candidates.
@@ -510,7 +572,7 @@ fn transcribe_detect(
     // everything and ends any pending confirmation loop.
     if detections.is_empty() {
         if let Some(dir) = detect::detect_nav_command(&text) {
-            if let Some(payload) = crate::commands::navigate_handle(app, dir) {
+            if let Some(payload) = crate::commands::navigate_handle(app, dir, crate::commands::BY_VOICE) {
                 *pending = None;
                 let _ = app.emit(
                     "verse-candidate",
@@ -530,7 +592,7 @@ fn transcribe_detect(
     // re-project the current scripture in the new translation.
     if tr != prev_tr && detections.is_empty() {
         if let Some((osis, ch, v)) = state.cursor.lock().ok().and_then(|c| c.as_ref().map(|c| (c.book_osis.clone(), c.chapter, c.verse))) {
-            crate::commands::present_coords_handle(app, &osis, ch, v);
+            crate::commands::present_coords_handle(app, &osis, ch, v, crate::commands::BY_VOICE);
         }
     }
 
@@ -843,22 +905,27 @@ pub fn segment_utterances(samples: &[f32]) -> Vec<(f32, Vec<f32>)> {
     out
 }
 
-/// Open the default microphone and stream 16 kHz mono frames down a channel.
-/// Shared by the listen loop and the calibration recorder, so both hear exactly
-/// the same audio path (same device, same resampling, same levels).
-/// The audio inputs this app will accept: a USB audio interface, a mixer's USB output,
-/// a line-in — anything carrying the feed from the sound desk.
+/// Every audio input the machine offers, split into the two kinds — because they are
+/// two different things and must never be presented as one list.
 ///
-/// The machine's own microphone is not among them, and is not offered. It hears the
-/// hall: the loudspeakers, the congregation, the room. Feeding the app that and calling
-/// it listening would look, from the operator's chair, exactly like it was working.
-pub fn input_devices() -> Vec<String> {
+/// A *desk feed* is what this app is for: a USB audio interface, a mixer's USB output,
+/// a line-in, anything carrying the preacher's own microphone already mixed, with no
+/// room in it. That is the signal it was built and measured against.
+///
+/// A *room microphone* is the machine's own: it hears the hall, the loudspeakers and
+/// the congregation. It is offered — it is the quickest way to show someone that the
+/// app really does hear speech and find the verse — but only ever as its own thing,
+/// asked for by name. See `resolve_input`.
+pub fn input_devices() -> (Vec<String>, Vec<String>) {
     let host = cpal::default_host();
-    host.input_devices()
-        .map(|ds| {
-            ds.filter_map(|d| d.name().ok()).filter(|n| !is_machine_microphone(n)).collect()
-        })
-        .unwrap_or_default()
+    let all: Vec<String> =
+        host.input_devices().map(|ds| ds.filter_map(|d| d.name().ok()).collect()).unwrap_or_default();
+    split_inputs(all)
+}
+
+/// Sort device names into (desk feeds, room microphones), order preserved.
+pub fn split_inputs(all: Vec<String>) -> (Vec<String>, Vec<String>) {
+    all.into_iter().partition(|n| !is_machine_microphone(n))
 }
 
 /// Is this the machine's own microphone?
@@ -875,21 +942,54 @@ pub fn is_machine_microphone(name: &str) -> bool {
     is_mic && is_onboard
 }
 
-/// The chosen input. There is deliberately no fallback.
+/// The chosen input: a device name, and whether this machine's own microphone was
+/// explicitly permitted.
 ///
-/// Falling back to "whatever Windows calls the default" means falling back to the
-/// laptop's own microphone — which hears the room, the congregation and the PA, and
-/// none of what this app was built and measured against. Listening to the wrong thing
-/// is worse than not listening: it looks like it is working. So an input that is not
-/// chosen, or not connected, is an error the operator can see and fix.
-fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
+/// They are one value because they must never be separated. A device name that has
+/// arrived from anywhere — an old database, a hand edit, a device that renamed itself —
+/// cannot carry permission with it; permission is a second field the operator sets on
+/// purpose. Threading them as two loose arguments would make "forgot to pass the flag"
+/// a way to open the room mic by accident, and this is the one thing that must not
+/// happen by accident.
+#[derive(Clone, Debug, Default)]
+pub struct Input {
+    /// None = nothing chosen. There is no default.
+    pub name: Option<String>,
+    /// The operator said, in as many words, "yes, the laptop's own microphone".
+    pub room_mic_ok: bool,
+}
+
+/// Decide whether an input may be opened. The whole gate, with no hardware in it, so
+/// the rule can be tested rather than trusted.
+///
+/// There is still deliberately no fallback. Falling back to "whatever Windows calls
+/// the default" means falling back to the laptop's own microphone — which hears the
+/// room, the congregation and the PA. Listening to the wrong thing is worse than not
+/// listening: it looks like it is working.
+///
+/// The room microphone is reachable, but only with `room_mic_ok` — a separate, explicit
+/// opt-in that the operator makes once, held apart from the device name. Holding the two
+/// apart is the point: a stale or hand-edited setting that names the laptop's microphone
+/// fails closed instead of quietly listening to the hall.
+pub fn resolve_input(name: Option<&str>, room_mic_ok: bool) -> Result<&str, String> {
     let want = name
         .filter(|n| !n.is_empty())
         .ok_or("No sound input chosen. Pick the sound-desk feed under Live listening → Sound input.")?;
-    // Not even if someone names it by hand: this app is fed from the desk.
-    if is_machine_microphone(want) {
-        return Err("This machine's own microphone hears the room, not the preacher. Use the feed from the sound desk.".to_string());
+    if is_machine_microphone(want) && !room_mic_ok {
+        return Err(
+            "This machine's own microphone hears the room, not the preacher. Choose the feed \
+             from the sound desk — or, to demonstrate the app, pick it again under \
+             \"Demonstration only\"."
+                .to_string(),
+        );
     }
+    Ok(want)
+}
+
+/// The chosen input, opened. Errors the operator can see and fix: not chosen, not
+/// permitted, or not plugged in.
+fn pick_device(input: &Input) -> Result<cpal::Device, String> {
+    let want = resolve_input(input.name.as_deref(), input.room_mic_ok)?;
     let host = cpal::default_host();
     if let Ok(mut devices) = host.input_devices() {
         if let Some(d) = devices.find(|d| d.name().map(|n| n == want).unwrap_or(false)) {
@@ -899,12 +999,10 @@ fn pick_device(name: Option<&str>) -> Result<cpal::Device, String> {
     Err(format!("The sound input \"{want}\" is not connected."))
 }
 
-
-
 /// Listen on `device` for a few moments and report the loudest level heard, so the
 /// operator can confirm the desk feed is actually arriving before the service.
-pub fn input_level(device: Option<&str>, secs: f32) -> Result<f32, String> {
-    let (stream, rx) = open_mic(device)?;
+pub fn input_level(input: &Input, secs: f32) -> Result<f32, String> {
+    let (stream, rx) = open_mic(input)?;
     let deadline = Instant::now() + Duration::from_secs_f32(secs);
     let mut peak = 0.0f32;
     while Instant::now() < deadline {
@@ -916,8 +1014,8 @@ pub fn input_level(device: Option<&str>, secs: f32) -> Result<f32, String> {
     Ok(peak)
 }
 
-fn open_mic(name: Option<&str>) -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
-    let device = pick_device(name)?;
+fn open_mic(input: &Input) -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>), String> {
+    let device = pick_device(input)?;
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
@@ -989,9 +1087,9 @@ fn build_stream(
 /// Returns None if nobody spoke before `wait_secs`.
 pub fn record_one_utterance(
     wait_secs: u64,
-    device: Option<&str>,
+    input: &Input,
 ) -> Result<Option<Vec<f32>>, String> {
-    let (stream, rx) = open_mic(device)?;
+    let (stream, rx) = open_mic(input)?;
     let mut utter: Vec<f32> = Vec::new();
     let mut preroll: Vec<f32> = Vec::new();
     let mut speech_ms = 0f32;
@@ -1046,10 +1144,10 @@ fn run_inner(
     model: &Path,
     binary: &Path,
     decode: stt::Decode,
-    device: Option<&str>,
+    input: &Input,
     mut recorder: Option<crate::sessions::Recorder>,
 ) -> Result<(), String> {
-    let (stream, rx) = open_mic(device)?;
+    let (stream, rx) = open_mic(input)?;
     let _ = app.emit("listen-started", ());
 
     let mut utter: Vec<f32> = Vec::new();
@@ -1187,7 +1285,7 @@ pub fn run_listen_loop(
     model: PathBuf,
     binary: PathBuf,
     decode: stt::Decode,
-    device: Option<String>,
+    input: Input,
     room: crate::learn::Room,
     record: Option<crate::sessions::RecordTarget>,
 ) {
@@ -1208,7 +1306,7 @@ pub fn run_listen_loop(
             None
         }
     });
-    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode, device.as_deref(), recorder) {
+    if let Err(e) = run_inner(&app, &flag, &model, &binary, decode, &input, recorder) {
         let _ = app.emit("listen-error", e);
     }
     flag.store(false, Ordering::SeqCst);

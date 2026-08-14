@@ -90,7 +90,7 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
       </div>
 
       <p className="text-sm text-[var(--muted)]">
-        Pick any recordings of {who || "this speaker"} preaching (MP3, M4A, WAV, FLAC) — the
+        Pick any recordings of {who || "this speaker"} preaching (MP3, M4A, WAV, FLAC). The
         more, the better. The app learns their voice from the scriptures they read aloud.
         Takes a while; stays on this machine.
       </p>
@@ -116,7 +116,7 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
             />
           </div>
           <p className="text-sm text-[var(--muted)]">
-            {progress.percent}% — {progress.stage}
+            {progress.percent}% · {progress.stage}
             {progress.total > 0 ? ` (${progress.done}/${progress.total})` : ""}
             {progress.secondsLeft > 0 ? ` · ${timeLeft(progress.secondsLeft)}` : ""}
           </p>
@@ -138,7 +138,7 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
           </p>
           <ul className="ml-4 list-disc space-y-0.5 text-[var(--muted)]">
             <li>Recognizer: {result.settings}</li>
-            {result.translation && <li>Reads from: {result.translation} — now selected for them</li>}
+            {result.translation && <li>Reads from: {result.translation}, now selected for them</li>}
             <li>Speech threshold for their sound feed: {result.speechAbove.toFixed(3)}</li>
             {result.learnedNames.length > 0 && (
               <li>

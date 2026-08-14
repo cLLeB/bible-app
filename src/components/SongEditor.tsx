@@ -104,7 +104,7 @@ export function SongEditor({ editing, onSaved, onCancel }: SongEditorProps) {
         </div>
 
         <div className="space-y-1">
-          <div className="panel-title">Preview — {preview.length} slide(s)</div>
+          <div className="panel-title">Preview · {preview.length} slide(s)</div>
           <div className="max-h-64 space-y-1 overflow-y-auto">
             {preview.map((slide, i) => (
               <div key={i} className="rounded-lg border p-2" style={{ background: "var(--surface)" }}>

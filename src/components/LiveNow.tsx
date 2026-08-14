@@ -10,7 +10,7 @@ function describe(s: ProjectionState): string {
     case "message":
       return `Message: ${s.text.slice(0, 50)}`;
     case "countdown":
-      return `Countdown${s.label ? ` — ${s.label}` : ""}`;
+      return `Countdown${s.label ? ` · ${s.label}` : ""}`;
     case "logo":
       return "Logo";
     case "blackout":

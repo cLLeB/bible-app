@@ -50,7 +50,7 @@ export function TranslationPicker() {
     >
       {translations.map((t) => (
         <option key={t.code} value={t.code}>
-          {t.code} — {t.name}
+          {t.code} · {t.name}
         </option>
       ))}
     </select>

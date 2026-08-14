@@ -108,12 +108,38 @@ fn compute_nav(
     Ok(res)
 }
 
+/// Who drove a presentation.
+///
+/// The console applies its own changes as it makes them, so it only needs to
+/// hear about the ones it did not cause. Naming the source is what lets it tell
+/// the difference: mirroring a console-driven change back would hand scripture
+/// the keyboard in the middle of a service order that already owns it.
+pub(crate) const BY_CONSOLE: &str = "console";
+pub(crate) const BY_REMOTE: &str = "remote";
+pub(crate) const BY_VOICE: &str = "voice";
+
+/// Record a verse as the presented one: move the cursor and tell the desktop.
+///
+/// Whoever drove the change (laptop, voice, or the phone in the operator's
+/// pocket) the cursor is what next/previous steps from and "Presenting" is what
+/// the operator reads. Both have to follow the wall, or the next tap moves from
+/// a verse nobody is looking at.
+pub(crate) fn mark_presented(app: &tauri::AppHandle, payload: &VersePayload, source: &str) {
+    let state = app.state::<AppState>();
+    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
+    let _ = app.emit(
+        "presenting-changed",
+        serde_json::json!({ "verse": payload, "source": source }),
+    );
+}
+
 /// Present a verse by exact coordinates: project it and set the cursor.
 pub(crate) fn present_coords_handle(
     app: &tauri::AppHandle,
     book_osis: &str,
     chapter: u16,
     verse: u16,
+    source: &str,
 ) -> Option<VersePayload> {
     let state = app.state::<AppState>();
     let tr = state.active_translation();
@@ -122,15 +148,36 @@ pub(crate) fn present_coords_handle(
         db.verse_at(&tr, book_osis, chapter, verse).ok().flatten()
     }?;
     let payload = build_payload(rec);
-    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
     let caption = format!("{} · {}", payload.reference, payload.translation);
     let _ = project_via_handle(app, ProjectionState::Verse { text: payload.text.clone(), caption });
+    mark_presented(app, &payload, source);
     Some(payload)
+}
+
+/// Present a spoken or typed reference: look it up, project it, and record it.
+/// The path the LAN remote takes, so a verse sent from the phone lands exactly
+/// where one presented at the laptop does.
+pub(crate) fn present_reference_handle(
+    app: &tauri::AppHandle,
+    query: &str,
+) -> Result<VersePayload, String> {
+    let payload = {
+        let state = app.state::<AppState>();
+        do_lookup(&state, query)?
+    };
+    let caption = format!("{} · {}", payload.reference, payload.translation);
+    project_via_handle(app, ProjectionState::Verse { text: payload.text.clone(), caption })?;
+    mark_presented(app, &payload, BY_REMOTE);
+    Ok(payload)
 }
 
 /// Move the presented scripture in a direction; returns the new verse (or None
 /// at a boundary / when nothing is presented yet).
-pub(crate) fn navigate_handle(app: &tauri::AppHandle, dir: &str) -> Option<VersePayload> {
+pub(crate) fn navigate_handle(
+    app: &tauri::AppHandle,
+    dir: &str,
+    source: &str,
+) -> Option<VersePayload> {
     let state = app.state::<AppState>();
     let cur = state.cursor.lock().ok().and_then(|c| c.clone())?;
     let tr = state.active_translation();
@@ -139,7 +186,7 @@ pub(crate) fn navigate_handle(app: &tauri::AppHandle, dir: &str) -> Option<Verse
         compute_nav(&db, &tr, &cur, dir).ok().flatten()
     };
     let (osis, ch, v) = target?;
-    present_coords_handle(app, &osis, ch, v)
+    present_coords_handle(app, &osis, ch, v, source)
 }
 
 #[tauri::command]
@@ -149,13 +196,13 @@ pub fn present_coords(
     chapter: u16,
     verse: u16,
 ) -> Result<VersePayload, String> {
-    present_coords_handle(&app, &book_osis, chapter, verse)
+    present_coords_handle(&app, &book_osis, chapter, verse, BY_CONSOLE)
         .ok_or_else(|| "Verse not found".to_string())
 }
 
 #[tauri::command]
 pub fn navigate(app: tauri::AppHandle, dir: String) -> Option<VersePayload> {
-    navigate_handle(&app, &dir)
+    navigate_handle(&app, &dir, BY_CONSOLE)
 }
 
 pub(crate) fn build_payload(rec: crate::db::VerseRecord) -> VersePayload {
@@ -847,36 +894,74 @@ pub fn song_usage_report(
 /// Project the same verse in two translations side by side. Primary is the
 /// active translation; `secondary` is any installed translation code. Missing
 /// secondary text projects an empty column rather than failing.
+///
+/// Shared by the console and the LAN remote, so a comparison started on the
+/// phone leaves the cursor and "Presenting" exactly where one started at the
+/// laptop does.
+pub(crate) fn present_parallel_handle(
+    app: &tauri::AppHandle,
+    book_osis: &str,
+    chapter: u16,
+    verse: u16,
+    secondary: &str,
+    source: &str,
+) -> Result<VersePayload, String> {
+    let (payload, second) = {
+        let state = app.state::<AppState>();
+        let tr = state.active_translation();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let primary = db
+            .verse_at(&tr, book_osis, chapter, verse)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Verse not found".to_string())?;
+        let second = db.verse_at(secondary, book_osis, chapter, verse).map_err(|e| e.to_string())?;
+        (build_payload(primary), second)
+    };
+    let st = ProjectionState::Parallel {
+        primary_text: payload.text.clone(),
+        primary_code: payload.translation.clone(),
+        secondary_text: second.map(|r| r.text).unwrap_or_default(),
+        secondary_code: secondary.to_string(),
+        caption: payload.reference.clone(),
+    };
+    project_via_handle(app, st)?;
+    mark_presented(app, &payload, source);
+    Ok(payload)
+}
+
+/// Compare by reference rather than coordinates. An empty reference means
+/// "whatever is on screen", so the phone's Both works straight after a nav step
+/// without retyping where the preacher already is.
+pub(crate) fn present_parallel_ref_handle(
+    app: &tauri::AppHandle,
+    secondary: &str,
+    reference: &str,
+) -> Result<VersePayload, String> {
+    let state = app.state::<AppState>();
+    let (book_osis, chapter, verse) = if reference.is_empty() {
+        let cur = state
+            .cursor
+            .lock()
+            .ok()
+            .and_then(|c| c.clone())
+            .ok_or_else(|| "Nothing is on screen yet. Project a verse first.".to_string())?;
+        (cur.book_osis, cur.chapter, cur.verse)
+    } else {
+        let v = do_lookup(&state, reference)?;
+        (v.book_osis, v.chapter, v.verse)
+    };
+    present_parallel_handle(app, &book_osis, chapter, verse, secondary, BY_REMOTE)
+}
+
 #[tauri::command]
 pub fn project_parallel(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     book_osis: String,
     chapter: u16,
     verse: u16,
     secondary: String,
 ) -> Result<VersePayload, String> {
-    let tr = state.active_translation();
-    let (primary, second) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        let primary = db
-            .verse_at(&tr, &book_osis, chapter, verse)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Verse not found".to_string())?;
-        let second = db.verse_at(&secondary, &book_osis, chapter, verse).map_err(|e| e.to_string())?;
-        (primary, second)
-    };
-    let payload = build_payload(primary);
-    set_cursor(&state, &payload.book_osis, payload.chapter, payload.verse);
-    let st = ProjectionState::Parallel {
-        primary_text: payload.text.clone(),
-        primary_code: payload.translation.clone(),
-        secondary_text: second.map(|r| r.text).unwrap_or_default(),
-        secondary_code: secondary,
-        caption: payload.reference.clone(),
-    };
-    project(&app, &state, st)?;
-    Ok(payload)
+    present_parallel_handle(&app, &book_osis, chapter, verse, &secondary, BY_CONSOLE)
 }
 
 #[tauri::command]
@@ -1249,13 +1334,15 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
         let who = crate::calibrate::active_profile(&db);
         crate::calibrate::load(&db, &model, &who)
     };
-    let device = {
+    let input = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.get_setting("input_device").filter(|s| !s.is_empty())
+        chosen_input(&db)
     };
     // No input, no listening. Quietly opening the laptop's own microphone would hear
     // the room instead of the preacher and look for all the world like it was working.
-    if device.is_none() {
+    // Opening it because the operator asked for it, to demonstrate the app, is a
+    // different thing — and that is what `Input::room_mic_ok` carries.
+    if input.name.is_none() {
         return Err(
             "Choose the sound input first — the feed from the sound desk, under Live \
              listening → Sound input."
@@ -1321,7 +1408,7 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     let flag = state.listening.clone();
     let app2 = app.clone();
     std::thread::spawn(move || {
-        crate::audio::run_listen_loop(app2, flag, model, binary, decode, device, room, record)
+        crate::audio::run_listen_loop(app2, flag, model, binary, decode, input, room, record)
     });
     Ok(())
 }
@@ -1770,32 +1857,64 @@ pub fn stop_listening(state: tauri::State<'_, AppState>) {
 
 #[tauri::command]
 pub fn audio_inputs(state: tauri::State<'_, AppState>) -> Result<AudioInputs, String> {
-    let chosen = {
+    let input = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.get_setting("input_device")
+        chosen_input(&db)
     };
-    Ok(AudioInputs { chosen, all: crate::audio::input_devices() })
+    let (all, room_mics) = crate::audio::input_devices();
+    // Only true when the app really would open the room mic — same test the audio
+    // path applies, so the warning cannot disagree with what is happening.
+    let on_room_mic = input
+        .name
+        .as_deref()
+        .map(|n| input.room_mic_ok && crate::audio::is_machine_microphone(n))
+        .unwrap_or(false);
+    Ok(AudioInputs { chosen: input.name, all, room_mics, on_room_mic })
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioInputs {
-    /// None = nothing chosen yet. There is no default: see `audio::pick_device`.
+    /// None = nothing chosen yet. There is no default: see `audio::resolve_input`.
     pub chosen: Option<String>,
-    /// Desk feeds only. The machine's own microphone is not offered.
+    /// Feeds from the sound desk — what the app is for.
     pub all: Vec<String>,
+    /// This machine's own microphones, listed apart from the desk feeds and never
+    /// mixed in with them. Choosing one takes a deliberate second step.
+    pub room_mics: Vec<String>,
+    /// Is the app currently pointed at the room rather than the desk? Drives the
+    /// warning the operator can see without going looking for it.
+    pub on_room_mic: bool,
 }
 
+/// The chosen input, read as one thing: the device name and whether the room mic was
+/// permitted. Everything that opens audio goes through here.
+///
+/// The permission lives in its own setting rather than being inferred from the device
+/// name, so that a name arriving by any other route — an old database, a hand edit, a
+/// device that changed its name — cannot grant itself permission to listen to the room.
+fn chosen_input(db: &crate::db::Db) -> crate::audio::Input {
+    crate::audio::Input {
+        name: db.get_setting("input_device").filter(|s| !s.is_empty()),
+        room_mic_ok: db.get_setting("input_room_mic_ok").as_deref() == Some("1"),
+    }
+}
+
+/// Choose the input. `room_mic` is the operator saying, in as many words, "yes, the
+/// laptop's own microphone, I know it hears the room" — it is only honoured for a
+/// device that really is one, and it is cleared the moment anything else is picked.
 #[tauri::command]
 pub fn set_audio_input(
     name: Option<String>,
+    room_mic: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    match name.filter(|n| !n.is_empty()) {
-        Some(n) => db.set_setting("input_device", &n).map_err(|e| e.to_string()),
-        None => db.set_setting("input_device", "").map_err(|e| e.to_string()),
-    }
+    let name = name.filter(|n| !n.is_empty());
+    let ok = room_mic.unwrap_or(false)
+        && name.as_deref().map(crate::audio::is_machine_microphone).unwrap_or(false);
+    db.set_setting("input_room_mic_ok", if ok { "1" } else { "" }).map_err(|e| e.to_string())?;
+    db.set_setting("input_device", name.as_deref().unwrap_or("")).map_err(|e| e.to_string())
 }
 
 /// Listen for a couple of seconds and report the loudest level heard (0..1), so the
@@ -1804,17 +1923,16 @@ pub fn set_audio_input(
 #[tauri::command]
 pub async fn test_audio_input(app: tauri::AppHandle) -> Result<f32, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let device = selected_input(&app)?;
-        crate::audio::input_level(device.as_deref(), 3.0)
+        crate::audio::input_level(&selected_input(&app)?, 3.0)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn selected_input(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+fn selected_input(app: &tauri::AppHandle) -> Result<crate::audio::Input, String> {
     let state = app.state::<AppState>();
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    Ok(db.get_setting("input_device").filter(|s| !s.is_empty()))
+    Ok(chosen_input(&db))
 }
 
 // ---- Learning a preacher from their recordings ------------------------------
@@ -2043,8 +2161,7 @@ pub async fn record_calibration_line(
     tauri::async_runtime::spawn_blocking(move || {
         // Calibrate through the same input the service will use, or the tuning is for
         // a signal that never occurs.
-        let device = selected_input(&app)?;
-        let audio = crate::audio::record_one_utterance(20, device.as_deref())?
+        let audio = crate::audio::record_one_utterance(20, &selected_input(&app)?)?
             .ok_or("Didn't hear anything — check the input and try again.")?;
         let dir = speaker_dir(&app)?;
         let path = dir.join(format!("calib_{index:02}.wav"));
@@ -2182,15 +2299,39 @@ fn read_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
         .collect()
 }
 
-/// Start the LAN phone remote; returns the URL to open on a phone.
+/// Start the LAN phone remote; returns every address a phone might reach it on,
+/// best guess first.
 #[tauri::command]
-pub fn start_remote(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
+pub fn start_remote(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     crate::remote::start(app, state.remote_running.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Presenting a reference is three things at once: put it on the wall, move
+    /// the cursor, and tell the desktop. The LAN remote used to do only the
+    /// first, so the phone changed the screen while "Presenting" and the
+    /// next/previous buttons stayed on the verse before it. A real end-to-end
+    /// check needs a running Tauri app, so this guards the structure instead:
+    /// the remote must go through the shared path rather than looking a verse up
+    /// and projecting it on its own.
+    #[test]
+    fn the_lan_remote_presents_through_the_shared_path() {
+        let remote = include_str!("remote.rs");
+        assert!(
+            remote.contains("present_reference_handle"),
+            "the remote should present references through commands, not by hand"
+        );
+        assert!(
+            !remote.contains("do_lookup("),
+            "the remote looks a verse up itself again, which skips the cursor and the desktop"
+        );
+    }
 
     #[test]
     fn parses_and_strips_spoken_translation() {

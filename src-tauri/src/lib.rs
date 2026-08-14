@@ -17,6 +17,7 @@ pub mod profile_seed;
 pub mod reference;
 pub mod relearn;
 mod remote;
+mod remote_pages;
 mod resolution;
 pub mod sessions;
 mod translations;

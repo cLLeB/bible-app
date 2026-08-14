@@ -5,16 +5,16 @@ This is a friendly checklist for trying out the app by hand. For each area it sa
 Tick things off and jot notes; when you're back, give me the rundown.
 
 > **How to start it:** open a terminal in the project folder and run `npm run tauri dev`.
-> A window titled **"Bible — Operator Console"** opens. That's your control screen.
+> A window titled **"Bible Operator Console"** opens. That's your control screen.
 > A second black **Projection** screen appears the first time you project something
-> (on your second monitor if you have one, otherwise fullscreen on your main screen —
+> (on your second monitor if you have one, otherwise fullscreen on your main screen;
 > press the Windows key or Alt+Tab to get back to the console).
 
 ---
 
 ## 0. Very important context before you start
 
-- **The whole Bible is now loaded — 6 translations** (KJV, WEB, ASV, YLT, BBE, Darby),
+- **The whole Bible is now loaded, in 6 translations** (KJV, WEB, ASV, YLT, BBE, Darby),
   ~31,000 verses each. Every verse should resolve now. The **first launch** after this may take
   a few extra seconds (it builds a search index once); later launches are fast.
 - A **Translation** dropdown (next to "Scripture") lets you switch between the 6 versions.
@@ -23,7 +23,7 @@ Tick things off and jot notes; when you're back, give me the rundown.
 - **Songs:** ~32 classic public-domain hymns come pre-loaded (Amazing Grace, It Is Well, Blessed Assurance, and many more).
 - If something looks frozen, that's usually the speech engine thinking for a second or two.
 
-## 0.5. THE BIG NEW THING — Presentation-mode navigation (test this hard)
+## 0.5. THE BIG NEW THING: Presentation-mode navigation (test this hard)
 
 This is the heart of the project: **getting the right scripture on screen faster than any
 operator could alone.** Once *any* verse is on screen, a green **"Presenting"** bar appears and
@@ -34,11 +34,11 @@ you can fly around scripture:
 - **Jump box** (in the green bar): type `15` + Enter to jump to verse 15 of the current chapter,
   or `4:5` + Enter to jump to chapter 4 verse 5 of the current book.
 - **By voice** (while listening): say **"next verse"**, **"previous verse"**, **"next chapter"**,
-  or **"previous chapter"** and it moves — hands-free.
-- **Instant project:** in the Scripture box, type a reference and just press **Enter** — it goes
+  or **"previous chapter"** and it moves, hands-free.
+- **Instant project:** in the Scripture box, type a reference and just press **Enter**. It goes
   straight to the screen (no extra click). `John 3.16` with a dot works too. Shift+Enter previews
   without projecting.
-- **Recent strip:** recently shown verses appear as little buttons under the Scripture box —
+- **Recent strip:** recently shown verses appear as little buttons under the Scripture box;
   click one to re-project instantly.
 
 **Test the real scenario:** put `John 3:16` on screen (type it + Enter). Now imagine the preacher
@@ -48,6 +48,13 @@ follow along, or say **"next verse"**. This should feel *fast*.
 ---
 
 ## 1. The Live Listening feature (the "magic" one)
+
+**First, give it something to listen to.** Open **Before the service** → *Sound input*.
+For a real service you pick the feed from the sound desk. To try it at a desk with no
+cable, open the group headed **"Demonstration only (hears the room, not the preacher)"**,
+pick this laptop's own microphone, and press **Use it to demonstrate**. The app will
+show a `room mic` badge until you choose something else. That badge is meant to stay
+up, so nobody runs a live service on the room by accident.
 
 **What to do:** Click **● Start listening**. Allow microphone access if Windows asks.
 Speak clearly, then pause for about a second and a half. Try:
@@ -140,26 +147,47 @@ clicked into. That's intentional so they don't fight each other.
 
 ---
 
-## 5. Display controls (bottom of the console)
+## 5. Live and Prepare tabs
 
-**What to do / see:**
+The console is split in two, using the tabs next to the logo:
+
+- **Live** — what you touch while a service is running: the presenter, listening and detected
+  verses, scripture lookup, the service order, and the display controls.
+- **Prepare** — what you set up beforehand: songs, PDF/PowerPoint import, outputs (stage
+  display, phone remote, OBS), themes, and projector control. **Planning Center import** and
+  **Song usage (CCLI)** are tucked inside a collapsed **Admin & integrations** section at the
+  bottom — most churches never need either.
+
+**What to check:** the tab you were last on is remembered when you close and reopen the app,
+and the **"On screen" bar** stays visible on both tabs so you always know what the congregation
+is seeing.
+
+### Display controls (Live tab)
 - **Blank** (black "ready" screen), **Blackout** (fully black), **Logo** (a simple logo screen).
 - **Message:** type an announcement → **Show** → it appears big on screen.
 - **Countdown:** set minutes + a label → **Start** → a live ticking countdown appears on screen
   (great for "service starts in 5:00").
-- **Font** slider and **Theme** (Dark / Light / Sepia) change how the projection looks — you
-  should see the projection screen update live.
+- **Font** slider changes how big the projected text is — the projection screen updates live.
+  (Theme and backgrounds are on the Prepare tab.)
+
+### Outputs (Prepare tab)
 - **Stage display:** opens a third window with a big **clock** and whatever's currently on
   screen — meant for a screen the preacher/musicians can see.
-- **Phone remote:** click it → a web address appears (like `http://192.168.x.x:8787`). Open
-  that on your **phone (same Wi-Fi)** → you can type a reference and project it, or blank the
-  screen, from your phone. Fully offline.
+- **Phone remote:** click it → an address (like `http://192.168.x.x:8787`) **and a six-character
+  pairing code** appear. On your phone (same Wi-Fi) open the address, enter the code once, and
+  the phone remembers it. The code stops anyone else on the network projecting to your screen,
+  and it changes each time the app restarts. Fully offline.
 - **OBS / browser output:** the same address with `/projection` on the end
-  (`http://192.168.x.x:8787/projection`) shows the live projection in any browser — you can add
-  it as a Browser Source in OBS for streaming.
+  (`http://192.168.x.x:8787/projection`) shows the live projection in any browser — add it as a
+  Browser Source in OBS. This one needs **no** pairing code, so it keeps working unattended.
 
-**The little "On screen" bar** at the very top of the console always shows what the congregation
-is currently seeing, with a red dot when something is live.
+### What the phone remote can do
+Move through the passage (**◀ verse / verse ▶**, **◀ chapter / chapter ▶**), go to a reference,
+**search by words** and tap a result to project it, **Blank / Blackout / Logo**, start and stop
+**listening**, and put an **alert** over the screen ("Parent needed in the nursery").
+
+It does **not** show the service order or the detected-verse list — those live in the console
+itself, not in the part of the app the phone can reach.
 
 ---
 

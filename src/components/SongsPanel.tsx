@@ -31,7 +31,7 @@ export function SongsPanel() {
     setBackup(text);
     try {
       await navigator.clipboard.writeText(text);
-      setNotice("Songs copied to clipboard — paste into a document to save.");
+      setNotice("Songs copied to clipboard. Paste into a document to save.");
     } catch {
       setNotice("Copy the text below to save your songs.");
     }
@@ -41,7 +41,7 @@ export function SongsPanel() {
     try {
       const songs = parseSongsText(importText);
       if (songs.length === 0) {
-        setError("No songs found — put a title on its own line, then the lyrics.");
+        setError("No songs found. Put a title on its own line, then the lyrics.");
         return;
       }
       const count = await importSongs(JSON.stringify(songs));
@@ -101,7 +101,7 @@ export function SongsPanel() {
         }`}
       >
         {s.title}
-        {s.author ? <span className="text-[var(--muted)]"> — {s.author}</span> : null}
+        {s.author ? <span className="text-[var(--muted)]"> · {s.author}</span> : null}
       </button>
       <button onClick={() => addSongCue(s.id, s.title)} className="icon-btn" title="Add to service order">
         ＋
@@ -157,7 +157,7 @@ export function SongsPanel() {
           {userSongs.length > 0 ? (
             <ul className="space-y-0.5">{userSongs.map((s) => songRow(s, false))}</ul>
           ) : (
-            <p className="text-sm text-gray-400">No songs of yours yet — add one with “＋ New song”.</p>
+            <p className="text-sm text-gray-400">No songs of yours yet. Add one with “＋ New song”.</p>
           )}
 
           {bundled.length > 0 && (
@@ -184,7 +184,7 @@ export function SongsPanel() {
             <textarea readOnly value={backup} rows={6} className="textarea w-full text-sm" />
           )}
           <p className="text-xs text-[var(--muted)]">
-            To add songs, paste them below — one per block, a title on its own line, an
+            To add songs, paste them below: one per block, a title on its own line, an
             optional “by Author” line, then the lyrics. Separate multiple songs with a line of “===”.
           </p>
           <textarea

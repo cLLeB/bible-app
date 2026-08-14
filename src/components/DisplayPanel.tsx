@@ -8,12 +8,15 @@ import {
   setStageMessage,
   setStageTimer,
   showAlert,
-  showStage,
-  startRemote,
   type ProjectionSettings,
 } from "../api";
 import { defaultProjectionSettings } from "../lib/themeDefaults";
 
+/**
+ * The display controls an operator reaches for *during* a service. Setting up
+ * where the projection goes (stage window, phone remote, OBS/NDI) lives in
+ * OutputsPanel on the Prepare tab, because that is done once, not mid-sermon.
+ */
 export function DisplayPanel() {
   const [message, setMessage] = useState("");
   const [stageMsg, setStageMsg] = useState("");
@@ -22,7 +25,6 @@ export function DisplayPanel() {
   const [alertText, setAlertText] = useState("");
   const [alertSecs, setAlertSecs] = useState(10);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
-  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
 
   useEffect(() => {
     getProjectionSettings().then(setSettings).catch(() => {});
@@ -47,31 +49,7 @@ export function DisplayPanel() {
         <button onClick={() => setProjection({ kind: "logo" })} className="btn">
           Logo
         </button>
-        <button onClick={() => showStage()} className="btn">
-          Stage display
-        </button>
-        <button onClick={async () => setRemoteUrl(await startRemote())} className="btn">
-          Phone remote
-        </button>
       </div>
-
-      {remoteUrl && (
-        <div className="space-y-1 text-sm text-gray-600">
-          <p>
-            Phone remote: open <span className="font-mono text-blue-700">{remoteUrl}</span> on a
-            phone on the same Wi-Fi.
-          </p>
-          <p>
-            OBS / browser output: add a Browser Source at{" "}
-            <span className="font-mono text-blue-700">{remoteUrl}/projection</span>.
-          </p>
-          <p>
-            NDI (for vMix / OBS / Resolume): add the Browser Source above in OBS, then turn on
-            OBS&rsquo;s NDI output (Tools → NDI Output Settings → Main Output). vMix and other NDI
-            tools then see the live projection as an NDI source on the network — no extra hardware.
-          </p>
-        </div>
-      )}
 
       <div className="flex gap-2">
         <input

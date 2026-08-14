@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AudioInputPicker } from "./AudioInputPicker";
 import { CalibrationPanel } from "./CalibrationPanel";
@@ -54,6 +54,7 @@ export function ListenPanel() {
   });
   const [useRunSheet, setUseRunSheet] = useState(() => localStorage.getItem("use-run-sheet") === "1");
   const cues = useServiceStore((s) => s.cues);
+  const addVerse = useServiceStore((s) => s.addVerse);
   const runSheetVerses = cues.filter((c) => c.type === "verse").length;
 
   function changeAuto(v: boolean): void {
@@ -78,11 +79,20 @@ export function ListenPanel() {
   // Until a sound input is chosen the app will not listen at all, so that setting is
   // not something to hide behind a fold — it is the whole job.
   const [needsInput, setNeedsInput] = useState(false);
-  useEffect(() => {
+  // Listening to this laptop's own microphone is a legitimate thing to do — it is how
+  // you show someone what the app does — but it must never be a quiet state. The
+  // picker itself lives behind the fold below, so the fact is repeated out here where
+  // the operator is already looking.
+  const [onRoomMic, setOnRoomMic] = useState(false);
+  const refreshInput = useCallback((): void => {
     void audioInputs()
-      .then((i) => setNeedsInput(i.chosen === null))
+      .then((i) => {
+        setNeedsInput(i.chosen === null);
+        setOnRoomMic(i.onRoomMic);
+      })
       .catch(() => undefined);
-  }, [listening]);
+  }, []);
+  useEffect(refreshInput, [listening, refreshInput]);
 
   // The folded-away auto-project rules still decide whether verses appear by
   // themselves, so the header says where they stand without being asked.
@@ -202,7 +212,7 @@ export function ListenPanel() {
       listen("listen-stopped", () => setListening(false)),
       listen("listen-idle-stop", () => {
         setListening(false);
-        setError("Stopped listening after 20 minutes of silence — click to start again.");
+        setError("Stopped listening after 20 minutes of silence. Click to start again.");
       }),
       listen<string>("listen-error", (e) => setError(e.payload)),
     ];
@@ -277,7 +287,7 @@ export function ListenPanel() {
         {consent && (
           <label
             className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-            title="Record this service to improve the profile — stays on this machine. Set before starting."
+            title="Record this service to improve the profile; stays on this machine. Set before starting."
           >
             <input
               type="checkbox"
@@ -343,39 +353,57 @@ export function ListenPanel() {
               <span className="text-sm text-[var(--faint)]">Detected references appear here.</span>
             ) : (
               candidates.map((c, i) => (
-                <button
+                // Two controls, not one: tapping the body projects the verse,
+                // while ＋ Service only queues it. A button cannot be nested
+                // inside a button, so the row is a container rather than the
+                // single big button it used to be.
+                <div
                   key={`${c.verse.reference}-${i}`}
-                  onClick={() => pick(c.verse)}
-                  className="pick-hover block w-full rounded border p-2 text-left"
+                  className="flex items-stretch gap-1 rounded border"
                   style={{ borderColor: "var(--border)" }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{c.verse.reference}</span>
-                    <span className="flex items-center gap-1">
-                      {onRunSheet(cues, c.verse) && (
+                  <button
+                    onClick={() => pick(c.verse)}
+                    className="pick-hover min-w-0 flex-1 rounded-l p-2 text-left"
+                    title="Project this verse now"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold">{c.verse.reference}</span>
+                      <span className="flex flex-none items-center gap-1">
+                        {onRunSheet(cues, c.verse) && (
+                          <span
+                            className="tint-strong tint-info rounded px-1.5 py-0.5 text-[10px]"
+                            title="This chapter is on the run sheet"
+                          >
+                            on run sheet
+                          </span>
+                        )}
                         <span
-                          className="tint-strong tint-info rounded px-1.5 py-0.5 text-[10px]"
-                          title="This chapter is on the run sheet"
+                          className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${
+                            c.confidence >= 0.9
+                              ? "tint-good"
+                              : c.confidence >= 0.8
+                                ? "tint-warn"
+                                : "tint-neutral"
+                          }`}
+                          title={`${c.source} match`}
                         >
-                          on run sheet
+                          {Math.round(c.confidence * 100)}% · {c.source}
                         </span>
-                      )}
-                      <span
-                        className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${
-                          c.confidence >= 0.9
-                            ? "tint-good"
-                            : c.confidence >= 0.8
-                              ? "tint-warn"
-                              : "tint-neutral"
-                        }`}
-                        title={`${c.source} match`}
-                      >
-                        {Math.round(c.confidence * 100)}% · {c.source}
                       </span>
-                    </span>
-                  </div>
-                  <div className="line-clamp-2 text-xs text-[var(--muted)]">{c.verse.text}</div>
-                </button>
+                    </div>
+                    <div className="line-clamp-2 text-xs text-[var(--muted)]">{c.verse.text}</div>
+                  </button>
+                  <button
+                    onClick={() => addVerse(c.verse)}
+                    className="pick-hover flex-none rounded-r border-l px-2 text-xs text-[var(--muted)]"
+                    style={{ borderColor: "var(--border)" }}
+                    title={`Add ${c.verse.reference} to the service order`}
+                    aria-label={`Add ${c.verse.reference} to the service order`}
+                  >
+                    ＋
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -389,11 +417,19 @@ export function ListenPanel() {
         <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
           Before the service
           <span className="text-[var(--muted)]">
-            {needsInput ? " — choose the sound input" : " — sound input, auto-project"}
+            {needsInput ? " · choose the sound input" : " · sound input, auto-project"}
           </span>
+          {onRoomMic && (
+            <span
+              className="tint tint-warn ml-2 rounded border px-1.5 py-0.5 text-xs font-normal"
+              title="Listening to this laptop's own microphone, which hears the room. For a service, use the feed from the sound desk."
+            >
+              room mic
+            </span>
+          )}
         </summary>
         <div className="space-y-3 px-3 pb-3">
-          <AudioInputPicker disabled={listening} />
+          <AudioInputPicker disabled={listening} onChanged={refreshInput} />
 
           <div className="space-y-1.5">
             <div className="panel-title">When to project by itself</div>

@@ -81,7 +81,7 @@ export function StageView() {
             )}
           </div>
         ) : (
-          <p className="text-2xl text-neutral-700">— End —</p>
+          <p className="text-2xl text-neutral-700">End of service</p>
         )}
       </div>
     </div>

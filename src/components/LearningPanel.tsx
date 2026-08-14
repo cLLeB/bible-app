@@ -19,7 +19,7 @@ function verdict(p: Proposal): string {
     return `finds ${p.newScore} of ${p.references} references where the current settings find ${p.incumbentScore}`;
   }
   if (p.newAliases.length > 0) {
-    return `no change to the settings — but it learnt ${p.newAliases.length} name${
+    return `no change to the settings, but it learnt ${p.newAliases.length} name${
       p.newAliases.length === 1 ? "" : "s"
     } the app was mishearing`;
   }
@@ -149,7 +149,7 @@ export function LearningPanel() {
               onClick={() => void act(acceptProposal)}
               disabled={busy}
               className="btn btn-sm btn-primary"
-              title="Use these — you can put it back afterwards"
+              title="Use these; you can put it back afterwards"
             >
               Use this
             </button>
@@ -174,7 +174,7 @@ export function LearningPanel() {
             <button
               onClick={() => {
                 dismissed.current = true;
-                setNote("Not now — it will offer again later.");
+                setNote("Not now. It will offer again later.");
               }}
               className="btn btn-sm"
             >

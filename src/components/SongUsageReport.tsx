@@ -39,7 +39,7 @@ export function SongUsageReport() {
 
       {rows && rows.length === 0 && (
         <p className="text-sm text-[var(--faint)]">
-          No songs projected yet — usage is recorded once per song per day.
+          No songs projected yet. Usage is recorded once per song per day.
         </p>
       )}
 

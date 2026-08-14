@@ -1,8 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { navigate, presentCoords, type NavDir, type VersePayload } from "../api";
 import { useLiveStore, useScriptureStore } from "../services";
-import { pushScriptureStage } from "../stage";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -15,28 +13,9 @@ export function ScripturePresenter() {
   const curRef = useRef<VersePayload | null>(null);
   curRef.current = current;
 
-  // Mirror the live scripture verse (and its next verse) onto the stage monitor.
-  // Only when scripture owns the screen — during a service the ServicePanel
-  // drives the stage so "next" reflects the run order, not the next chapter verse.
-  useEffect(() => {
-    if (current && useLiveStore.getState().owner === "scripture") {
-      void pushScriptureStage(current);
-    }
-  }, [current]);
-
-  // Voice navigation projects from the backend; mirror it here so the
-  // presenter's "current" (and keyboard nav) stays in sync with the screen.
-  useEffect(() => {
-    const sub = listen<{ verse: VersePayload; source: string }>("verse-candidate", (e) => {
-      if (e.payload.source === "voice-nav") {
-        useLiveStore.getState().setOwner("scripture");
-        setCurrent(e.payload.verse);
-      }
-    });
-    return () => {
-      sub.then((f) => f());
-    };
-  }, [setCurrent]);
+  // Mirroring the backend (phone remote, voice) into the stores and onto the
+  // stage lives in LiveSync, which is mounted on both tabs. This component only
+  // shows and drives what is already there.
 
   async function go(dir: NavDir): Promise<void> {
     useLiveStore.getState().setOwner("scripture");
@@ -95,7 +74,7 @@ export function ScripturePresenter() {
     <div className="tint tint-current flex flex-wrap items-center gap-2 rounded-xl border p-2.5">
       <span className="chip" style={{ color: "var(--live)" }}>Presenting</span>
       <span className="font-semibold">{current.reference}</span>
-      <span className="hidden flex-1 truncate text-xs text-[var(--muted)] lg:inline">— {current.text}</span>
+      <span className="hidden flex-1 truncate text-xs text-[var(--muted)] lg:inline">· {current.text}</span>
       <div className="ml-auto flex items-center gap-1">
         <button onClick={() => go("prev-chapter")} className="btn btn-sm" title="Previous chapter (PageUp)">⏮ ch</button>
         <button onClick={() => go("prev-verse")} className="icon-btn" title="Previous verse (←)">◀</button>

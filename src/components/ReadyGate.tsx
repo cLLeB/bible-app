@@ -63,7 +63,7 @@ export function ReadyGate({ children }: ReadyGateProps) {
           <h1 className="panel-title">Setup problem</h1>
           <p className="text-sm text-red-500">{error}</p>
           <p className="text-sm text-[var(--muted)]">
-            Some of the library may be missing. You can continue — songs and any
+            Some of the library may be missing. You can continue; songs and any
             translations that did install will still work.
           </p>
           <button className="btn" onClick={() => setError(null)}>
@@ -80,7 +80,7 @@ export function ReadyGate({ children }: ReadyGateProps) {
         <div className="space-y-2 text-center">
           <h1 className="text-lg font-bold tracking-tight">Bible · Operator Console</h1>
           <p className="text-sm text-[var(--muted)]">{status}</p>
-          <p className="text-xs text-[var(--muted)]">First run only — this takes a minute.</p>
+          <p className="text-xs text-[var(--muted)]">First run only. This takes a minute.</p>
         </div>
       </div>
     );

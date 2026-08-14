@@ -193,7 +193,7 @@ export function ServiceReview() {
                         <span className="min-w-0 flex-1">
                           <span className="font-semibold">{m.reference}</span>
                           {m.replaced && (
-                            <span className="text-[var(--muted)]"> — replaced {m.replaced}</span>
+                            <span className="text-[var(--muted)]"> · replaced {m.replaced}</span>
                           )}
                           {m.spoken && (
                             <span className="block truncate text-[var(--muted)]" title={m.spoken}>

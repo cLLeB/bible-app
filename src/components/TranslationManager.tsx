@@ -63,7 +63,7 @@ export function TranslationManager() {
                   {t.licensed && (
                     <span
                       className="tint-strong tint-warn ml-1 rounded px-1 text-[10px]"
-                      title="Copyrighted — for your personal use only, not for distribution"
+                      title="Copyrighted: for your personal use only, not for distribution"
                     >
                       personal
                     </span>

@@ -95,7 +95,7 @@ export function SongLive({ song }: SongLiveProps) {
       <div className="flex items-center gap-2">
         <span className="font-semibold">{song.title}</span>
         <span className="text-xs text-gray-500">
-          — arrow keys advance · Esc/B blanks
+          arrow keys advance · Esc/B blanks
         </span>
       </div>
       <div className="flex gap-2">

@@ -98,7 +98,7 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
   }
 
   async function addWho(): Promise<void> {
-    const name = window.prompt("Name of the speaker (e.g. “Guest — Pastor Mensah”)")?.trim();
+    const name = window.prompt("Name of the speaker (e.g. “Guest: Pastor Mensah”)")?.trim();
     if (name) await changeWho(name);
   }
 
@@ -107,7 +107,7 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
     // Say what this actually does: removing a speaker deletes their recordings too.
     if (
       !window.confirm(
-        `Remove “${who}” — their learned settings and every recording of them on this machine? This cannot be undone.`,
+        `Remove “${who}”, their learned settings and every recording of them on this machine? This cannot be undone.`,
       )
     ) {
       return;
@@ -148,7 +148,7 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
   return (
     <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-        Voice profiles <span className="text-[var(--muted)]">— {who || "speaker"}</span>
+        Voice profiles <span className="text-[var(--muted)]">· {who || "speaker"}</span>
       </summary>
 
       <div className="space-y-3 px-3 pb-3">
@@ -182,7 +182,7 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
         </div>
 
         <p className="text-sm text-[var(--muted)]">
-          Each speaker is tuned on their own — teaching one never affects the others.
+          Each speaker is tuned on their own, so teaching one never affects the others.
           Everything stays on this machine.
         </p>
 

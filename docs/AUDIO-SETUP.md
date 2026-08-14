@@ -40,6 +40,21 @@ Many can run as a USB interface — plug it into the laptop and it shows up as a
 **5. Last resort: the laptop's own microphone.**
 Put it as close to a speaker as you can and expect it to miss more.
 
+## The laptop's own microphone, and when to use it
+
+It is in the *Sound input* list, in its own group headed **"Demonstration only — hears
+the room, not the preacher"**. It is there for one job: showing somebody what the app
+does. No cable, no mixer — open the app, pick it, talk, and watch the verse you quoted
+come up on the screen.
+
+Choosing it takes a second press to confirm, it is never selected by default, and while
+it is in use the app says **"demonstration input — hears the room"** where the operator
+can see it without going looking. That is deliberate. Listening to the wrong thing is
+worse than not listening at all, because from the operator's chair it looks exactly like
+it is working — so the app will do it, but never quietly.
+
+For a service, use the desk.
+
 ## Before the service: press "Test sound"
 
 In *Live listening* → *Sound input*, pick the device and press **Test sound**. It
@@ -53,7 +68,8 @@ listens for three seconds and tells you what is arriving:
 | clipping | Turn the send down. Distortion is as bad as silence. |
 
 If the input is unplugged mid-service, the app says so out loud rather than quietly
-switching to the laptop microphone and pretending to listen.
+switching to the laptop microphone and pretending to listen. There is no fallback of any
+kind: the laptop microphone is only ever used when it was picked on purpose.
 
 ## What the app copes with on its own
 

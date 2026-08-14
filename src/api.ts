@@ -166,7 +166,12 @@ export const setStageMessage = (message: string): Promise<void> =>
 export const peekNext = (): Promise<VersePayload | null> =>
   invoke<VersePayload | null>("peek_next");
 
-export const startRemote = (): Promise<string> => invoke<string>("start_remote");
+/**
+ * Every address a phone might reach the remote on, best guess first. The server
+ * listens on all of them; which one works depends on the network the phone is
+ * sharing, so the operator picks. Opening one is all there is to connecting.
+ */
+export const startRemote = (): Promise<string[]> => invoke<string[]>("start_remote");
 
 /** One item in a Planning Center plan. */
 export interface PlanItem {
@@ -489,14 +494,23 @@ export interface CalibrationResult {
 export interface AudioInputs {
   /** null = nothing chosen. There is no default: the app will not listen until one is. */
   chosen: string | null;
-  /** Desk feeds only — this machine's own microphone is not offered. */
+  /** Feeds from the sound desk — what the app is for. */
   all: string[];
+  /** This machine's own microphones, kept apart from the desk feeds on purpose. */
+  roomMics: string[];
+  /** Is the app pointed at the room right now rather than the desk? */
+  onRoomMic: boolean;
 }
 
 export const audioInputs = (): Promise<AudioInputs> => invoke<AudioInputs>("audio_inputs");
 
-export const setAudioInput = (name: string | null): Promise<void> =>
-  invoke<void>("set_audio_input", { name });
+/**
+ * Choose the input. `roomMic` is the operator saying "yes, this laptop's own
+ * microphone, I know it hears the room" — the backend honours it only for a device
+ * that really is one, and clears it as soon as anything else is picked.
+ */
+export const setAudioInput = (name: string | null, roomMic = false): Promise<void> =>
+  invoke<void>("set_audio_input", { name, roomMic });
 
 /** Listens for ~3s and returns the loudest level heard (0..1). */
 export const testAudioInput = (): Promise<number> => invoke<number>("test_audio_input");

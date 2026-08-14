@@ -241,7 +241,7 @@ export function ServicePanel() {
                   <span>
                     🎵 {cue.title}
                     {i === item && slides.length ? (
-                      <span className="text-gray-500"> — slide {slide + 1}/{slides.length}</span>
+                      <span className="text-gray-500"> · slide {slide + 1}/{slides.length}</span>
                     ) : null}
                   </span>
                 )}
