@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { showStage, startRemote } from "../api";
+import {
+  listDisplays,
+  setOutputDisplay,
+  showStage,
+  startRemote,
+  type DisplayInfo,
+} from "../api";
 
 /** Printed size of the QR, in CSS pixels. */
 const QR_PX = 190;
@@ -16,6 +22,32 @@ export function OutputsPanel() {
   const [qr, setQr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [chosenDisplay, setChosenDisplay] = useState("");
+
+  const loadDisplays = useCallback(async (): Promise<void> => {
+    try {
+      const [found, chosen] = await listDisplays();
+      setDisplays(found);
+      setChosenDisplay(chosen);
+    } catch {
+      /* the picker is an aid; the automatic choice still works without it */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDisplays();
+  }, [loadDisplays]);
+
+  async function pickDisplay(name: string): Promise<void> {
+    setChosenDisplay(name);
+    setError(null);
+    try {
+      await setOutputDisplay(name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   // Scanning the QR just opens the address. The typed address stays on screen
   // underneath: a camera is not always to hand, and a QR that fails to render
@@ -71,6 +103,38 @@ export function OutputsPanel() {
   return (
     <section className="space-y-3">
       <h2 className="panel-title">Outputs</h2>
+
+      {/* Which screen the congregation sees. Named rather than guessed, because
+          "the second monitor" is an enumeration order, not a place. */}
+      <div className="rounded border p-2 text-sm" style={{ borderColor: "var(--border)" }}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-[var(--faint)]">
+            Congregation screen
+          </span>
+          <select
+            className="select ml-auto"
+            style={{ width: "auto" }}
+            value={chosenDisplay}
+            onChange={(e) => void pickDisplay(e.target.value)}
+          >
+            <option value="">Automatic (the screen you are not using)</option>
+            {displays.map((d) => (
+              <option key={d.name} value={d.name}>
+                {d.name} · {d.width}×{d.height}
+                {d.primary ? " (this laptop)" : ""}
+              </option>
+            ))}
+          </select>
+          <button onClick={() => void loadDisplays()} className="btn btn-sm" title="Re-check after plugging in a TV">
+            Refresh
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-[var(--faint)]">
+          {displays.length <= 1
+            ? "Only this laptop's screen is connected, so output opens as a window instead of covering the console. Plug in a TV and press Refresh."
+            : "Output fills that screen and never takes keyboard focus, so you can keep typing here while it is live."}
+        </p>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <button onClick={() => showStage()} className="btn">

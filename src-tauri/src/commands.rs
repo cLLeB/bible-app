@@ -809,22 +809,76 @@ pub fn get_projection(state: tauri::State<'_, AppState>) -> ProjectionState {
 /// The projection window is declared (hidden) in tauri.conf.json, so it loads
 /// index.html at startup exactly like the main window. Here we just position,
 /// size, and reveal it.
+/// Every screen the OS is currently offering.
+pub(crate) fn displays_now(app: &tauri::AppHandle) -> Vec<crate::displays::DisplayInfo> {
+    let Some(win) = app.get_webview_window("projection") else { return Vec::new() };
+    let primary = win.primary_monitor().ok().flatten().and_then(|m| m.name().cloned());
+    win.available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let name = m.name().cloned().unwrap_or_else(|| format!("Display {}", i + 1));
+            let size = m.size();
+            let pos = m.position();
+            crate::displays::DisplayInfo {
+                primary: Some(&name) == primary.as_ref(),
+                name,
+                x: pos.x,
+                y: pos.y,
+                width: size.width,
+                height: size.height,
+            }
+        })
+        .collect()
+}
+
+const OUTPUT_DISPLAY_KEY: &str = "projection:display";
+
+/// The screen the operator picked, or None for automatic.
+fn preferred_display(app: &tauri::AppHandle) -> Option<String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().ok()?;
+    db.get_setting(OUTPUT_DISPLAY_KEY).filter(|s| !s.trim().is_empty())
+}
+
+/// The projection window is declared (hidden) in tauri.conf.json, so it loads
+/// index.html at startup exactly like the main window. Here we place it on the
+/// right screen and reveal it.
+///
+/// Two rules the ordinary church setup depends on. It goes to the screen that
+/// is *not* the operator's, chosen by that property rather than by enumeration
+/// order. And it is never focused: stealing the caret out of the search box on
+/// every cue, and dragging the window onto whatever virtual desktop the
+/// operator is using, is what output windows must not do.
 fn ensure_projection_window(app: &tauri::AppHandle) -> Result<(), String> {
     let win = app
         .get_webview_window("projection")
         .ok_or_else(|| "projection window not found".to_string())?;
 
-    // Move to the second monitor if present, else stay on primary.
-    if let Ok(monitors) = win.available_monitors() {
-        if let Some(second) = monitors.get(1) {
-            let pos = second.position();
-            win.set_position(tauri::PhysicalPosition { x: pos.x, y: pos.y })
+    let displays = displays_now(app);
+    let preferred = preferred_display(app);
+    let want = match preferred.as_deref() {
+        Some(name) => crate::displays::Choice::Named(name),
+        None => crate::displays::Choice::Automatic,
+    };
+    let target = crate::displays::choose(&displays, want);
+
+    if let Some(display) = target {
+        win.set_fullscreen(false).ok();
+        win.set_position(tauri::PhysicalPosition { x: display.x, y: display.y })
+            .map_err(|e| e.to_string())?;
+        if crate::displays::should_fill(Some(display)) {
+            win.set_fullscreen(true).map_err(|e| e.to_string())?;
+        } else {
+            // The operator's own screen: a window they can move and see past,
+            // not a takeover of the console they are working in.
+            win.set_size(tauri::PhysicalSize { width: 960, height: 540 })
                 .map_err(|e| e.to_string())?;
         }
     }
-    win.set_fullscreen(true).map_err(|e| e.to_string())?;
+
     win.show().map_err(|e| e.to_string())?;
-    win.set_focus().ok();
     Ok(())
 }
 
@@ -984,6 +1038,29 @@ pub fn set_projection(
     next: ProjectionState,
 ) -> Result<(), String> {
     project(&app, &state, next)
+}
+
+/// Every screen, with the one output is currently going to marked. Shown to the
+/// operator so choosing a TV is a decision they make rather than a guess the
+/// app makes silently.
+#[tauri::command]
+pub fn list_displays(app: tauri::AppHandle) -> (Vec<crate::displays::DisplayInfo>, String) {
+    let displays = displays_now(&app);
+    (displays, preferred_display(&app).unwrap_or_default())
+}
+
+/// Send output to a named screen. An empty name means automatic: whichever
+/// screen is not the operator's.
+#[tauri::command]
+pub fn set_output_display(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_setting(OUTPUT_DISPLAY_KEY, name.trim()).map_err(|e| e.to_string())?;
+    }
+    // Move immediately: the operator should see the change land, not discover
+    // it at the next cue.
+    ensure_projection_window(&app)
 }
 
 #[tauri::command]

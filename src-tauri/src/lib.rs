@@ -7,6 +7,7 @@ pub mod corrections;
 mod flavor;
 pub mod db;
 pub mod detect;
+pub mod displays;
 mod events;
 pub mod idle;
 pub mod knowledge;
@@ -292,6 +293,8 @@ pub fn run() {
             commands::remove_media,
             commands::rename_media,
             commands::move_media,
+            commands::list_displays,
+            commands::set_output_display,
             commands::list_converters,
             commands::set_converter,
             commands::deck_as_pdf,

@@ -135,6 +135,25 @@ export const moveMedia = (id: number, up: boolean): Promise<MediaLibraryItem[]> 
 export const projectMedia = (id: number): Promise<MediaLibraryItem> =>
   invoke<MediaLibraryItem>("project_media", { id });
 
+/** One screen the operating system is offering. */
+export interface DisplayInfo {
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The screen the desktop lives on: the operator's own. */
+  primary: boolean;
+}
+
+/** Every screen, plus the name the operator chose ("" = automatic). */
+export const listDisplays = (): Promise<[DisplayInfo[], string]> =>
+  invoke<[DisplayInfo[], string]>("list_displays");
+
+/** Send output to a screen by name; empty means automatic. */
+export const setOutputDisplay = (name: string): Promise<void> =>
+  invoke<void>("set_output_display", { name });
+
 /** Office suites on this machine that can convert a deck: [name, path], best first. */
 export const listConverters = (): Promise<[string, string][]> =>
   invoke<[string, string][]>("list_converters");
