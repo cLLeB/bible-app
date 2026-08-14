@@ -14,6 +14,7 @@ import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
 import { MediaPanel } from "./components/MediaPanel";
+import { PreviewPane } from "./components/PreviewPane";
 import { ScripturePresenter } from "./components/ScripturePresenter";
 import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
@@ -95,6 +96,13 @@ export default function App() {
 
         {/* Always visible, on both tabs: what the congregation is seeing right now. */}
         <LiveNow />
+
+        {/* And what it will see next. Staged from Prepare (media) as readily as
+            from Live (scripture), so it sits outside the tab switch too, and
+            renders nothing at all until something is staged. */}
+        <div className="card empty:hidden">
+          <PreviewPane />
+        </div>
 
         {tab === "live" ? (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">

@@ -1,12 +1,15 @@
 import { FormEvent } from "react";
 import { lookupReference } from "../api";
 import { present } from "../present";
+import { usePreviewStore } from "../services";
 import { useLookupStore } from "../store";
 
 export function LookupBar() {
   const { query, setQuery, setResult, setError } = useLookupStore();
 
-  // Enter projects immediately (fastest path). Shift+Enter just previews.
+  // Enter projects immediately (fastest path). Shift+Enter stages it in the
+  // preview pane instead, which is what "preview" meant here all along: the
+  // result card showed the words, the pane shows what the wall will look like.
   async function submit(project: boolean): Promise<void> {
     try {
       const v = await lookupReference(query.trim());
@@ -14,6 +17,10 @@ export function LookupBar() {
       if (project) {
         await present(v);
         setQuery("");
+      } else {
+        usePreviewStore
+          .getState()
+          .stage({ kind: "verse", text: v.text, caption: `${v.reference} · ${v.translation}` });
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));

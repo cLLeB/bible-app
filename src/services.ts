@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { VersePayload } from "./api";
+import type { ProjectionState, VersePayload } from "./api";
 import { usableCues } from "./lib/serviceCues";
 
 export type Cue =
@@ -37,6 +37,24 @@ interface LiveState {
 export const useLiveStore = create<LiveState>((set) => ({
   owner: null,
   setOwner: (owner) => set({ owner }),
+}));
+
+/**
+ * What is staged for the wall but not on it yet.
+ *
+ * Deliberately console-only and not persisted: a preview is the operator's
+ * private working space, and it must never survive a restart into a service
+ * where someone else assumes it is live.
+ */
+interface PreviewState {
+  staged: ProjectionState | null;
+  stage: (next: ProjectionState) => void;
+  clear: () => void;
+}
+export const usePreviewStore = create<PreviewState>((set) => ({
+  staged: null,
+  stage: (staged) => set({ staged }),
+  clear: () => set({ staged: null }),
 }));
 
 // The scripture verse currently being presented (for the nav controller),

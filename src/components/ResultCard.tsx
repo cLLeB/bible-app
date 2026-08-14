@@ -6,12 +6,13 @@ import {
   type TranslationInfo,
 } from "../api";
 import { present } from "../present";
-import { useServiceStore } from "../services";
+import { usePreviewStore, useServiceStore } from "../services";
 import { useLookupStore } from "../store";
 
 export function ResultCard() {
   const { result, error } = useLookupStore();
   const addVerse = useServiceStore((s) => s.addVerse);
+  const stagePreview = usePreviewStore((s) => s.stage);
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
   const [secondary, setSecondary] = useState("");
 
@@ -35,6 +36,19 @@ export function ResultCard() {
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => present(result)} className="btn btn-primary">
           Project
+        </button>
+        <button
+          onClick={() =>
+            stagePreview({
+              kind: "verse",
+              text: result.text,
+              caption: `${result.reference} · ${result.translation}`,
+            })
+          }
+          className="btn"
+          title="Show it in the preview pane without putting it on the screen"
+        >
+          Preview
         </button>
         <button onClick={() => blankProjection()} className="btn">
           Blank

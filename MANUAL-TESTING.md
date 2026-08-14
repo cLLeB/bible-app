@@ -233,6 +233,24 @@ Then build a run order of song → video → verse and step the whole thing with
 
 ---
 
+## 6.6. Preview before live
+
+A **Preview** strip appears under "On screen" as soon as you stage something, on either tab,
+and disappears when you clear it. It shows the item **in the theme that is live right now**,
+so it answers the real question: will this read from the back of the room.
+
+- **Shift+Enter** in the lookup bar stages a verse instead of projecting it (this is the old
+  preview shortcut, now pointed at the pane).
+- **Preview** buttons on a looked-up verse and on any media item do the same.
+- **Go live** projects exactly what you are looking at and clears the pane.
+- Nothing you do in the pane touches the congregation screen until Go live.
+
+Two things to check on purpose: change the theme while something is staged (the preview should
+change with it), and preview a video (it shows the first frame and stays silent — two copies of
+the same clip playing out of step is the last thing you want mid-service).
+
+---
+
 ## 7. Things that are deliberately NOT done yet (don't be surprised)
 
 - **Reworded paraphrases** (very different words but same meaning) may not be caught yet — only

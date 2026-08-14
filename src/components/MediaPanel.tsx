@@ -19,7 +19,7 @@ import {
   type ProjectionState,
 } from "../api";
 import { clampInterval, MEDIA_EXTENSIONS, SLIDESHOW_DEFAULT_SECONDS } from "../lib/media";
-import { useServiceStore } from "../services";
+import { usePreviewStore, useServiceStore } from "../services";
 
 /**
  * The media library, the video transport, and the slideshow.
@@ -38,6 +38,7 @@ export function MediaPanel() {
   const [editing, setEditing] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const addToService = useServiceStore((s) => s.addMedia);
+  const stagePreview = usePreviewStore((s) => s.stage);
 
   useEffect(() => {
     listMedia().then(setItems).catch(() => {});
@@ -222,6 +223,27 @@ export function MediaPanel() {
               className="btn btn-sm"
             >
               Project
+            </button>
+            <button
+              onClick={() =>
+                stagePreview(
+                  m.kind === "video"
+                    ? {
+                        kind: "video",
+                        src: m.path,
+                        title: m.title,
+                        paused: true,
+                        muted: true,
+                        looping: false,
+                      }
+                    : { kind: "image", src: m.path },
+                )
+              }
+              disabled={!m.present}
+              className="btn btn-sm"
+              title="Show it in the preview pane without putting it on the screen"
+            >
+              Preview
             </button>
             <button
               onClick={() => addToService(m.id, m.title, m.kind)}
