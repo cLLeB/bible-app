@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { deckAsPdf, importSlide } from "../api";
+import { deckAsPdf, importSlide, listConverters, setConverter } from "../api";
 import { titleFromPath } from "../lib/media";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -29,6 +29,26 @@ function payload(dataUrl: string): string {
 export function PdfImport() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [converters, setConverters] = useState<[string, string][]>([]);
+
+  useEffect(() => {
+    listConverters().then(setConverters).catch(() => {});
+  }, []);
+
+  /** Let the operator name a converter this machine keeps somewhere unusual. */
+  async function chooseConverter(): Promise<void> {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Converter", extensions: ["exe", ""] }],
+    });
+    if (!picked || Array.isArray(picked)) return;
+    try {
+      setConverters(await setConverter(picked));
+      setStatus(null);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function importDeck(): Promise<void> {
     const picked = await open({
@@ -86,11 +106,28 @@ export function PdfImport() {
         </button>
       </div>
       <p className="text-xs text-[var(--faint)]">
-        PowerPoint (.pptx), OpenDocument (.odp) and PDF. PowerPoint is converted
-        automatically using LibreOffice or PowerPoint if either is installed. Pages become
-        images in Media, so they preview, project, step page by page, join a service order
-        and run in the announcements loop, and they are still there next Sunday.
+        PowerPoint (.pptx), OpenDocument (.odp) and PDF. Pages become images in Media, so
+        they preview, project, step page by page, join a service order and run in the
+        announcements loop, and they are still there next Sunday.
       </p>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {converters.length > 0 ? (
+          <span className="text-[var(--muted)]">
+            PowerPoint converted with <strong>{converters[0][0]}</strong>
+            {converters.length > 1 && ` (+${converters.length - 1} other)`}
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">
+            No office suite found, so .pptx cannot be converted here. Install LibreOffice or
+            ONLYOFFICE, or export the deck to PDF.
+          </span>
+        )}
+        <button onClick={() => void chooseConverter()} className="btn btn-sm">
+          {converters.length > 0 ? "Change" : "Find it myself"}
+        </button>
+      </div>
+
       {status && <p className="text-sm text-[var(--muted)]">{status}</p>}
     </section>
   );

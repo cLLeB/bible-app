@@ -2408,6 +2408,35 @@ pub fn move_media(
     Ok(crate::media::list(&app))
 }
 
+/// Which office suites on this machine can convert a deck, best first. Shown to
+/// the operator so "PowerPoint import doesn't work" is answerable at the desk
+/// rather than by guesswork.
+#[tauri::command]
+pub fn list_converters(app: tauri::AppHandle) -> Vec<(String, String)> {
+    crate::media::converters(&app)
+        .into_iter()
+        // A bare program name is a hopeful PATH lookup, not a found install, so
+        // it is not worth reporting as one.
+        .filter(|c| c.program.is_absolute())
+        .map(|c| (c.name, c.program.to_string_lossy().to_string()))
+        .collect()
+}
+
+/// Point the app at a converter it did not find. An empty path clears it.
+#[tauri::command]
+pub fn set_converter(app: tauri::AppHandle, path: String) -> Result<Vec<(String, String)>, String> {
+    if !path.trim().is_empty() && crate::media::style_for(std::path::Path::new(path.trim())).is_none()
+    {
+        return Err(
+            "That program is not one this app knows how to drive. Choose soffice (LibreOffice \
+             or OpenOffice) or x2t (ONLYOFFICE)."
+                .into(),
+        );
+    }
+    crate::media::set_converter_override(&app, &path)?;
+    Ok(list_converters(app))
+}
+
 /// Turn a PowerPoint or OpenDocument deck into a PDF we can render, and return
 /// its path. A PDF is handed straight back, so callers need not care which the
 /// operator chose.

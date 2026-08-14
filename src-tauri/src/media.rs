@@ -163,20 +163,148 @@ pub fn needs_conversion(path: &str) -> bool {
     }
 }
 
-/// LibreOffice, wherever this machine keeps it.
-fn find_soffice() -> Option<std::path::PathBuf> {
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
-        if let Ok(base) = std::env::var(var) {
-            candidates.push(Path::new(&base).join("LibreOffice/program/soffice.exe"));
+/// How a given converter binary wants to be driven.
+///
+/// Every office suite solves this differently, and the differences are not
+/// cosmetic: one takes an output *directory* and names the file itself, another
+/// takes the output path, and a third has no command line at all and must be
+/// automated as an application.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConvertStyle {
+    /// `soffice --headless --convert-to pdf --outdir <dir> <file>`, which names
+    /// the result `<stem>.pdf` itself. LibreOffice, OpenOffice, and the several
+    /// suites that ship a compatible `soffice`.
+    SofficeHeadless,
+    /// `x2t <from> <to>`. ONLYOFFICE's own converter core.
+    X2t,
+    /// No command line: the application is driven through COM. The string is
+    /// the ProgID. Microsoft PowerPoint and WPS Presentation both answer to
+    /// `Presentations.Open` / `SaveAs(..., 32)`.
+    WindowsCom(&'static str),
+}
+
+/// A converter this machine could use.
+#[derive(Debug, Clone)]
+pub struct Converter {
+    pub name: String,
+    pub program: std::path::PathBuf,
+    pub style: ConvertStyle,
+}
+
+/// Where each known suite keeps its converter, relative to a Windows program
+/// directory. Order is preference order: headless command-line converters come
+/// before COM automation, which launches a real application and can stall on a
+/// dialog nobody is there to dismiss on a Sunday morning.
+const WINDOWS_CANDIDATES: &[(&str, &str, ConvertStyle)] = &[
+    ("LibreOffice", "LibreOffice/program/soffice.exe", ConvertStyle::SofficeHeadless),
+    ("ONLYOFFICE", "ONLYOFFICE/DesktopEditors/converter/x2t.exe", ConvertStyle::X2t),
+    ("OpenOffice", "OpenOffice 4/program/soffice.exe", ConvertStyle::SofficeHeadless),
+    ("OpenOffice", "OpenOffice/program/soffice.exe", ConvertStyle::SofficeHeadless),
+    ("WPS Office", "Kingsoft/WPS Office/office6/wpp.exe", ConvertStyle::WindowsCom("Kwpp.Application")),
+];
+
+/// Non-Windows locations, so this is not silently a Windows-only feature.
+const UNIX_CANDIDATES: &[(&str, &str, ConvertStyle)] = &[
+    ("LibreOffice", "/usr/bin/soffice", ConvertStyle::SofficeHeadless),
+    ("LibreOffice", "/usr/local/bin/soffice", ConvertStyle::SofficeHeadless),
+    (
+        "LibreOffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        ConvertStyle::SofficeHeadless,
+    ),
+    ("ONLYOFFICE", "/opt/onlyoffice/desktopeditors/converter/x2t", ConvertStyle::X2t),
+    (
+        "ONLYOFFICE",
+        "/Applications/ONLYOFFICE.app/Contents/MacOS/converter/x2t",
+        ConvertStyle::X2t,
+    ),
+];
+
+/// Infer how to drive a binary the operator pointed at by hand. Only the file
+/// name can be trusted here: the operator may have installed anywhere.
+pub fn style_for(program: &Path) -> Option<ConvertStyle> {
+    let stem = program.file_stem()?.to_str()?.to_lowercase();
+    match stem.as_str() {
+        "soffice" | "soffice.bin" | "libreoffice" => Some(ConvertStyle::SofficeHeadless),
+        "x2t" => Some(ConvertStyle::X2t),
+        _ => None,
+    }
+}
+
+/// Every converter this machine can offer, best first.
+///
+/// A church buys whatever office suite it buys, and a feature that works only
+/// for LibreOffice users is a feature most churches do not have. So the known
+/// suites are all looked for, and an operator whose install is somewhere else
+/// entirely can name the binary themselves.
+pub fn converters(app: &AppHandle) -> Vec<Converter> {
+    let mut found: Vec<Converter> = Vec::new();
+
+    // The operator's own choice outranks anything discovered.
+    if let Some(chosen) = converter_override(app) {
+        let path = std::path::PathBuf::from(&chosen);
+        if path.exists() {
+            if let Some(style) = style_for(&path) {
+                found.push(Converter { name: "Chosen converter".into(), program: path, style });
+            }
         }
     }
-    // A PATH install, and the usual Linux/macOS locations, so this is not
-    // silently Windows-only.
-    candidates.push("soffice".into());
-    candidates.push("/usr/bin/soffice".into());
-    candidates.push("/Applications/LibreOffice.app/Contents/MacOS/soffice".into());
-    candidates.into_iter().find(|p| p.to_str() == Some("soffice") || p.exists())
+
+    let mut bases: Vec<String> = Vec::new();
+    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        if let Ok(base) = std::env::var(var) {
+            if !bases.contains(&base) {
+                bases.push(base);
+            }
+        }
+    }
+    for (name, relative, style) in WINDOWS_CANDIDATES {
+        for base in &bases {
+            let path = Path::new(base).join(relative);
+            if path.exists() && !found.iter().any(|c| c.program == path) {
+                found.push(Converter { name: (*name).into(), program: path, style: *style });
+            }
+        }
+    }
+    for (name, absolute, style) in UNIX_CANDIDATES {
+        let path = std::path::PathBuf::from(absolute);
+        if path.exists() && !found.iter().any(|c| c.program == path) {
+            found.push(Converter { name: (*name).into(), program: path, style: *style });
+        }
+    }
+
+    // A suite on PATH, which is how most Linux installs and some Windows ones
+    // look. Existence cannot be tested for a bare name, so it goes last and is
+    // simply attempted.
+    found.push(Converter {
+        name: "LibreOffice (PATH)".into(),
+        program: "soffice".into(),
+        style: ConvertStyle::SofficeHeadless,
+    });
+
+    #[cfg(windows)]
+    found.push(Converter {
+        name: "Microsoft PowerPoint".into(),
+        program: "powershell".into(),
+        style: ConvertStyle::WindowsCom("PowerPoint.Application"),
+    });
+
+    found
+}
+
+const CONVERTER_KEY: &str = "media:converter";
+
+fn converter_override(app: &AppHandle) -> Option<String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().ok()?;
+    db.get_setting(CONVERTER_KEY)
+}
+
+/// Remember a converter the operator picked themselves. An empty path clears it.
+pub fn set_converter_override(app: &AppHandle, path: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.set_setting(CONVERTER_KEY, path.trim()).map_err(|e| e.to_string())
 }
 
 /// Convert a PowerPoint or OpenDocument deck to PDF, which we already render
@@ -210,41 +338,158 @@ pub fn convert_to_pdf(app: &AppHandle, path: &str) -> Result<String, String> {
     }
 
     let mut tried: Vec<String> = Vec::new();
-    if let Some(soffice) = find_soffice() {
-        let result = std::process::Command::new(&soffice)
-            .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
-            .arg(&out_dir)
-            .arg(path)
-            .output();
-        match result {
-            Ok(out) if expected.exists() => {
-                let _ = out;
+    for converter in converters(app) {
+        match run_converter(&converter, path, &out_dir, &expected) {
+            Ok(()) if expected.exists() => {
                 let found = expected.to_string_lossy().to_string();
                 allow_path(app, &found);
                 return Ok(found);
             }
-            Ok(out) => tried.push(format!(
-                "LibreOffice ran but produced nothing ({})",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )),
-            Err(e) => tried.push(format!("LibreOffice could not be started ({e})")),
+            Ok(()) => tried.push(format!("{} ran but produced nothing", converter.name)),
+            Err(e) => tried.push(format!("{}: {e}", converter.name)),
         }
     }
 
-    #[cfg(windows)]
-    if let Err(e) = convert_with_powerpoint(path, &expected) {
-        tried.push(e);
-    } else if expected.exists() {
-        let found = expected.to_string_lossy().to_string();
-        allow_path(app, &found);
-        return Ok(found);
-    }
-
-    let detail = if tried.is_empty() { String::new() } else { format!(" ({})", tried.join("; ")) };
+    let detail = if tried.is_empty() { String::new() } else { format!(" Tried: {}.", tried.join("; ")) };
     Err(format!(
-        "This machine has no PowerPoint converter{detail}. Install LibreOffice (free) or \
-         PowerPoint, or export the deck to PDF and import that."
+        "No office suite on this machine could convert that deck.{detail} Install LibreOffice \
+         or ONLYOFFICE (both free), point the app at a converter you already have, or export \
+         the deck to PDF and import that."
     ))
+}
+
+/// Drive one converter in whichever way it expects.
+fn run_converter(
+    converter: &Converter,
+    input: &str,
+    out_dir: &Path,
+    out_file: &Path,
+) -> Result<(), String> {
+    match converter.style {
+        ConvertStyle::SofficeHeadless => {
+            let mut cmd = std::process::Command::new(&converter.program);
+            cmd.args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
+                .arg(out_dir)
+                .arg(input);
+            run(cmd, &converter.program)
+        }
+        ConvertStyle::X2t => {
+            // Measured, not assumed: the bare `x2t <in> <out>` form fails with
+            // exit 89 and no output file. What works is the documented task
+            // file, and it must name the font cache ONLYOFFICE's own editor
+            // generates — without real fonts there is nothing to draw a PDF
+            // with. Same deck, same binary: 89 and nothing, versus a PDF.
+            let params = write_x2t_params(&converter.program, input, out_file, out_dir)?;
+            let mut cmd = std::process::Command::new(&converter.program);
+            cmd.arg(&params);
+            // x2t loads its own libraries from beside itself, so it has to be
+            // run from its own directory rather than from ours.
+            if let Some(dir) = converter.program.parent() {
+                cmd.current_dir(dir);
+            }
+            run(cmd, &converter.program)
+        }
+        ConvertStyle::WindowsCom(prog_id) => convert_with_com(prog_id, input, out_file),
+    }
+}
+
+/// ONLYOFFICE's PDF format id, from its own format table.
+const X2T_FORMAT_PDF: u32 = 513;
+
+/// Write the task file x2t actually wants, and return its path.
+///
+/// The paths are all derived from the converter binary the registry found, so
+/// this works for an install anywhere, not only the default one. The font cache
+/// is looked for where the desktop editor keeps it; when it is missing, x2t is
+/// pointed at a path in our own data directory and builds one there.
+fn write_x2t_params(
+    program: &Path,
+    input: &str,
+    out_file: &Path,
+    work_dir: &Path,
+) -> Result<std::path::PathBuf, String> {
+    // <install>/converter/x2t.exe -> <install>
+    let root = program
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| "converter is in an unexpected place".to_string())?;
+
+    let cached = std::env::var("LOCALAPPDATA")
+        .ok()
+        .map(|local| Path::new(&local).join("ONLYOFFICE/DesktopEditors/data/fonts/AllFonts.js"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| work_dir.join("AllFonts.js"));
+
+    let params = work_dir.join("x2t-task.xml");
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <m_sFileFrom>{from}</m_sFileFrom>
+  <m_sFileTo>{to}</m_sFileTo>
+  <m_nFormatTo>{format}</m_nFormatTo>
+  <m_sFontDir>{fonts}</m_sFontDir>
+  <m_sAllFontsPath>{cache}</m_sAllFontsPath>
+  <m_sThemeDir>{themes}</m_sThemeDir>
+</TaskQueueDataConvert>
+"#,
+        from = xml_escape(input),
+        to = xml_escape(&out_file.to_string_lossy()),
+        format = X2T_FORMAT_PDF,
+        fonts = xml_escape(&root.join("fonts").to_string_lossy()),
+        cache = xml_escape(&cached.to_string_lossy()),
+        themes = xml_escape(&root.join("editors/sdkjs/slide/themes").to_string_lossy()),
+    );
+    std::fs::write(&params, xml).map_err(|e| e.to_string())?;
+    Ok(params)
+}
+
+/// A church deck can be called anything, including "Q&A <live>".
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn run(mut cmd: std::process::Command, program: &Path) -> Result<(), String> {
+    match cmd.output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            let why = String::from_utf8_lossy(&out.stderr);
+            let why = why.trim();
+            Err(if why.is_empty() { format!("exited with {}", out.status) } else { why.into() })
+        }
+        Err(e) => Err(format!("could not start {} ({e})", program.display())),
+    }
+}
+
+/// An office application driven through COM. `32` is the PDF save format, which
+/// Microsoft PowerPoint and WPS Presentation both use.
+#[cfg(windows)]
+fn convert_with_com(prog_id: &str, input: &str, out: &Path) -> Result<(), String> {
+    let script = format!(
+        "$ErrorActionPreference='Stop'; \
+         $app = New-Object -ComObject {prog_id}; \
+         $deck = $app.Presentations.Open('{}', $true, $false, $false); \
+         $deck.SaveAs('{}', 32); $deck.Close(); $app.Quit()",
+        input.replace('\'', "''"),
+        out.to_string_lossy().replace('\'', "''"),
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|e| format!("could not start PowerShell ({e})"))?;
+    if out.exists() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[cfg(not(windows))]
+fn convert_with_com(_prog_id: &str, _input: &str, _out: &Path) -> Result<(), String> {
+    Err("COM automation is Windows only".into())
 }
 
 /// True when `built` exists and is at least as new as `source`.
@@ -255,28 +500,6 @@ fn is_fresh(built: &Path, source: &str) -> bool {
     match (a.modified(), b.modified()) {
         (Ok(built_at), Ok(source_at)) => built_at >= source_at,
         _ => false,
-    }
-}
-
-/// PowerPoint itself, driven through COM. `32` is ppSaveAsPDF.
-#[cfg(windows)]
-fn convert_with_powerpoint(path: &str, out: &Path) -> Result<(), String> {
-    let script = format!(
-        "$ErrorActionPreference='Stop'; \
-         $app = New-Object -ComObject PowerPoint.Application; \
-         $deck = $app.Presentations.Open('{}', $true, $false, $false); \
-         $deck.SaveAs('{}', 32); $deck.Close(); $app.Quit()",
-        path.replace('\'', "''"),
-        out.to_string_lossy().replace('\'', "''"),
-    );
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .map_err(|e| format!("PowerPoint could not be started ({e})"))?;
-    if out.exists() {
-        Ok(())
-    } else {
-        Err(format!("PowerPoint refused the file ({})", String::from_utf8_lossy(&output.stderr).trim()))
     }
 }
 
@@ -550,6 +773,52 @@ mod tests {
         for ext in IMAGE_EXT.iter().chain(VIDEO_EXT.iter()) {
             assert!(ts.contains(&format!("\"{ext}\"")), "{ext} is missing from src/lib/media.ts");
         }
+    }
+
+    #[test]
+    fn each_suite_is_driven_the_way_it_expects() {
+        // These are not interchangeable: soffice takes an output directory and
+        // names the file itself, x2t takes the output path. Driving one like the
+        // other produces no file and no useful error.
+        assert_eq!(style_for(Path::new("C:/x/soffice.exe")), Some(ConvertStyle::SofficeHeadless));
+        assert_eq!(style_for(Path::new("/usr/bin/soffice")), Some(ConvertStyle::SofficeHeadless));
+        assert_eq!(
+            style_for(Path::new("C:/Program Files/ONLYOFFICE/DesktopEditors/converter/x2t.exe")),
+            Some(ConvertStyle::X2t)
+        );
+        // Something we have no idea how to drive must be refused, not guessed at.
+        assert_eq!(style_for(Path::new("C:/x/notepad.exe")), None);
+        assert_eq!(style_for(Path::new("x2t")), Some(ConvertStyle::X2t));
+    }
+
+    #[test]
+    fn headless_converters_are_preferred_over_com_automation() {
+        // COM launches a real application, which can stall on a dialog with
+        // nobody there to dismiss it. It is a fallback, never a first choice.
+        let com_first = WINDOWS_CANDIDATES
+            .iter()
+            .position(|(.., style)| matches!(style, ConvertStyle::WindowsCom(_)));
+        let headless_last = WINDOWS_CANDIDATES
+            .iter()
+            .rposition(|(.., style)| !matches!(style, ConvertStyle::WindowsCom(_)));
+        if let (Some(com), Some(headless)) = (com_first, headless_last) {
+            assert!(headless < com, "a COM engine is being tried before a headless one");
+        }
+        // The suites a church is actually likely to have are all covered.
+        let names: Vec<&str> = WINDOWS_CANDIDATES.iter().map(|(n, ..)| *n).collect();
+        for expected in ["LibreOffice", "ONLYOFFICE", "OpenOffice", "WPS Office"] {
+            assert!(names.contains(&expected), "{expected} is not looked for");
+        }
+    }
+
+    #[test]
+    fn a_deck_name_cannot_break_the_x2t_task_file() {
+        // Church decks are called things like "Q&A <live>". Unescaped, that
+        // produces malformed XML and a conversion that fails for a reason no
+        // operator could ever guess.
+        assert_eq!(xml_escape("Q&A <live>"), "Q&amp;A &lt;live&gt;");
+        assert_eq!(xml_escape(r#"say "yes""#), "say &quot;yes&quot;");
+        assert_eq!(xml_escape("C:/church/ordinary.pptx"), "C:/church/ordinary.pptx");
     }
 
     #[test]

@@ -135,6 +135,14 @@ export const moveMedia = (id: number, up: boolean): Promise<MediaLibraryItem[]> 
 export const projectMedia = (id: number): Promise<MediaLibraryItem> =>
   invoke<MediaLibraryItem>("project_media", { id });
 
+/** Office suites on this machine that can convert a deck: [name, path], best first. */
+export const listConverters = (): Promise<[string, string][]> =>
+  invoke<[string, string][]>("list_converters");
+
+/** Point the app at a converter it did not find; empty clears the override. */
+export const setConverter = (path: string): Promise<[string, string][]> =>
+  invoke<[string, string][]>("set_converter", { path });
+
 /** A deck as something we can render: PowerPoint is converted, PDF passes through. */
 export const deckAsPdf = (path: string): Promise<string> =>
   invoke<string>("deck_as_pdf", { path });
