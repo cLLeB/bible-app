@@ -200,7 +200,7 @@ itself, not in the part of the app the phone can reach.
 
 ---
 
-## 6.5. Media: images, video and the slideshow
+## 6.5. Media: images, video, decks and the announcements loop
 
 On **Prepare → Media**.
 
@@ -209,18 +209,34 @@ On **Prepare → Media**.
   the app database, and it means moving or deleting the original shows up as **File missing**
   on the row rather than as a blank screen mid-service.
 - **Project** puts an item straight on the wall. Click a title to rename it; ▲▼ set the order
-  the slideshow walks; ✕ removes the row and leaves your file alone.
+  the loop walks; ✕ removes the row and leaves your file alone.
 - **Video controls** appear above the library while a video is live: Play/Pause, Restart,
   sound on/off, and Loop. Muting or looping must *not* restart the clip — that is worth
   checking on purpose.
-- **Slideshow** holds each item for the seconds you set and, with Repeat on, runs forever
-  (good for pre-service announcements). It runs **inside the app, not inside a screen**, so
-  it keeps advancing while you switch to Live, open the theme editor, or walk away. Stopping
-  leaves the last slide up rather than blanking.
-- The **phone remote** grew a Media section: tap any item to project it, and there is a
-  Slideshow start/stop button. It is the same slideshow the laptop is running, so starting on
-  one and stopping on the other is correct behaviour, not a bug.
-- A missing file is skipped by a running slideshow instead of stopping it.
+
+**Importing a deck** (Prepare → Slides / PowerPoint): pick a `.pptx`, `.odp` or `.pdf`.
+PowerPoint is converted automatically if LibreOffice or PowerPoint is installed on the
+machine. **Neither is installed on this laptop**, so a `.pptx` here will report exactly that
+and tell you what to install; a PDF works today. Pages land in Media as images, named
+`Deck · 1`, `Deck · 2`, and survive a restart.
+
+There are **two different things** here, and they are deliberately not the same feature:
+
+- **Stepping a deck.** Import a PowerPoint or PDF (below) and project any page. A
+  "Presenting deck" bar appears with Previous/Next page, and those stay **inside that
+  document** rather than wandering into the rest of the library. This is what "slides"
+  means in presentation software.
+- **The announcements loop.** Walks the library on a timer, for the reel that plays before
+  a service. The dwell time governs **images only**. When it reaches a video it holds until
+  the clip actually ends and then moves on, because a three-minute video cut off at eight
+  seconds is not a slideshow. If a video will not decode, the loop gives up on it after 20
+  minutes rather than hanging forever.
+- The loop runs **inside the app, not inside a screen**, so it keeps advancing while you
+  switch to Live, open the theme editor, or walk away. Stopping leaves the last item up
+  rather than blanking, and a missing file is skipped instead of stopping the run.
+- The **phone remote** grew a Media section: tap any item to project it, plus a loop
+  start/stop button. It is the same loop the laptop is running, so starting on one and
+  stopping on the other is correct, not a bug.
 
 - **＋ adds an item to the service order**, so one run sheet can hold songs, scripture and
   video together and the arrow keys walk straight through it. Media cues remember the library

@@ -1,7 +1,9 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { importSlide } from "../api";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { deckAsPdf, importSlide } from "../api";
 import { titleFromPath } from "../lib/media";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -15,6 +17,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  */
 const RENDER_WIDTH = 1920;
 
+/** What the picker accepts. PowerPoint is converted on the way in. */
+const DECK_EXTENSIONS = ["pdf", "pptx", "ppt", "ppsx", "pps", "odp"];
+
 /** Strip the `data:image/png;base64,` prefix the backend does not want. */
 function payload(dataUrl: string): string {
   const comma = dataUrl.indexOf(",");
@@ -24,15 +29,27 @@ function payload(dataUrl: string): string {
 export function PdfImport() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  async function onFile(file: File): Promise<void> {
+  async function importDeck(): Promise<void> {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Presentations", extensions: DECK_EXTENSIONS }],
+    });
+    if (!picked || Array.isArray(picked)) return;
+
     setBusy(true);
-    setStatus("Reading…");
-    const deck = titleFromPath(file.name);
+    const deck = titleFromPath(picked);
     try {
-      const bytes = await file.arrayBuffer();
+      // PowerPoint becomes a PDF first; a PDF is handed straight back, so this
+      // is one action either way and the operator never has to know which.
+      setStatus("Preparing…");
+      const pdfPath = await deckAsPdf(picked);
+
+      // Read it back through the asset protocol, which the backend has just
+      // allowed for this file. No second file-reading permission is needed.
+      const bytes = await (await fetch(convertFileSrc(pdfPath))).arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
+
       for (let i = 1; i <= pdf.numPages; i++) {
         setStatus(`Rendering page ${i} of ${pdf.numPages}…`);
         const page = await pdf.getPage(i);
@@ -63,27 +80,17 @@ export function PdfImport() {
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="panel-title">Slides / PDF</h2>
-        <button className="btn btn-sm" onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? "Importing…" : "Import PDF"}
+        <h2 className="panel-title">Slides / PowerPoint</h2>
+        <button className="btn btn-sm" onClick={() => void importDeck()} disabled={busy}>
+          {busy ? "Importing…" : "Import deck"}
         </button>
       </div>
       <p className="text-xs text-[var(--faint)]">
-        Export a PowerPoint or Keynote deck to PDF, then import it here. Pages become
-        images in Media, so they preview, project, reorder, join a service order and
-        run as a slideshow like anything else, and they are still there next Sunday.
+        PowerPoint (.pptx), OpenDocument (.odp) and PDF. PowerPoint is converted
+        automatically using LibreOffice or PowerPoint if either is installed. Pages become
+        images in Media, so they preview, project, step page by page, join a service order
+        and run in the announcements loop, and they are still there next Sunday.
       </p>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void onFile(f);
-          e.target.value = "";
-        }}
-      />
       {status && <p className="text-sm text-[var(--muted)]">{status}</p>}
     </section>
   );

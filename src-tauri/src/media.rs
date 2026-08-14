@@ -151,6 +151,135 @@ pub fn slides_dir(app: &AppHandle, deck: &str) -> Result<std::path::PathBuf, Str
     Ok(base)
 }
 
+/// Presentation formats that must be converted before we can render them.
+/// PDF is not here: it is the format we render directly.
+const DECK_EXT: &[&str] = &["pptx", "ppt", "odp", "pps", "ppsx"];
+
+/// Does this file need converting before it can be turned into slides?
+pub fn needs_conversion(path: &str) -> bool {
+    match Path::new(path).extension().and_then(|e| e.to_str()) {
+        Some(ext) => DECK_EXT.contains(&ext.to_lowercase().as_str()),
+        None => false,
+    }
+}
+
+/// LibreOffice, wherever this machine keeps it.
+fn find_soffice() -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+        if let Ok(base) = std::env::var(var) {
+            candidates.push(Path::new(&base).join("LibreOffice/program/soffice.exe"));
+        }
+    }
+    // A PATH install, and the usual Linux/macOS locations, so this is not
+    // silently Windows-only.
+    candidates.push("soffice".into());
+    candidates.push("/usr/bin/soffice".into());
+    candidates.push("/Applications/LibreOffice.app/Contents/MacOS/soffice".into());
+    candidates.into_iter().find(|p| p.to_str() == Some("soffice") || p.exists())
+}
+
+/// Convert a PowerPoint or OpenDocument deck to PDF, which we already render
+/// well, and return the PDF's path.
+///
+/// Rendering PowerPoint faithfully means fonts, layouts, shapes and charts:
+/// an engine, not a parser. Rather than bundle hundreds of megabytes into an
+/// installer that is already large, this borrows an engine the machine already
+/// has. Most churches have one of the two. When neither is present the operator
+/// is told exactly what to do instead, because a silent failure here would look
+/// like the app simply refusing their file.
+pub fn convert_to_pdf(app: &AppHandle, path: &str) -> Result<String, String> {
+    if !Path::new(path).exists() {
+        return Err(format!("'{path}' is not there any more."));
+    }
+    let out_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("converted");
+    std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+
+    let stem = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("deck");
+    let expected = out_dir.join(format!("{stem}.pdf"));
+    // A previous conversion of the same deck is reused only if it is newer than
+    // the source, so an edited deck is genuinely re-converted.
+    if is_fresh(&expected, path) {
+        let found = expected.to_string_lossy().to_string();
+        allow_path(app, &found);
+        return Ok(found);
+    }
+
+    let mut tried: Vec<String> = Vec::new();
+    if let Some(soffice) = find_soffice() {
+        let result = std::process::Command::new(&soffice)
+            .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
+            .arg(&out_dir)
+            .arg(path)
+            .output();
+        match result {
+            Ok(out) if expected.exists() => {
+                let _ = out;
+                let found = expected.to_string_lossy().to_string();
+                allow_path(app, &found);
+                return Ok(found);
+            }
+            Ok(out) => tried.push(format!(
+                "LibreOffice ran but produced nothing ({})",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(e) => tried.push(format!("LibreOffice could not be started ({e})")),
+        }
+    }
+
+    #[cfg(windows)]
+    if let Err(e) = convert_with_powerpoint(path, &expected) {
+        tried.push(e);
+    } else if expected.exists() {
+        let found = expected.to_string_lossy().to_string();
+        allow_path(app, &found);
+        return Ok(found);
+    }
+
+    let detail = if tried.is_empty() { String::new() } else { format!(" ({})", tried.join("; ")) };
+    Err(format!(
+        "This machine has no PowerPoint converter{detail}. Install LibreOffice (free) or \
+         PowerPoint, or export the deck to PDF and import that."
+    ))
+}
+
+/// True when `built` exists and is at least as new as `source`.
+fn is_fresh(built: &Path, source: &str) -> bool {
+    let (Ok(a), Ok(b)) = (std::fs::metadata(built), std::fs::metadata(source)) else {
+        return false;
+    };
+    match (a.modified(), b.modified()) {
+        (Ok(built_at), Ok(source_at)) => built_at >= source_at,
+        _ => false,
+    }
+}
+
+/// PowerPoint itself, driven through COM. `32` is ppSaveAsPDF.
+#[cfg(windows)]
+fn convert_with_powerpoint(path: &str, out: &Path) -> Result<(), String> {
+    let script = format!(
+        "$ErrorActionPreference='Stop'; \
+         $app = New-Object -ComObject PowerPoint.Application; \
+         $deck = $app.Presentations.Open('{}', $true, $false, $false); \
+         $deck.SaveAs('{}', 32); $deck.Close(); $app.Quit()",
+        path.replace('\'', "''"),
+        out.to_string_lossy().replace('\'', "''"),
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|e| format!("PowerPoint could not be started ({e})"))?;
+    if out.exists() {
+        Ok(())
+    } else {
+        Err(format!("PowerPoint refused the file ({})", String::from_utf8_lossy(&output.stderr).trim()))
+    }
+}
+
 /// Let the projection window actually load this file.
 ///
 /// The asset protocol is scoped, and the configured scope covers the user's own
@@ -421,6 +550,19 @@ mod tests {
         for ext in IMAGE_EXT.iter().chain(VIDEO_EXT.iter()) {
             assert!(ts.contains(&format!("\"{ext}\"")), "{ext} is missing from src/lib/media.ts");
         }
+    }
+
+    #[test]
+    fn only_formats_needing_an_engine_are_converted() {
+        // PDF is what we render directly, so sending it through a converter
+        // would be a pointless round trip that can only lose fidelity.
+        assert!(!needs_conversion("deck.pdf"));
+        assert!(!needs_conversion("photo.png"));
+        assert!(!needs_conversion("clip.mp4"));
+        for deck in ["Sunday.pptx", "old.PPT", "notes.odp", "show.ppsx"] {
+            assert!(needs_conversion(deck), "{deck} should be converted first");
+        }
+        assert!(!needs_conversion("README"));
     }
 
     #[test]

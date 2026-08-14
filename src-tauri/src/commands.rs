@@ -2408,6 +2408,18 @@ pub fn move_media(
     Ok(crate::media::list(&app))
 }
 
+/// Turn a PowerPoint or OpenDocument deck into a PDF we can render, and return
+/// its path. A PDF is handed straight back, so callers need not care which the
+/// operator chose.
+#[tauri::command]
+pub fn deck_as_pdf(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    if !crate::media::needs_conversion(&path) {
+        crate::media::allow_path(&app, &path);
+        return Ok(path);
+    }
+    crate::media::convert_to_pdf(&app, &path)
+}
+
 /// Store one rendered PDF/deck page as a library image. Called once per page so
 /// a long deck reports progress and a failure names the page that failed.
 #[tauri::command]

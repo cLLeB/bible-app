@@ -292,6 +292,7 @@ pub fn run() {
             commands::remove_media,
             commands::rename_media,
             commands::move_media,
+            commands::deck_as_pdf,
             commands::import_slide,
             commands::step_deck,
             commands::video_ended,

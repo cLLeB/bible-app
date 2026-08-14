@@ -135,6 +135,10 @@ export const moveMedia = (id: number, up: boolean): Promise<MediaLibraryItem[]> 
 export const projectMedia = (id: number): Promise<MediaLibraryItem> =>
   invoke<MediaLibraryItem>("project_media", { id });
 
+/** A deck as something we can render: PowerPoint is converted, PDF passes through. */
+export const deckAsPdf = (path: string): Promise<string> =>
+  invoke<string>("deck_as_pdf", { path });
+
 /** Store one rendered deck page as a library image. */
 export const importSlide = (
   deck: string,
