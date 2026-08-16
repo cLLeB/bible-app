@@ -2629,13 +2629,27 @@ mod tests {
     /// check needs a running Tauri app, so this guards the structure instead:
     /// the remote must go through the shared path rather than looking a verse up
     /// and projecting it on its own.
+    ///
+    /// The same reasoning covers everything else the phone can now put on the
+    /// wall. A song slide projected round the side of `project_slide` would skip
+    /// the stage monitor and the CCLI usage log; a deck stepped by hand would
+    /// leave the console's idea of the live page behind.
     #[test]
     fn the_lan_remote_presents_through_the_shared_path() {
-        let remote = include_str!("remote.rs");
-        assert!(
-            remote.contains("present_reference_handle"),
-            "the remote should present references through commands, not by hand"
-        );
+        let remote = include_str!("remote_api.rs");
+        for (call, why) in [
+            ("present_reference_handle", "references"),
+            ("commands::project_slide", "song slides"),
+            ("media::step_deck", "deck pages"),
+            ("commands::set_video_playback", "video transport"),
+            ("commands::set_stage_message", "notes to the stage"),
+            ("commands::set_font_scale", "text size"),
+        ] {
+            assert!(
+                remote.contains(call),
+                "the remote should present {why} through the shared path, not by hand"
+            );
+        }
         assert!(
             !remote.contains("do_lookup("),
             "the remote looks a verse up itself again, which skips the cursor and the desktop"

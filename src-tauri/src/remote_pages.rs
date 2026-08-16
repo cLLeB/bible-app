@@ -1,5 +1,6 @@
 //! The two pages the LAN server serves: the operator's phone remote, and the
-//! read-only projection mirror used for OBS / browser output.
+//! read-only projection mirror used for OBS / browser output. This module holds
+//! what they share and assembles each from its parts.
 //!
 //! Both poll the app for state. They do it with a *sequential* loop: each cycle
 //! waits for the previous response before scheduling the next, and every request
@@ -11,6 +12,17 @@
 //! mostly CSS and JavaScript, and `format!` would demand every brace in them be
 //! doubled, an easy way to ship subtly broken script that only misbehaves on a
 //! phone. Plain `concat` keeps the source readable and removes the hazard.
+//!
+//! Each page is built once and cached: the markup never varies by request, and a
+//! church laptop has better things to do than rebuild a page per poll.
+
+use std::sync::OnceLock;
+
+use crate::remote_control_js::{
+    BROWSE_JS, MEDIA_JS, POLL_JS, SCREEN_JS, SONGS_JS, TABS_JS, WORD_JS,
+};
+use crate::remote_control_page::head_and_body;
+use crate::remote_mirror_page::{PROJECTION_HTML, PROJECTION_JS, PROJECTION_THEME_JS};
 
 /// Polling and timeout helpers. Shared: a stuck request must never hang a page
 /// forever, whichever page it is.
@@ -34,371 +46,35 @@ async function req(path,opts){
 }
 "#;
 
-const REMOTE_HTML: &str = r#"<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>Bible Remote</title>
-<style>
-/* Light is the same mild brightness as the operator console: an off-white that
-   reads on a phone in a bright hall without glaring in a dark one. The page
-   follows the phone's own appearance setting, and the ☀/☾ button overrides it
-   for the visit. Nothing is stored, so a fresh browser still works on first
-   load. */
-:root{
- color-scheme:light dark;
- --bg:#dfe3ea;--surface:#ffffff;--field:#ffffff;--border:#c4ccd8;
- --text:#172230;--muted:#566072;--head:#1d4ed8;
- --btn:#e2e7ef;--btn-text:#172230;--idle:#b3bcca;--err:#b3261e;
-}
-:root[data-theme="dark"]{
- --bg:#0e1116;--surface:#171c25;--field:#171c25;--border:#232a36;
- --text:#e8eaed;--muted:#7d8798;--head:#9cc4ff;
- --btn:#2b3240;--btn-text:#ffffff;--idle:#3a4250;--err:#ff9b9b;
-}
-@media (prefers-color-scheme:dark){
- :root:not([data-theme="light"]){
-  --bg:#0e1116;--surface:#171c25;--field:#171c25;--border:#232a36;
-  --text:#e8eaed;--muted:#7d8798;--head:#9cc4ff;
-  --btn:#2b3240;--btn-text:#ffffff;--idle:#3a4250;--err:#ff9b9b;
- }
-}
-*{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:12px 12px 32px;background:var(--bg);color:var(--text)}
-h1{font-size:1rem;margin:0;color:var(--head);letter-spacing:.02em}
-.top{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--idle);flex:none}
-.dot.on{background:#31c48d}
-.dot.off{background:#f05252}
-input,select{width:100%;padding:12px;font-size:16px;border-radius:10px;border:1px solid var(--border);background:var(--field);color:var(--text)}
-button{padding:13px 14px;font-size:15px;border:0;border-radius:10px;color:var(--btn-text);background:var(--btn);font-weight:500}
-button:active{opacity:.65}
-.tbtn{margin-left:auto;flex:none;padding:8px 11px;font-size:14px;line-height:1}
-.row{display:flex;gap:8px;margin-top:8px}
-.row>*{flex:1}
-.go{background:#2563eb;color:#fff}.warn{background:#8f4700;color:#fff}
-.dark{background:#111;color:#fff}.stop{background:#a12b2b;color:#fff}
-.nav button{font-size:17px;padding:16px 8px}
-#now{margin:10px 0;padding:11px 12px;background:var(--surface);border-radius:10px;min-height:2.6rem;font-size:14px;line-height:1.35;border:1px solid var(--border)}
-#err{color:var(--err);font-size:13px;margin:8px 0 0;min-height:1em}
-.sec{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
-.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:6px}
-.sub{margin-top:12px}
-.hits button{display:block;width:100%;text-align:left;margin-top:6px;background:var(--surface);color:var(--text);font-weight:400;font-size:14px;line-height:1.35}
-.hits b{color:var(--head);font-weight:600}
-</style></head><body>
+static REMOTE_PAGE: OnceLock<String> = OnceLock::new();
+static PROJECTION_PAGE: OnceLock<String> = OnceLock::new();
 
-<div id="app">
-  <div class="top">
-    <h1>Bible Remote</h1>
-    <button id="tbtn" class="tbtn" onclick="toggleTheme()" title="Light or dark">☾</button>
-    <span id="dot" class="dot"></span>
-  </div>
-  <div id="now">…</div>
-
-  <div class="lbl">Move through the passage</div>
-  <div class="row nav">
-    <button onclick="nav('prev-verse')">◀ verse</button>
-    <button onclick="nav('next-verse')">verse ▶</button>
-  </div>
-  <div class="row nav">
-    <button onclick="nav('prev-chapter')">◀ chapter</button>
-    <button onclick="nav('next-chapter')">chapter ▶</button>
-  </div>
-
-  <div class="sec">
-    <div class="lbl">Go to a reference</div>
-    <input id="q" placeholder="e.g. John 3:16" autocapitalize="words" autocomplete="off">
-    <div class="row"><button class="go" onclick="go()">Project</button></div>
-    <div id="cmp" class="sub" hidden>
-      <div class="lbl">Compare with</div>
-      <div class="row">
-        <select id="sec"></select>
-        <button onclick="both()" title="Show it in both translations, side by side">Both</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="sec">
-    <div class="lbl">Search by words</div>
-    <input id="s" placeholder="e.g. lamp unto my feet" autocomplete="off">
-    <div class="row"><button onclick="search()">Search</button></div>
-    <div id="hits" class="hits"></div>
-  </div>
-
-  <div class="sec" id="mediasec" hidden>
-    <div class="lbl">Media</div>
-    <div class="row">
-      <button id="ssbtn" onclick="slideshow()">▶ Slideshow</button>
-    </div>
-    <div id="mlist" class="hits"></div>
-  </div>
-
-  <div class="sec">
-    <div class="lbl">Screen</div>
-    <div class="row">
-      <button onclick="disp('blank')">Blank</button>
-      <button class="dark" onclick="disp('blackout')">Blackout</button>
-      <button onclick="disp('logo')">Logo</button>
-    </div>
-  </div>
-
-  <div class="sec">
-    <div class="lbl">Listening</div>
-    <div class="row"><button id="lisbtn" class="go" onclick="listen()">● Start listening</button></div>
-  </div>
-
-  <div class="sec">
-    <div class="lbl">Alert over the screen</div>
-    <input id="alert" placeholder="e.g. Parent needed in the nursery" autocomplete="off">
-    <div class="row">
-      <button class="warn" onclick="sendAlert()">Show alert</button>
-      <button onclick="clearAlert()">Clear</button>
-    </div>
-  </div>
-
-  <p id="err"></p>
-</div>
-
-<script>
-"#;
-
-const REMOTE_JS: &str = r#"
-function $(id){return document.getElementById(id)}
-function err(m){$('err').textContent=m||''}
-
-async function nav(d){
- var r=await req('/api/nav',{method:'POST',body:d});
- err(r.ok?'':(r.status===409?'Nothing is on screen yet. Project a verse first.':await r.text()));
- kick();
+fn build_remote_page() -> String {
+    [
+        head_and_body().as_str(),
+        LOOP_JS,
+        REQ_JS,
+        TABS_JS,
+        WORD_JS,
+        BROWSE_JS,
+        SONGS_JS,
+        MEDIA_JS,
+        SCREEN_JS,
+        POLL_JS,
+    ]
+    .concat()
 }
-async function go(){
- var q=$('q').value.trim(); if(!q)return;
- var r=await req('/api/project',{method:'POST',body:q});
- err(r.ok?'':await r.text()); kick();
-}
-async function disp(kind){
- var r=await req('/api/display',{method:'POST',body:kind});
- err(r.ok?'':await r.text()); kick();
-}
-async function search(){
- var q=$('s').value.trim(); if(!q)return;
- $('hits').textContent='Searching…';
- var r=await req('/api/search',{method:'POST',body:q});
- if(!r.ok){$('hits').textContent='';err(await r.text());return}
- var list=await r.json();
- $('hits').textContent='';
- if(!list.length){$('hits').textContent='No matches.';return}
- list.forEach(function(v){
-  var b=document.createElement('button');
-  var t=document.createElement('b'); t.textContent=v.reference;
-  b.appendChild(t); b.appendChild(document.createTextNode(' · '+v.text));
-  b.onclick=function(){project(v.reference)};
-  $('hits').appendChild(b);
- });
-}
-async function project(ref){
- var r=await req('/api/project',{method:'POST',body:ref});
- err(r.ok?'':await r.text()); kick();
-}
-// Compare: an empty box means the verse already on screen, so Both works
-// straight after stepping through a passage without retyping the reference.
-async function both(){
- var code=$('sec').value; if(!code)return;
- var r=await req('/api/parallel',{method:'POST',body:code+'|'+$('q').value.trim()});
- err(r.ok?'':await r.text()); kick();
-}
-async function loadTranslations(){
- var r=await req('/api/translations'); if(!r.ok)return;
- var d=await r.json();
- var others=(d.list||[]).filter(function(t){return t.code!==d.active});
- if(!others.length)return; // only one installed: nothing to compare against
- var s=$('sec'); s.textContent='';
- others.forEach(function(t){
-  var o=document.createElement('option'); o.value=t.code; o.textContent=t.code; s.appendChild(o);
- });
- $('cmp').hidden=false;
-}
-// Media lives in the app, so the phone only lists it and taps one. The library
-// is loaded once: it changes at the desk before a service, not from here.
-async function loadMedia(){
- var r=await req('/api/media'); if(!r.ok)return;
- var list=await r.json(); if(!list.length)return;
- var box=$('mlist'); box.textContent='';
- list.forEach(function(m){
-  var b=document.createElement('button');
-  var t=document.createElement('b'); t.textContent=m.kind==='video'?'Video':'Image';
-  b.appendChild(t); b.appendChild(document.createTextNode(' · '+m.title));
-  b.onclick=function(){playMedia(m.id)};
-  box.appendChild(b);
- });
- $('mediasec').hidden=false;
-}
-async function playMedia(id){
- var r=await req('/api/media',{method:'POST',body:String(id)});
- err(r.ok?'':await r.text()); kick();
-}
-var sliding=false;
-async function slideshow(){
- var r=await req('/api/slideshow',{method:'POST',body:sliding?'stop':'start'});
- var t=await r.text();
- if(!r.ok){err(t);return}
- setSlideshow(t==='running'); err('');
-}
-function setSlideshow(on){
- sliding=on;
- var b=$('ssbtn');
- b.textContent=on?'■ Stop slideshow':'▶ Slideshow';
- b.className=on?'stop':'';
-}
-function themeIsDark(){
- var t=document.documentElement.getAttribute('data-theme');
- return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
-}
-function paintTheme(){$('tbtn').textContent=themeIsDark()?'☀':'☾'}
-function toggleTheme(){
- document.documentElement.setAttribute('data-theme',themeIsDark()?'light':'dark');
- paintTheme();
-}
-var listening=false;
-async function listen(){
- var r=await req('/api/listen',{method:'POST',body:listening?'stop':'start'});
- var t=await r.text();
- if(!r.ok){err(t);return}
- setListening(t==='listening'); err('');
-}
-function setListening(on){
- listening=on;
- var b=$('lisbtn');
- b.textContent=on?'■ Stop listening':'● Start listening';
- b.className=on?'stop':'go';
-}
-async function sendAlert(){
- var t=$('alert').value.trim(); if(!t)return;
- var r=await req('/api/alert',{method:'POST',body:t});
- err(r.ok?'':await r.text());
-}
-async function clearAlert(){
- await req('/api/alert',{method:'POST',body:''});
- $('alert').value=''; err('');
-}
-
-async function refresh(){
- var r=await req('/api/state');
- if(!r.ok)throw new Error('state');
- var s=await r.json();
- $('now').textContent=s.summary;
- // The laptop is the source of truth for whether it is listening, so a reload,
- // or someone starting it at the laptop, never leaves this button lying.
- if(s.listening!==listening)setListening(s.listening);
- if(s.slideshow!==sliding)setSlideshow(s.slideshow);
- $('dot').className='dot on';
-}
-// Nudge the next poll after an action instead of adding a second timer.
-var pending=false;
-function kick(){if(!pending){pending=true;refresh().catch(function(){}).finally(function(){pending=false})}}
-function start(){
- loop(async function(){
-  try{await refresh()}catch(e){$('dot').className='dot off';throw e}
- },1500);
-}
-$('q').addEventListener('keydown',function(e){if(e.key==='Enter')go()});
-$('s').addEventListener('keydown',function(e){if(e.key==='Enter')search()});
-$('alert').addEventListener('keydown',function(e){if(e.key==='Enter')sendAlert()});
-paintTheme();
-// Older iOS only has the deprecated addListener, and an exception here would
-// take the rest of the page's setup down with it.
-var mq=matchMedia('(prefers-color-scheme: dark)');
-if(mq.addEventListener)mq.addEventListener('change',paintTheme);
-else if(mq.addListener)mq.addListener(paintTheme);
-loadTranslations().catch(function(){});
-loadMedia().catch(function(){});
-start();
-</script></body></html>"#;
-
-const PROJECTION_HTML: &str = r#"<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Projection</title>
-<style>html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif;overflow:hidden}
-#wrap{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 6vw;box-sizing:border-box}
-#body{font-size:5vw;line-height:1.15;white-space:pre-line;max-width:90vw}
-#cap{font-size:2.2vw;color:#bbb;margin-top:4vh}</style></head>
-<body><div id="wrap"><div id="body"></div><div id="cap"></div></div>
-<script>
-"#;
-
-/// The mirror's half of the theme, kept in step with `src/lib/theme.ts`: the
-/// same background, colours, weight and auto-fit rules the congregation screen
-/// uses. Without this a sepia service still mirrors as white on black, which is
-/// wrong on a phone and wrong again in an OBS scene.
-const PROJECTION_THEME_JS: &str = r#"
-var theme=null,scale=1;
-function bgCss(b){
- if(b.kind==='gradient')return 'linear-gradient('+b.angle+'deg,'+b.color+','+b.color2+')';
- // Image and video backgrounds are files on the laptop that a phone on the LAN
- // cannot read. The theme's base colour is what sits behind them anyway.
- return b.color;
-}
-function applyTheme(){
- if(!theme)return;
- var t=theme.text,b=document.getElementById('body'),c=document.getElementById('cap');
- // Blackout means dark, whatever the theme says.
- var dark=cur&&cur.kind==='blackout';
- var paint=dark?'#000':bgCss(theme.background);
- document.documentElement.style.background=paint;
- document.body.style.background=paint;
- var shadow=t.shadow?'0 2px 8px rgba(0,0,0,0.55)':'none';
- b.style.color=t.color;b.style.fontFamily=t.fontFamily;b.style.fontWeight=t.weight;
- b.style.textTransform=t.uppercase?'uppercase':'none';b.style.textShadow=shadow;
- c.style.color=t.captionColor;c.style.fontFamily=t.fontFamily;c.style.textShadow=shadow;
- c.style.fontSize=(2.2*scale)+'vw';
- document.getElementById('wrap').style.textAlign=t.align;
-}
-loop(async function(){
- var r=await timedFetch('/api/appearance');
- var s=await r.json();
- if(s&&s.theme){theme=s.theme;scale=s.fontScale||1;applyTheme();render();}
-},2000);
-"#;
-
-const PROJECTION_JS: &str = r#"
-function fmt(ms){var t=Math.max(0,Math.floor(ms/1000));var m=Math.floor(t/60),s=t%60;return m+':'+String(s).padStart(2,'0');}
-var cur=null;
-function fitvw(n){return (n<120?5:n<220?4:n<340?3.2:n<500?2.6:2.1)*scale;}
-function render(){
- var b=document.getElementById('body'),c=document.getElementById('cap');
- // Blackout is a background change, so the theme is repainted on every frame.
- applyTheme();
- if(!cur){b.textContent='';c.textContent='';return;}
- b.style.fontSize=(5*scale)+'vw';
- switch(cur.kind){
-  case 'verse': case 'song':
-   b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent=cur.caption;break;
-  case 'parallel':
-   b.textContent=cur.primaryText+'\n\n'+cur.secondaryText;
-   b.style.fontSize=fitvw((cur.primaryText+cur.secondaryText).length)+'vw';
-   c.textContent=cur.caption+' ('+cur.primaryCode+' / '+cur.secondaryCode+')';break;
-  case 'message':
-   b.textContent=cur.text;b.style.fontSize=fitvw(cur.text.length)+'vw';c.textContent='';break;
-  case 'countdown':
-   b.textContent=fmt(cur.targetMs-Date.now());c.textContent=cur.label||'';break;
-  case 'logo': b.textContent='✝';c.textContent='';break;
-  default: b.textContent='';c.textContent='';
- }
-}
-// Read-only mirror: it polls the live projection and never sends anything back.
-loop(async function(){
- var r=await timedFetch('/api/projection');
- cur=await r.json();
- render();
-},400);
-setInterval(render,250);
-</script></body></html>"#;
 
 pub fn remote_page() -> String {
-    [REMOTE_HTML, LOOP_JS, REQ_JS, REMOTE_JS].concat()
+    REMOTE_PAGE.get_or_init(build_remote_page).clone()
 }
 
 pub fn projection_page() -> String {
-    [PROJECTION_HTML, LOOP_JS, PROJECTION_THEME_JS, PROJECTION_JS].concat()
+    PROJECTION_PAGE
+        .get_or_init(|| {
+            [PROJECTION_HTML, LOOP_JS, PROJECTION_THEME_JS, PROJECTION_JS].concat()
+        })
+        .clone()
 }
 
 #[cfg(test)]
@@ -455,9 +131,107 @@ mod tests {
             "function toggleTheme(",
             "function slideshow(",
             "function playMedia(",
+            "function showTab(",
+            "function openSong(",
+            "function closeSong(",
+            "function slideStep(",
+            "function projectSlide(",
+            "function deck(",
+            "function vid(",
+            "function sendMessage(",
+            "function clearMessage(",
+            "function countdown(",
+            "function sendNote(",
+            "function clearNote(",
+            "function stageTimer(",
+            "function size(",
+            "function useTranslation(",
+            "function browseUp(",
+            "function openBook(",
+            "function openChapter(",
+            "function projectVerse(",
         ] {
             assert!(page.contains(handler), "{handler} is wired to a button but not defined");
         }
+    }
+
+    /// Every `onclick="name(` in the markup must name a function the script
+    /// actually defines. The list above catches a deleted handler; this catches
+    /// a *typo'd* one, which is the failure that reaches a phone silently.
+    #[test]
+    fn no_button_calls_a_function_that_does_not_exist() {
+        let page = remote_page();
+        for (i, _) in page.match_indices("onclick=\"") {
+            let rest = &page[i + "onclick=\"".len()..];
+            let name = rest.split('(').next().unwrap_or("");
+            assert!(
+                page.contains(&format!("function {name}(")),
+                "onclick calls {name}() which is never defined"
+            );
+        }
+    }
+
+    #[test]
+    fn the_remote_reaches_every_part_of_a_service() {
+        // The gaps this page was widened to close. Each is something the console
+        // could already do and the operator standing in the hall could not.
+        let page = remote_page();
+        for (route, what) in [
+            ("/api/songs", "the song list"),
+            ("/api/song", "projecting a song slide"),
+            ("/api/deck", "turning a deck's pages"),
+            ("/api/video", "video transport"),
+            ("/api/message", "a full-screen message"),
+            ("/api/countdown", "a countdown"),
+            ("/api/stage-note", "a note to the stage"),
+            ("/api/stage-timer", "the stage timer"),
+            ("/api/fontscale", "text size on the wall"),
+            ("/api/translation", "changing translation"),
+            ("/api/books", "the book list"),
+            ("/api/count", "counting chapters and verses"),
+        ] {
+            assert!(page.contains(route), "{what} never reaches the app");
+        }
+    }
+
+    #[test]
+    fn the_bible_can_be_reached_by_tapping_rather_than_typing() {
+        // Typing "1 Thessalonians 4:16" one-handed in a dark hall is the worst
+        // input the app asks for. Book, then chapter, then verse must all be
+        // grids, and only one of the three visible at a time.
+        let page = remote_page();
+        for grid in ["bookgrid", "chapgrid", "versegrid"] {
+            assert!(page.contains(&format!("id=\"{grid}\"")), "no {grid} to tap through");
+        }
+        assert!(page.contains("function browseLevel("), "the three grids are never swapped");
+        // Chapters and verses are only ever offered from what the app actually
+        // holds, so a translation missing a book cannot offer its chapters.
+        assert!(page.contains("/api/count?book="), "the counts are guessed rather than asked for");
+        // Verses project through the same parser the typed box uses.
+        assert!(page.contains("atBook.name+' '+atChapter+':'+v"), "browse builds its own reference");
+    }
+
+    #[test]
+    fn the_tabs_and_the_sections_they_switch_line_up() {
+        // A tab whose section is missing shows an empty page and no error, so the
+        // two lists are checked against each other rather than by eye.
+        let page = remote_page();
+        for tab in ["word", "songs", "media", "screen"] {
+            assert!(page.contains(&format!("id=\"tab-{tab}\"")), "no section for the {tab} tab");
+            assert!(page.contains(&format!("data-tab=\"{tab}\"")), "no button for the {tab} tab");
+            assert!(page.contains(&format!("showTab('{tab}')")), "the {tab} tab is unreachable");
+        }
+    }
+
+    #[test]
+    fn the_controls_for_live_media_start_hidden() {
+        // Transport and page buttons are raised by the poll only when something
+        // is on the wall to control. Shipped visible, they would offer to pause a
+        // video that is not playing.
+        let page = remote_page();
+        assert!(page.contains("<div id=\"vid\" class=\"ctx\" hidden>"), "transport starts shown");
+        assert!(page.contains("<div id=\"deck\" class=\"ctx\" hidden>"), "page buttons start shown");
+        assert!(page.contains("function paintContext("), "nothing ever raises them");
     }
 
     #[test]
@@ -478,6 +252,16 @@ mod tests {
         assert!(page.contains("prefers-color-scheme:dark"), "no light/dark following");
         assert!(page.contains("data-theme"), "the override has nothing to set");
         assert!(!page.contains("color-scheme:dark}"), "the page is still pinned to dark");
+    }
+
+    #[test]
+    fn the_remote_keeps_clear_of_a_phones_own_furniture() {
+        // A fixed bar at the bottom of an iPhone lands under the home indicator,
+        // and the pinned header under the notch, unless both are inset.
+        let page = remote_page();
+        assert!(page.contains("viewport-fit=cover"), "the insets are never reported");
+        assert!(page.contains("env(safe-area-inset-bottom)"), "the tab bar ignores the inset");
+        assert!(page.contains("env(safe-area-inset-top)"), "the header ignores the inset");
     }
 
     #[test]
