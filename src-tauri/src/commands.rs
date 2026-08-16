@@ -15,6 +15,9 @@ pub struct AppState {
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
     pub alert: Mutex<crate::events::Alert>, // lower-third alert over the congregation screen
+    // Sound under the service. Separate from `current` on purpose: music plays
+    // *while* a verse or song holds the screen (see events::AudioState).
+    pub audio: Mutex<crate::events::AudioState>,
     // First-run seeding runs on a background thread (it holds the db lock for
     // as long as it takes), so the UI can tell "still installing" from "ready".
     pub ready: Arc<AtomicBool>,
@@ -1266,6 +1269,116 @@ pub fn clear_alert(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> 
         *a = alert.clone();
     }
     emit_alert(&app, &alert)
+}
+
+// ---- Audio ----
+//
+// Sound runs beside the projection rather than through it. Every command here
+// leaves `current` alone, which is the whole point: an offering track plays
+// while the giving verse stays on the wall.
+
+fn emit_audio(app: &tauri::AppHandle, audio: &crate::events::AudioState) -> Result<(), String> {
+    // The projection window owns the element, because it is the window that
+    // lives for the whole service. The operator's console can be reloaded, and
+    // the music must not stop when it is.
+    app.emit_to("projection", "set-audio", audio.clone()).map_err(|e| e.to_string())
+}
+
+/// What is playing, so the projection window can pick it up again on (re)load
+/// and the console can draw the transport it is actually in.
+#[tauri::command]
+pub fn get_audio(state: tauri::State<'_, AppState>) -> crate::events::AudioState {
+    state.audio.lock().map(|a| a.clone()).unwrap_or_default()
+}
+
+fn set_audio(app: &tauri::AppHandle, next: crate::events::AudioState) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        // Semicolon matters: as the block's tail expression the lock guard would
+        // outlive `state` and fail to borrow-check.
+        if let Ok(mut a) = state.audio.lock() {
+            *a = next.clone();
+        };
+    }
+    emit_audio(app, &next)
+}
+
+/// Start a library item playing, keeping the volume the operator last set. Used
+/// by the console, the run order and the LAN remote alike.
+pub fn play_audio_handle(app: &tauri::AppHandle, path: &str, title: &str) -> Result<(), String> {
+    let volume = app
+        .state::<AppState>()
+        .audio
+        .lock()
+        .map(|a| a.volume)
+        .unwrap_or(1.0);
+    set_audio(
+        app,
+        crate::events::AudioState {
+            src: path.to_string(),
+            title: title.to_string(),
+            paused: false,
+            looping: false,
+            volume,
+        },
+    )
+}
+
+/// Play one item from the media library by id. Errors if it is not a sound file
+/// — putting a picture through the speakers is a mistake worth naming.
+#[tauri::command]
+pub fn play_audio(app: tauri::AppHandle, id: i64) -> Result<crate::media::MediaItem, String> {
+    let item = crate::media::list(&app)
+        .into_iter()
+        .find(|m| m.id == id)
+        .ok_or_else(|| "That item is no longer in the library.".to_string())?;
+    if item.kind != "audio" {
+        return Err(format!("'{}' is not a sound file.", item.title));
+    }
+    if !item.present {
+        return Err(format!("'{}' is no longer at {}", item.title, item.path));
+    }
+    play_audio_handle(&app, &item.path, &item.title)?;
+    Ok(item)
+}
+
+/// Pause/resume, loop, and volume, in one call so the transport can never end
+/// up half-applied. Volume is clamped: a value outside 0..1 is a bug upstream,
+/// not an instruction to deafen a congregation.
+#[tauri::command]
+pub fn set_audio_playback(
+    app: tauri::AppHandle,
+    paused: bool,
+    looping: bool,
+    volume: f32,
+) -> Result<(), String> {
+    let current = get_audio(app.state::<AppState>());
+    if current.src.is_empty() {
+        return Err("No sound is loaded.".into());
+    }
+    set_audio(
+        &app,
+        crate::events::AudioState {
+            paused,
+            looping,
+            volume: volume.clamp(0.0, 1.0),
+            ..current
+        },
+    )
+}
+
+/// Jump the playing track to a position, as an instant rather than a condition
+/// (the same reasoning as `seek_video`).
+#[tauri::command]
+pub fn seek_audio(app: tauri::AppHandle, position_ms: i64) -> Result<(), String> {
+    app.emit_to("projection", "audio-seek", position_ms.max(0)).map_err(|e| e.to_string())
+}
+
+/// Stop and unload, keeping the operator's volume for whatever plays next.
+#[tauri::command]
+pub fn stop_audio(app: tauri::AppHandle) -> Result<(), String> {
+    let volume = get_audio(app.state::<AppState>()).volume;
+    set_audio(&app, crate::events::AudioState { volume, ..Default::default() })
 }
 
 // ---- Stage / confidence monitor ----
@@ -2725,6 +2838,7 @@ mod tests {
             settings: Mutex::new(ProjectionSettings::default()),
             stage: Mutex::new(StageInfo::default()),
             alert: Mutex::new(crate::events::Alert::default()),
+            audio: Mutex::new(crate::events::AudioState::default()),
             ready: Arc::new(AtomicBool::new(true)),
             listening: Arc::new(AtomicBool::new(false)),
             recording: Arc::new(AtomicBool::new(false)),

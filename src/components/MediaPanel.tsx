@@ -4,18 +4,24 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMedia,
   blankProjection,
+  getAudio,
   getProjection,
   listMedia,
   moveMedia,
+  playAudio,
   projectMedia,
   removeMedia,
   renameMedia,
+  seekAudio,
   seekVideo,
+  setAudioPlayback,
   setVideoPlayback,
   slideshowRunning,
   startSlideshow,
   stepDeck,
+  stopAudio,
   stopSlideshow,
+  type AudioState,
   type MediaLibraryItem,
   type ProjectionState,
 } from "../api";
@@ -32,6 +38,13 @@ import { usePreviewStore, useServiceStore } from "../services";
 export function MediaPanel() {
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [live, setLive] = useState<ProjectionState>({ kind: "blank" });
+  const [audio, setAudio] = useState<AudioState>({
+    src: "",
+    title: "",
+    paused: true,
+    looping: false,
+    volume: 1,
+  });
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(String(SLIDESHOW_DEFAULT_SECONDS));
   const [looping, setLooping] = useState(true);
@@ -45,8 +58,12 @@ export function MediaPanel() {
     listMedia().then(setItems).catch(() => {});
     slideshowRunning().then(setRunning).catch(() => {});
     getProjection().then(setLive).catch(() => {});
+    getAudio().then(setAudio).catch(() => {});
     const subs = [
       listen<ProjectionState>("set-projection", (e) => setLive(e.payload)),
+      // Sound is its own channel, so the transport below follows it whoever
+      // started the track — this panel, the run order, or the phone.
+      listen<AudioState>("set-audio", (e) => setAudio(e.payload)),
       // The slideshow runs in the backend, so it can start, advance and finish
       // without this panel being open. It says so rather than being asked.
       listen<boolean>("slideshow-changed", (e) => setRunning(e.payload)),
@@ -161,6 +178,59 @@ export function MediaPanel() {
         </div>
       )}
 
+      {audio.src !== "" && (
+        <div className="rounded border p-2" style={{ borderColor: "var(--border)" }}>
+          <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
+            Sound · {audio.title}
+          </div>
+          <p className="mt-1 text-xs text-[var(--faint)]">
+            Plays under whatever is on the screen. Blanking the screen does not stop it.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() =>
+                void guard(() => setAudioPlayback(!audio.paused, audio.looping, audio.volume))
+              }
+              className="btn btn-sm"
+            >
+              {audio.paused ? "▶ Play" : "⏸ Pause"}
+            </button>
+            <button onClick={() => void guard(() => seekAudio(0))} className="btn btn-sm">
+              ⏮ Restart
+            </button>
+            <button
+              onClick={() =>
+                void guard(() => setAudioPlayback(audio.paused, !audio.looping, audio.volume))
+              }
+              aria-pressed={audio.looping}
+              className={`btn btn-sm ${audio.looping ? "btn-primary" : ""}`}
+            >
+              Loop
+            </button>
+            <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+              Volume
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={audio.volume}
+                onChange={(e) =>
+                  void guard(() =>
+                    setAudioPlayback(audio.paused, audio.looping, Number(e.target.value)),
+                  )
+                }
+                aria-label="Volume"
+              />
+              <span className="tabular-nums">{Math.round(audio.volume * 100)}%</span>
+            </label>
+            <button onClick={() => void guard(() => stopAudio())} className="btn btn-sm">
+              ■ Stop
+            </button>
+          </div>
+        </div>
+      )}
+
       {deckOf(live) && (
         <div className="rounded border p-2" style={{ borderColor: "var(--border)" }}>
           <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
@@ -227,7 +297,9 @@ export function MediaPanel() {
             className="flex flex-wrap items-center gap-2 rounded border px-2 py-1.5 text-sm"
             style={{ borderColor: "var(--border)" }}
           >
-            <span className="chip">{m.kind === "video" ? "Video" : "Image"}</span>
+            <span className="chip">
+              {m.kind === "video" ? "Video" : m.kind === "audio" ? "Audio" : "Image"}
+            </span>
 
             {editing === m.id ? (
               <input
@@ -261,12 +333,16 @@ export function MediaPanel() {
               </span>
             )}
 
+            {/* A sound file is put on by playing it, not by projecting it. Same
+                place in the row, because to the operator it is the same act. */}
             <button
-              onClick={() => void guard(() => projectMedia(m.id))}
+              onClick={() =>
+                void guard(() => (m.kind === "audio" ? playAudio(m.id) : projectMedia(m.id)))
+              }
               disabled={!m.present}
               className="btn btn-sm"
             >
-              Project
+              {m.kind === "audio" ? "Play" : "Project"}
             </button>
             <button
               onClick={() =>
@@ -283,9 +359,13 @@ export function MediaPanel() {
                     : { kind: "image", src: m.path },
                 )
               }
-              disabled={!m.present}
+              disabled={!m.present || m.kind === "audio"}
               className="btn btn-sm"
-              title="Show it in the preview pane without putting it on the screen"
+              title={
+                m.kind === "audio"
+                  ? "Sound has nothing to preview"
+                  : "Show it in the preview pane without putting it on the screen"
+              }
             >
               Preview
             </button>

@@ -8,7 +8,7 @@
  * of split that only shows up mid-service.
  */
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 
 export interface MediaItem {
   id: number;
@@ -19,11 +19,16 @@ export interface MediaItem {
 
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"];
 const VIDEO_EXT = ["mp4", "m4v", "mov", "webm", "mkv", "avi"];
+// Sound-only files. They sit in the same library as the pictures because an
+// operator thinks of "the things I brought for Sunday" as one pile, but they
+// never take the screen.
+const AUDIO_EXT = ["mp3", "m4a", "wav", "ogg", "oga", "flac", "aac", "opus"];
 
 /** Everything the file picker should offer, by kind. */
 export const MEDIA_EXTENSIONS: Readonly<Record<MediaKind, readonly string[]>> = {
   image: IMAGE_EXT,
   video: VIDEO_EXT,
+  audio: AUDIO_EXT,
 };
 
 /** What kind of media a path is, or null when it is not media we can show. */
@@ -33,6 +38,7 @@ export function mediaKind(path: string): MediaKind | null {
   const ext = path.slice(dot + 1).toLowerCase();
   if (IMAGE_EXT.includes(ext)) return "image";
   if (VIDEO_EXT.includes(ext)) return "video";
+  if (AUDIO_EXT.includes(ext)) return "audio";
   return null;
 }
 
@@ -41,6 +47,11 @@ export function titleFromPath(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? path;
   const dot = name.lastIndexOf(".");
   return (dot > 0 ? name.slice(0, dot) : name).trim() || name;
+}
+
+/** Does this kind take the congregation screen? Audio does not. */
+export function isVisual(kind: MediaKind): boolean {
+  return kind !== "audio";
 }
 
 /** Seconds a slideshow holds each item. */

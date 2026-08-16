@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampInterval,
+  isVisual,
   mediaKind,
   nextIndex,
   SLIDESHOW_DEFAULT_SECONDS,
@@ -17,11 +18,20 @@ describe("mediaKind", () => {
     expect(mediaKind("bumper.MP4")).toBe("video");
   });
 
-  it("refuses what the projection window cannot show", () => {
+  it("refuses what the library cannot use at all", () => {
     expect(mediaKind("notes.pdf")).toBeNull();
-    expect(mediaKind("song.mp3")).toBeNull();
     expect(mediaKind("README")).toBeNull();
     expect(mediaKind("archive.tar.gz")).toBeNull();
+  });
+
+  it("takes sound files, which belong to the library but not to the screen", () => {
+    expect(mediaKind("song.mp3")).toBe("audio");
+    expect(mediaKind("C:\\church\\walk-in.FLAC")).toBe("audio");
+    expect(mediaKind("testimony.m4a")).toBe("audio");
+    // The distinction the slideshow and the projection window both depend on.
+    expect(isVisual("audio")).toBe(false);
+    expect(isVisual("image")).toBe(true);
+    expect(isVisual("video")).toBe(true);
   });
 });
 

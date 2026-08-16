@@ -29,6 +29,10 @@ use tauri::{AppHandle, Emitter, Manager};
 /// `src/lib/media.ts`, which offers them in the file picker.
 const IMAGE_EXT: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"];
 const VIDEO_EXT: &[&str] = &["mp4", "m4v", "mov", "webm", "mkv", "avi"];
+/// Sound-only files. These live in the same library as the pictures because an
+/// operator thinks of "the things I brought for Sunday" as one pile, but they
+/// never take the screen — see `events::AudioState`.
+const AUDIO_EXT: &[&str] = &["mp3", "m4a", "wav", "ogg", "oga", "flac", "aac", "opus"];
 
 /// How long a slideshow holds each item, and the bounds a typed value is held
 /// to. The floor exists because a mistyped 0 would otherwise flash the whole
@@ -64,6 +68,9 @@ pub fn kind_of(path: &str) -> Option<&'static str> {
     }
     if VIDEO_EXT.contains(&ext.as_str()) {
         return Some("video");
+    }
+    if AUDIO_EXT.contains(&ext.as_str()) {
+        return Some("audio");
     }
     None
 }
@@ -620,6 +627,14 @@ fn present_at(app: &AppHandle, items: &[MediaItem], pos: usize) -> Result<MediaI
     if !item.present {
         return Err(format!("'{}' is no longer at {}", item.title, item.path));
     }
+    // A sound file is "put on" by playing it, not by projecting it. Routing that
+    // here rather than at each caller means the run order, the console and the
+    // phone all do the right thing with one, and none of them has to ask what
+    // kind of file it is first.
+    if !is_visual(&item.kind) {
+        crate::commands::play_audio_handle(app, &item.path, &item.title)?;
+        return Ok(item.clone());
+    }
     crate::commands::project_via_handle(app, state_for(&item.path, &item.title, &item.kind))?;
     let next = items.get(pos + 1).map(|n| StageSlot {
         text: n.title.clone(),
@@ -634,11 +649,25 @@ fn present_at(app: &AppHandle, items: &[MediaItem], pos: usize) -> Result<MediaI
 }
 
 fn kind_label(kind: &str) -> &'static str {
-    if kind == "video" {
-        "Video"
-    } else {
-        "Image"
+    match kind {
+        "video" => "Video",
+        "audio" => "Audio",
+        _ => "Image",
     }
+}
+
+/// Does this item take the congregation screen? Audio does not, so anything
+/// that walks the library *looking for something to show* has to ask.
+pub fn is_visual(kind: &str) -> bool {
+    kind != "audio"
+}
+
+/// The library, minus anything that never takes the screen. The announcements
+/// loop walks this rather than the whole library: a sound file in the middle of
+/// a loop would otherwise hold the last picture up for its dwell time and look
+/// exactly like the loop had stuck.
+fn visuals(app: &AppHandle) -> Vec<MediaItem> {
+    list(app).into_iter().filter(|m| is_visual(&m.kind)).collect()
 }
 
 /// Longest a loop will wait on a video before giving up on hearing that it
@@ -658,7 +687,7 @@ pub fn start_slideshow(
     seconds: u64,
     looping: bool,
 ) -> Result<(), String> {
-    let items = list(&app);
+    let items = visuals(&app);
     if items.iter().all(|m| !m.present) {
         return Err("The media library has nothing to show.".into());
     }
@@ -677,7 +706,7 @@ pub fn start_slideshow(
             // Re-read every step: the operator may add, rename or remove
             // something while it runs, and the next slide should be the library
             // as it is now, not as it was when Start was pressed.
-            let items = list(&app);
+            let items = visuals(&app);
             if items.is_empty() {
                 break;
             }
@@ -761,8 +790,21 @@ mod tests {
         assert_eq!(kind_of("C:/media/backdrop.JPG"), Some("image"));
         assert_eq!(kind_of("/srv/loop.webm"), Some("video"));
         assert_eq!(kind_of("notes.pdf"), None);
-        assert_eq!(kind_of("song.mp3"), None);
         assert_eq!(kind_of("README"), None);
+    }
+
+    #[test]
+    fn sound_files_join_the_library_without_joining_the_screen() {
+        // Audio is in the library because the operator brought it for Sunday
+        // with everything else, but it must never be treated as something to
+        // project: `is_visual` is what every screen-bound path asks.
+        assert_eq!(kind_of("walk-in.MP3"), Some("audio"));
+        assert_eq!(kind_of("/srv/offering.flac"), Some("audio"));
+        assert_eq!(kind_of("testimony.m4a"), Some("audio"));
+        assert!(!is_visual("audio"));
+        assert!(is_visual("image"));
+        assert!(is_visual("video"));
+        assert_eq!(kind_label("audio"), "Audio");
     }
 
     #[test]
@@ -770,7 +812,7 @@ mod tests {
         // A file the picker offers but the backend refuses is a split that only
         // shows up mid-service, so the two lists are checked against each other.
         let ts = include_str!("../../src/lib/media.ts");
-        for ext in IMAGE_EXT.iter().chain(VIDEO_EXT.iter()) {
+        for ext in IMAGE_EXT.iter().chain(VIDEO_EXT.iter()).chain(AUDIO_EXT.iter()) {
             assert!(ts.contains(&format!("\"{ext}\"")), "{ext} is missing from src/lib/media.ts");
         }
     }

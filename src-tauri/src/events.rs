@@ -71,6 +71,34 @@ pub struct Alert {
     pub until_ms: i64,
 }
 
+/// Sound playing under the service, independent of what is on the wall.
+///
+/// Audio is deliberately *not* a `ProjectionState`. The common uses are music
+/// under an offering, a walk-in track before anything is up, and a testimony
+/// clip behind a still: in every one of them something else owns the screen. A
+/// projection state would blank the wall to play a song, which is the opposite
+/// of what the operator asked for.
+///
+/// Empty `src` means nothing is loaded. `volume` is 0..1 so the same track can
+/// sit under a spoken word without a trip to the sound desk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioState {
+    pub src: String,
+    pub title: String,
+    pub paused: bool,
+    pub looping: bool,
+    pub volume: f32,
+}
+
+impl Default for AudioState {
+    fn default() -> Self {
+        // Nothing loaded, and paused, so a projection window that reloads
+        // mid-service does not start playing something on its own.
+        Self { src: String::new(), title: String::new(), paused: true, looping: false, volume: 1.0 }
+    }
+}
+
 /// One line of content on the stage/confidence monitor: the big text plus its
 /// reference/title caption.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

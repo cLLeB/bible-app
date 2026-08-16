@@ -110,7 +110,8 @@ export interface MediaLibraryItem {
   id: number;
   path: string;
   title: string;
-  kind: "image" | "video";
+  /** `audio` is in the library but never takes the screen — see `AudioState`. */
+  kind: "image" | "video" | "audio";
   /** The document this page came from; empty for a standalone file. */
   deck: string;
   present: boolean;
@@ -190,6 +191,38 @@ export const setVideoPlayback = (
 
 export const seekVideo = (positionMs: number): Promise<void> =>
   invoke<void>("seek_video", { positionMs });
+
+/**
+ * Sound running under the service. Deliberately not a `ProjectionState`: music
+ * plays *while* a verse or song holds the screen, so it travels on its own
+ * channel and leaves the wall alone.
+ */
+export interface AudioState {
+  src: string;
+  title: string;
+  paused: boolean;
+  looping: boolean;
+  /** 0..1. */
+  volume: number;
+}
+
+export const getAudio = (): Promise<AudioState> => invoke<AudioState>("get_audio");
+
+/** Start a sound file from the media library playing. */
+export const playAudio = (id: number): Promise<MediaLibraryItem> =>
+  invoke<MediaLibraryItem>("play_audio", { id });
+
+/** Transport for the sound already loaded; all three travel together. */
+export const setAudioPlayback = (
+  paused: boolean,
+  looping: boolean,
+  volume: number,
+): Promise<void> => invoke<void>("set_audio_playback", { paused, looping, volume });
+
+export const seekAudio = (positionMs: number): Promise<void> =>
+  invoke<void>("seek_audio", { positionMs });
+
+export const stopAudio = (): Promise<void> => invoke<void>("stop_audio");
 
 export const slideshowRunning = (): Promise<boolean> => invoke<boolean>("slideshow_running");
 

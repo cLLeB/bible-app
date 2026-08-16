@@ -3,10 +3,12 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   getAlert,
+  getAudio,
   getProjection,
   getProjectionSettings,
   videoEnded,
   type Alert,
+  type AudioState,
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
@@ -41,15 +43,24 @@ export function ProjectionView() {
   const [state, setState] = useState<ProjectionState>({ kind: "blank" });
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [alert, setAlert] = useState<Alert>({ text: "", untilMs: 0 });
+  const [audio, setAudio] = useState<AudioState>({
+    src: "",
+    title: "",
+    paused: true,
+    looping: false,
+    volume: 1,
+  });
 
   useEffect(() => {
     getProjection().then(setState).catch(() => setState({ kind: "blank" }));
     getProjectionSettings().then(setSettings).catch(() => {});
     getAlert().then(setAlert).catch(() => {});
+    getAudio().then(setAudio).catch(() => {});
     const subs = [
       listen<ProjectionState>("set-projection", (e) => setState(e.payload)),
       listen<ProjectionSettings>("set-settings", (e) => setSettings(e.payload)),
       listen<Alert>("set-alert", (e) => setAlert(e.payload)),
+      listen<AudioState>("set-audio", (e) => setAudio(e.payload)),
     ];
     return () => {
       subs.forEach((u) => u.then((f) => f()));
@@ -76,6 +87,38 @@ export function ProjectionView() {
   useEffect(() => {
     const sub = listen<number>("video-seek", (e) => {
       const el = videoRef.current;
+      if (el) el.currentTime = Math.max(0, e.payload) / 1000;
+    });
+    return () => {
+      sub.then((f) => f());
+    };
+  }, []);
+
+  // The live <audio>. It lives in this window rather than the console's because
+  // this is the window that stays open for the whole service: reloading the
+  // operator's console must never cut the music off.
+  //
+  // It is driven imperatively for the same reason the video is — re-mounting on
+  // every state change would restart the track when the operator only nudged
+  // the volume.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || audio.src === "") return;
+    el.volume = Math.min(1, Math.max(0, audio.volume));
+    el.loop = audio.looping;
+    if (audio.paused) {
+      el.pause();
+    } else {
+      // Autoplay can be refused; a caught rejection keeps the window alive.
+      void el.play().catch(() => {});
+    }
+  }, [audio.src, audio.paused, audio.looping, audio.volume]);
+
+  useEffect(() => {
+    const sub = listen<number>("audio-seek", (e) => {
+      const el = audioRef.current;
       if (el) el.currentTime = Math.max(0, e.payload) / 1000;
     });
     return () => {
@@ -267,6 +310,19 @@ export function ProjectionView() {
       >
         {body()}
       </div>
+
+      {/* Sound under the service. Rendered whatever is on the wall, and keyed by
+          source so a new track loads while a nudge of the volume does not
+          restart the one already playing. Nothing to see: it is audio. */}
+      {audio.src !== "" && (
+        <audio
+          key={audio.src}
+          ref={audioRef}
+          src={assetSrc(audio.src)}
+          loop={audio.looping}
+          autoPlay={!audio.paused}
+        />
+      )}
 
       {showAlert && (
         <div

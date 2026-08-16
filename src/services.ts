@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ProjectionState, VersePayload } from "./api";
+import type { MediaKind } from "./lib/media";
 import { usableCues } from "./lib/serviceCues";
 
 export type Cue =
@@ -9,13 +10,13 @@ export type Cue =
   // Media cues store the library id, not the path: renaming or moving a file is
   // then a library concern, and a run order saved as a template last month
   // still points at the right item.
-  | { id: string; type: "media"; mediaId: number; title: string; kind: "image" | "video" };
+  | { id: string; type: "media"; mediaId: number; title: string; kind: MediaKind };
 
 interface ServiceState {
   cues: Cue[];
   addVerse: (verse: VersePayload) => void;
   addSong: (songId: number, title: string) => void;
-  addMedia: (mediaId: number, title: string, kind: "image" | "video") => void;
+  addMedia: (mediaId: number, title: string, kind: MediaKind) => void;
   remove: (id: string) => void;
   move: (id: string, dir: -1 | 1) => void;
   clear: () => void;
