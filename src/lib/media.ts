@@ -49,6 +49,15 @@ export function titleFromPath(path: string): string {
   return (dot > 0 ? name.slice(0, dot) : name).trim() || name;
 }
 
+/**
+ * Every extension the library accepts, flattened for the file picker. Derived
+ * from MEDIA_EXTENSIONS so a new kind reaches the "Add files" dialog by being
+ * added there once, rather than by remembering to widen a filter as well.
+ */
+export function everyMediaExtension(): string[] {
+  return Object.values(MEDIA_EXTENSIONS).flatMap((exts) => [...exts]);
+}
+
 /** Does this kind take the congregation screen? Audio does not. */
 export function isVisual(kind: MediaKind): boolean {
   return kind !== "audio";

@@ -25,7 +25,7 @@ import {
   type MediaLibraryItem,
   type ProjectionState,
 } from "../api";
-import { clampInterval, MEDIA_EXTENSIONS, SLIDESHOW_DEFAULT_SECONDS } from "../lib/media";
+import { clampInterval, everyMediaExtension, SLIDESHOW_DEFAULT_SECONDS } from "../lib/media";
 import { usePreviewStore, useServiceStore } from "../services";
 
 /**
@@ -85,9 +85,11 @@ export function MediaPanel() {
   async function pickFiles(): Promise<void> {
     const picked = await open({
       multiple: true,
-      filters: [
-        { name: "Images and video", extensions: [...MEDIA_EXTENSIONS.image, ...MEDIA_EXTENSIONS.video] },
-      ],
+      // Built from MEDIA_EXTENSIONS rather than written out, so a kind added to
+      // the library is offered here without a second edit. Listing the kinds by
+      // hand is exactly how audio ended up impossible to add after the backend
+      // already accepted it.
+      filters: [{ name: "Media", extensions: everyMediaExtension() }],
     });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];

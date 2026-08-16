@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampInterval,
+  everyMediaExtension,
   isVisual,
   mediaKind,
   nextIndex,
@@ -22,6 +23,22 @@ describe("mediaKind", () => {
     expect(mediaKind("notes.pdf")).toBeNull();
     expect(mediaKind("README")).toBeNull();
     expect(mediaKind("archive.tar.gz")).toBeNull();
+  });
+
+  it("offers the picker every extension it will then accept", () => {
+    // The gap this closes: audio was recognised by mediaKind and by the backend
+    // while the Add-files dialog still filtered to images and video, so the
+    // files could not be chosen at all. Anything mediaKind claims must be
+    // reachable through the picker.
+    const offered = everyMediaExtension();
+    for (const ext of ["png", "mp4", "mp3", "flac", "webm", "jpg"]) {
+      expect(offered).toContain(ext);
+      expect(mediaKind(`file.${ext}`)).not.toBeNull();
+    }
+    // And nothing is offered that would then be refused on the way in.
+    for (const ext of offered) {
+      expect(mediaKind(`file.${ext}`)).not.toBeNull();
+    }
   });
 
   it("takes sound files, which belong to the library but not to the screen", () => {
