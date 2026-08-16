@@ -32,6 +32,10 @@ const SCALE_MIN: f32 = 0.6;
 const SCALE_MAX: f32 = 2.0;
 const SCALE_STEP: f32 = 0.1;
 
+/// How much one tap of the phone's louder/quieter moves the music. A tenth is
+/// small enough to ride a track under a speaking voice without overshooting.
+const VOLUME_STEP: f32 = 0.1;
+
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
@@ -134,12 +138,28 @@ pub fn state_json(app: &AppHandle) -> String {
 
     let font_scale = state.settings.lock().map(|s| s.font_scale).unwrap_or(1.0);
 
+    // Sound is reported whatever is on the wall, because that is the point of
+    // it: the operator needs to reach the music while a verse holds the screen,
+    // which is exactly when the projection state says nothing about it.
+    let sound = state.audio.lock().ok().map(|a| a.clone()).unwrap_or_default();
+    let audio = if sound.src.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!({
+            "title": sound.title,
+            "paused": sound.paused,
+            "looping": sound.looping,
+            "volume": sound.volume,
+        })
+    };
+
     serde_json::json!({
         "summary": summary,
         "kind": kind,
         "listening": state.listening.load(Ordering::SeqCst),
         "slideshow": state.slideshow.load(Ordering::SeqCst),
         "video": video,
+        "audio": audio,
         "deck": deck,
         "fontScale": font_scale,
         "translation": state.active_translation(),
@@ -445,6 +465,44 @@ pub fn route(app: &AppHandle, method: &str, path: &str, query: &str, body: &str)
                 "loop" => crate::commands::set_video_playback(app.clone(), paused, muted, !looping),
                 "restart" => crate::commands::seek_video(app.clone(), 0),
                 _ => return (400, "Unknown transport control.".into()),
+            };
+            match result {
+                Ok(()) => (200, "ok".into()),
+                Err(e) => (400, e),
+            }
+        }
+
+        // Sound transport. Reachable whatever is on the wall, which is what
+        // separates it from the video controls above: the operator turning the
+        // offering music down is not looking at the screen at all.
+        ("POST", "/api/audio") => {
+            let state = app.state::<AppState>();
+            let cur = crate::commands::get_audio(state);
+            if cur.src.is_empty() {
+                return (409, "No sound is loaded.".into());
+            }
+            let result = match body {
+                "pause" => {
+                    crate::commands::set_audio_playback(app.clone(), !cur.paused, cur.looping, cur.volume)
+                }
+                "loop" => {
+                    crate::commands::set_audio_playback(app.clone(), cur.paused, !cur.looping, cur.volume)
+                }
+                "louder" => crate::commands::set_audio_playback(
+                    app.clone(),
+                    cur.paused,
+                    cur.looping,
+                    (cur.volume + VOLUME_STEP).min(1.0),
+                ),
+                "quieter" => crate::commands::set_audio_playback(
+                    app.clone(),
+                    cur.paused,
+                    cur.looping,
+                    (cur.volume - VOLUME_STEP).max(0.0),
+                ),
+                "restart" => crate::commands::seek_audio(app.clone(), 0),
+                "stop" => crate::commands::stop_audio(app.clone()),
+                _ => return (400, "Unknown sound control.".into()),
             };
             match result {
                 Ok(()) => (200, "ok".into()),

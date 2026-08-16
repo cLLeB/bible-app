@@ -248,8 +248,10 @@ async function loadMedia(){
  list.forEach(function(m){
   var b=document.createElement('button');
   var t=document.createElement('span'); t.className='tag';
-  t.textContent=m.kind==='video'?'Video':'Image';
+  t.textContent=m.kind==='video'?'Video':(m.kind==='audio'?'Audio':'Image');
   b.appendChild(t); b.appendChild(document.createTextNode(m.title));
+  // Tapping a sound file plays it; the app decides that from the file's kind,
+  // so this stays one action either way.
   b.onclick=function(){playMedia(m.id)};
   box.appendChild(b);
  });
@@ -279,6 +281,11 @@ async function deck(dir){
 }
 async function vid(what){
  var r=await req('/api/video',{method:'POST',body:what});
+ err(r.ok?'':await r.text()); kick();
+}
+// Sound runs beside the screen, so its controls are reachable whatever is up.
+async function aud(what){
+ var r=await req('/api/audio',{method:'POST',body:what});
  err(r.ok?'':await r.text()); kick();
 }
 "##;
@@ -391,6 +398,15 @@ function paintContext(s){
  var d=s.deck||'';
  show($('deck'),d!=='');
  if(d)$('deckname').textContent=d;
+ // Sound is not tied to what is on the wall, so unlike the two above this
+ // appears whenever a track is loaded, verse or blackout or anything else.
+ var a=s.audio;
+ show($('aud'),!!a);
+ if(a){
+  $('apause').textContent=a.paused?'▶':'⏸';
+  $('aloop').className=a.looping?'on':'';
+  $('avol').textContent=Math.round((a.volume||0)*100)+'%';
+ }
 }
 // Nudge the next poll after an action instead of adding a second timer.
 var pending=false;

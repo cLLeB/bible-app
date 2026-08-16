@@ -150,6 +150,7 @@ mod tests {
             "function openBook(",
             "function openChapter(",
             "function projectVerse(",
+            "function aud(",
         ] {
             assert!(page.contains(handler), "{handler} is wired to a button but not defined");
         }
@@ -189,6 +190,7 @@ mod tests {
             ("/api/translation", "changing translation"),
             ("/api/books", "the book list"),
             ("/api/count", "counting chapters and verses"),
+            ("/api/audio", "sound transport"),
         ] {
             assert!(page.contains(route), "{what} never reaches the app");
         }
@@ -231,7 +233,21 @@ mod tests {
         let page = remote_page();
         assert!(page.contains("<div id=\"vid\" class=\"ctx\" hidden>"), "transport starts shown");
         assert!(page.contains("<div id=\"deck\" class=\"ctx\" hidden>"), "page buttons start shown");
+        assert!(page.contains("<div id=\"aud\" class=\"ctx\" hidden>"), "sound controls start shown");
         assert!(page.contains("function paintContext("), "nothing ever raises them");
+    }
+
+    #[test]
+    fn the_sound_controls_do_not_depend_on_what_is_on_the_wall() {
+        // Video transport is raised by the projection state; sound must not be,
+        // or the operator loses the offering music the moment a verse goes up.
+        // The page reads it from its own field for exactly that reason.
+        let page = remote_page();
+        assert!(page.contains("var a=s.audio;"), "sound is read from the projection state");
+        assert!(page.contains("show($('aud'),!!a)"), "the sound strip is never raised");
+        for control in ["aud('pause')", "aud('louder')", "aud('quieter')", "aud('stop')"] {
+            assert!(page.contains(control), "{control} is missing from the sound strip");
+        }
     }
 
     #[test]

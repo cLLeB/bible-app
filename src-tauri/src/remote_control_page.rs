@@ -189,6 +189,16 @@ const REMOTE_BODY: &str = r#"
     <span id="deckname" class="name"></span>
     <button onclick="deck('next')">page &#9654;</button>
   </div>
+
+  <div id="aud" class="ctx" hidden>
+    <button id="apause" onclick="aud('pause')">&#9208;</button>
+    <button onclick="aud('restart')">&#9198;</button>
+    <button onclick="aud('quieter')">&#8722;</button>
+    <span id="avol" class="name"></span>
+    <button onclick="aud('louder')">&#43;</button>
+    <button id="aloop" onclick="aud('loop')">&#8635;</button>
+    <button onclick="aud('stop')">&#9632;</button>
+  </div>
 </div>
 
 <main>
