@@ -1,3 +1,5 @@
+pub mod accel;
+pub mod accel_probe;
 pub mod audio;
 pub mod books;
 pub mod calibrate;
@@ -142,6 +144,14 @@ pub fn run() {
             db.migrate().expect("migrate");
             // Appearance persists across restarts (theme + font scale).
             let initial_settings = themes::load_projection_settings(&db);
+            // Settle which processor whisper will run on before anything asks for it,
+            // so the first listen of the day does not have to work it out.
+            for root in commands::bin_roots(app.path().resource_dir().ok().as_deref()) {
+                if !accel::available(&root).is_empty() {
+                    accel::refresh(&db, &root);
+                    break;
+                }
+            }
 
             let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
@@ -222,6 +232,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::accel_status,
+            commands::set_accel_preference,
+            commands::measure_accel,
             commands::lookup_reference,
             commands::search_scripture,
             commands::related_verses,

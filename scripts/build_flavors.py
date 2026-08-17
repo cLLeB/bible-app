@@ -126,7 +126,13 @@ def stage_runtime(models: list) -> None:
 
     The whisper binary ships with per-CPU backend DLLs and picks an optimized one
     at runtime; that dispatch is worth ~6x over a statically linked build, so the
-    whole bin/ dir goes along."""
+    whole bin/ dir goes along.
+
+    bin/ may also hold per-processor subdirectories (bin/cpu, bin/cuda, bin/vulkan
+    — see scripts/fetch_whisper_backends.py). They are copied through as they are,
+    and the app picks between them at runtime. A flat bin/ with no subdirectories
+    is still a valid CPU-only build, which is what every installer so far has
+    been."""
     if BUNDLED.exists():
         shutil.rmtree(BUNDLED)
     (BUNDLED / "models").mkdir(parents=True, exist_ok=True)
@@ -138,9 +144,17 @@ def stage_runtime(models: list) -> None:
         else:
             print(f"  WARNING: model {src.name} missing — STT unavailable in this flavor", file=sys.stderr)
     if BIN_DIR.is_dir():
+        backends = []
         for f in BIN_DIR.iterdir():
             if f.is_file():
                 shutil.copy2(f, BUNDLED / "bin" / f.name)
+            elif f.is_dir():
+                shutil.copytree(f, BUNDLED / "bin" / f.name, dirs_exist_ok=True)
+                backends.append(f.name)
+        if backends:
+            print(f"  processors bundled: {', '.join(sorted(backends))}")
+        else:
+            print("  processors bundled: cpu only (see scripts/fetch_whisper_backends.py)")
     else:
         print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
 

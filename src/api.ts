@@ -471,6 +471,41 @@ export interface Candidate {
 
 export type SttModel = "tiny" | "base" | "small" | "medium";
 
+/** Where whisper can run on this machine. */
+export interface AccelOption {
+  key: "cpu" | "vulkan" | "cuda";
+  label: string;
+  /** This build ships a whisper build for it. */
+  installed: boolean;
+  /** This machine's drivers can run it. Separate from `installed`: a build can
+   *  carry CUDA to a laptop with an AMD card in it. */
+  usable: boolean;
+  /** Milliseconds per utterance, once measured here. */
+  measuredMs: number | null;
+}
+
+export interface AccelStatus {
+  /** "auto", or a forced backend key. */
+  preference: string;
+  chosen: string;
+  chosenLabel: string;
+  threads: number;
+  options: AccelOption[];
+}
+
+export const accelStatus = (): Promise<AccelStatus> => invoke<AccelStatus>("accel_status");
+
+/** "auto" uses the fastest thing that works here. Forcing a backend is the way
+ *  back to the processor if a graphics driver misbehaves mid-service. */
+export const setAccelPreference = (preference: string): Promise<AccelStatus> =>
+  invoke<AccelStatus>("set_accel_preference", { preference });
+
+/** Time every backend this machine can run and keep the fastest. Takes the better
+ *  part of a minute; reports progress on "accel-trial" and finishes on
+ *  "accel-measured" (or "accel-error"). Refused while listening. */
+export const measureAccel = (model?: SttModel): Promise<void> =>
+  invoke<void>("measure_accel", { model });
+
 export const startListening = (model: SttModel): Promise<void> =>
   invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");

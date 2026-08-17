@@ -49,5 +49,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # Asking the OS to load vulkan-1.dll / nvcuda.dll is how we find out whether
+    # this machine's graphics driver can actually run a GPU whisper build.
+    "Win32_System_LibraryLoader",
 ] }
 

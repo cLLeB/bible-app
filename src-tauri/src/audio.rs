@@ -10,7 +10,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-const TARGET_RATE: u32 = 16_000;
+pub const TARGET_RATE: u32 = 16_000;
 /// Default speech threshold, used until a speaker's recordings say otherwise.
 const SILENCE_RMS: f32 = 0.010;
 

@@ -1515,19 +1515,207 @@ fn resolve_model_and_binary(
         })
         .ok_or("No whisper model found (looked in bundled resources and the project 'models' folder).")?;
 
-    let mut bin_dirs: Vec<PathBuf> = Vec::new();
-    if let Some(r) = res_dir {
-        bin_dirs.push(r.join("bin"));
-    }
-    if let Some(root) = &dev_root {
-        bin_dirs.push(root.join("bin"));
-    }
-    let binary = bin_dirs
+    let binary = bin_roots(res_dir)
         .iter()
-        .find_map(|d| first_existing(d, &["whisper-cli.exe", "main.exe", "whisper.exe"]))
+        .find_map(|root| {
+            // The chosen backend first (CPU until something faster is installed and
+            // measured), then any other backend that is present, then the flat
+            // layout every installer shipped so far.
+            let want = crate::accel::chosen().unwrap_or(crate::accel::Backend::Cpu);
+            let dirs = std::iter::once(want)
+                .chain(crate::accel::Backend::RANKED)
+                .filter_map(|b| crate::accel::dir_for(root, b));
+            for d in dirs {
+                if let Some(exe) = first_existing(&d, &["whisper-cli.exe", "main.exe", "whisper.exe"]) {
+                    return Some(exe);
+                }
+            }
+            first_existing(root, &["whisper-cli.exe", "main.exe", "whisper.exe"])
+        })
         .unwrap_or_else(|| PathBuf::from("whisper-cli")); // else rely on PATH
 
     Ok((model, binary))
+}
+
+/// Where whisper builds are kept: the packaged app's resources, then the dev
+/// project's `bin/`.
+pub(crate) fn bin_roots(res_dir: Option<&Path>) -> Vec<PathBuf> {
+    let dev_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().map(Path::to_path_buf);
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(r) = res_dir {
+        roots.push(r.join("bin"));
+    }
+    if let Some(root) = dev_root {
+        roots.push(root.join("bin"));
+    }
+    roots
+}
+
+// ---- Where whisper runs ----------------------------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccelOption {
+    pub key: String,
+    pub label: String,
+    /// This build ships a whisper build for it.
+    pub installed: bool,
+    /// This machine's drivers can run it. A build can ship CUDA to a laptop with
+    /// an AMD card in it, so the two are separate answers.
+    pub usable: bool,
+    /// Milliseconds per utterance, if it has been measured here.
+    pub measured_ms: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccelStatus {
+    /// "auto", or a forced backend key.
+    pub preference: String,
+    /// What that resolves to right now.
+    pub chosen: String,
+    pub chosen_label: String,
+    pub threads: usize,
+    pub options: Vec<AccelOption>,
+}
+
+fn accel_status_from(app: &tauri::AppHandle) -> Result<AccelStatus, String> {
+    let state = app.state::<AppState>();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let res_dir = app.path().resource_dir().ok();
+    let roots = bin_roots(res_dir.as_deref());
+    let root = roots.first().cloned().unwrap_or_default();
+    // The dev tree and a packaged install both count: whichever actually holds a
+    // whisper build is the one being asked about.
+    let root = roots
+        .iter()
+        .find(|r| !crate::accel::available(r).is_empty())
+        .cloned()
+        .unwrap_or(root);
+
+    let chosen = crate::accel::refresh(&db, &root);
+    let preference = db
+        .get_setting(crate::accel::SETTING_PREFERENCE)
+        .unwrap_or_else(|| "auto".into());
+    let timings: std::collections::HashMap<String, u64> = db
+        .get_setting("accel_measured_ms")
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let options = crate::accel::Backend::RANKED
+        .iter()
+        .map(|&b| AccelOption {
+            key: b.key().into(),
+            label: b.label().into(),
+            installed: crate::accel::dir_for(&root, b).is_some(),
+            usable: crate::accel::available(&root).contains(&b),
+            measured_ms: timings.get(b.key()).copied(),
+        })
+        .collect();
+
+    Ok(AccelStatus {
+        preference,
+        chosen: chosen.key().into(),
+        chosen_label: chosen.label().into(),
+        threads: crate::stt::threads().parse().unwrap_or(4),
+        options,
+    })
+}
+
+/// What this machine can run whisper on, and what it is running it on.
+#[tauri::command]
+pub fn accel_status(app: tauri::AppHandle) -> Result<AccelStatus, String> {
+    accel_status_from(&app)
+}
+
+/// "auto", or a backend key to force. Forcing exists because a graphics driver
+/// that misbehaves under load is a real thing, and when it happens mid-service the
+/// operator needs a way back to the processor that is not a reinstall.
+#[tauri::command]
+pub fn set_accel_preference(app: tauri::AppHandle, preference: String) -> Result<AccelStatus, String> {
+    let parsed = crate::accel::Preference::parse(&preference);
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_setting(crate::accel::SETTING_PREFERENCE, &parsed.key())
+            .map_err(|e| e.to_string())?;
+    }
+    accel_status_from(&app)
+}
+
+/// Time every backend this machine can run and keep the fastest.
+///
+/// Runs on its own thread and reports each trial as it finishes, because it takes
+/// the better part of a minute and a frozen window looks like a crash. Refuses
+/// while listening: half a dozen trial transcriptions would compete with the very
+/// service they are meant to speed up.
+#[tauri::command]
+pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.listening.load(Ordering::SeqCst) {
+        return Err("Stop listening first — measuring runs several test transcriptions, which would slow down the service it is trying to speed up.".into());
+    }
+    let kind = model.unwrap_or_else(|| crate::flavor::default_model().to_string());
+    let res_dir = app.path().resource_dir().ok();
+    let (model_path, _) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
+    let roots = bin_roots(res_dir.as_deref());
+    let root = roots
+        .iter()
+        .find(|r| !crate::accel::available(r).is_empty())
+        .cloned()
+        .ok_or("No whisper build was found to measure.")?;
+    let captures = crate::capture::dir(&app);
+
+    std::thread::spawn(move || {
+        let report = |t: &crate::accel_probe::Trial| {
+            let _ = app.emit(
+                "accel-trial",
+                serde_json::json!({
+                    "backend": t.backend.key(),
+                    "label": t.backend.label(),
+                    "threads": t.threads,
+                    "ms": t.ms,
+                }),
+            );
+        };
+        match crate::accel_probe::measure(&root, &model_path, captures.as_deref(), report) {
+            Ok(trials) => {
+                let best = match crate::accel_probe::best(&trials) {
+                    Some(b) => b,
+                    None => return,
+                };
+                // Fastest time seen per backend, so the settings screen can show why
+                // the winner won rather than only announcing it.
+                let mut per_backend: std::collections::HashMap<String, u64> = Default::default();
+                for t in &trials {
+                    let e = per_backend.entry(t.backend.key().into()).or_insert(t.ms);
+                    *e = (*e).min(t.ms);
+                }
+                let state = app.state::<AppState>();
+                if let Ok(db) = state.db.lock() {
+                    let _ = db.set_setting(crate::accel::SETTING_MEASURED, best.backend.key());
+                    let _ = db.set_setting(crate::accel::SETTING_THREADS, &best.threads.to_string());
+                    if let Ok(json) = serde_json::to_string(&per_backend) {
+                        let _ = db.set_setting("accel_measured_ms", &json);
+                    }
+                    crate::accel::refresh(&db, &root);
+                }
+                let _ = app.emit(
+                    "accel-measured",
+                    serde_json::json!({
+                        "backend": best.backend.key(),
+                        "label": best.backend.label(),
+                        "threads": best.threads,
+                        "ms": best.ms,
+                    }),
+                );
+            }
+            Err(e) => {
+                let _ = app.emit("accel-error", e);
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
