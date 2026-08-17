@@ -1679,18 +1679,12 @@ pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(),
             );
         };
         match crate::accel_probe::measure(&root, &model_path, captures.as_deref(), report) {
-            Ok(trials) => {
-                let best = match crate::accel_probe::best(&trials) {
+            Ok(measured) => {
+                let best = match measured.best() {
                     Some(b) => b,
                     None => return,
                 };
-                // Fastest time seen per backend, so the settings screen can show why
-                // the winner won rather than only announcing it.
-                let mut per_backend: std::collections::HashMap<String, u64> = Default::default();
-                for t in &trials {
-                    let e = per_backend.entry(t.backend.key().into()).or_insert(t.ms);
-                    *e = (*e).min(t.ms);
-                }
+                let per_backend = measured.by_backend();
                 let state = app.state::<AppState>();
                 if let Ok(db) = state.db.lock() {
                     let _ = db.set_setting(crate::accel::SETTING_MEASURED, best.backend.key());
@@ -1707,6 +1701,9 @@ pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(),
                         "label": best.backend.label(),
                         "threads": best.threads,
                         "ms": best.ms,
+                        // False means no real utterance had been captured yet, so the
+                        // ranking is a rough guide rather than a figure to quote.
+                        "realAudio": measured.real_audio,
                     }),
                 );
             }

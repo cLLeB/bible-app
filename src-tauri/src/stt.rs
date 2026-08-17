@@ -471,6 +471,27 @@ fn transcribe_via_server(
     resp.into_string().map(|t| t.trim().to_string()).map_err(|e| e.to_string())
 }
 
+/// The whisper-cli flags that carry one `Decode`, for a clip of `secs`.
+///
+/// Shared with the accelerator probe rather than written out twice. A probe that
+/// decodes differently from a service measures the wrong thing: the encoder window
+/// alone is worth 4x on this machine (7.2s fitted against 29.7s full), and it shifts
+/// the balance between encode and decode — which is exactly the balance that decides
+/// whether a graphics card is worth using.
+pub fn cli_decode_args(decode: Decode, secs: f32) -> Vec<String> {
+    let beam = decode.beam.to_string();
+    let mut args = vec!["-bs".into(), beam.clone(), "-bo".into(), beam];
+    if let Some(ctx) = decode.audio_ctx(secs) {
+        args.push("-ac".into());
+        args.push(ctx.to_string());
+    }
+    if decode.prompt {
+        args.push("--prompt".into());
+        args.push(BIBLE_PROMPT.into());
+    }
+    args
+}
+
 /// Fallback: one-shot whisper-cli. Correct but slower — it reloads the model.
 fn transcribe_via_cli(
     wav: &[u8],
@@ -487,7 +508,6 @@ fn transcribe_via_cli(
     let wav_path = base.with_extension("wav");
     std::fs::write(&wav_path, wav).map_err(|e| e.to_string())?;
 
-    let beam = decode.beam.to_string();
     let mut cmd = Command::new(binary);
     cmd.args([
         "-m",
@@ -498,21 +518,12 @@ fn transcribe_via_cli(
         "en",
         "-t",
         &threads(),
-        "-bs",
-        &beam,
-        "-bo",
-        &beam,
         "-nt",
         "-otxt",
         "-of",
         base.to_str().ok_or("bad out path")?,
     ]);
-    if let Some(ctx) = decode.audio_ctx(secs) {
-        cmd.args(["-ac", &ctx.to_string()]);
-    }
-    if decode.prompt {
-        cmd.args(["--prompt", BIBLE_PROMPT]);
-    }
+    cmd.args(cli_decode_args(decode, secs));
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 

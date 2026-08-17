@@ -55,13 +55,17 @@ fn compute_ms(stderr: &str) -> Option<u64> {
     seen.then(|| total.round() as u64)
 }
 
+/// How many times each candidate is timed. See `best_of`.
+const REPS: usize = 2;
+
 /// Speech-shaped audio to time against, used only when no real utterance has been
 /// captured from this room.
 ///
-/// Synthetic audio understates decode cost, because the model finds little to say
-/// about it, and decode is the part a graphics card helps least with. So a probe run
-/// on this clip flatters the GPU slightly. A real captured utterance is preferred
-/// wherever one exists, for exactly that reason.
+/// Do not trust this clip as far as a real one. The model finds no words in it, and
+/// with beam search it answers by looping: measured here, decode on this clip grew
+/// until it rivalled the encoder, which is not how a real utterance behaves and which
+/// muddies the very comparison the probe exists to make. `Measured::real_audio` says
+/// which kind of clip was used, so the answer can be presented for what it is.
 fn synthetic_clip() -> Vec<f32> {
     const SECS: usize = 4;
     let n = crate::audio::TARGET_RATE as usize * SECS;
@@ -106,7 +110,19 @@ fn captured_clip(captures: Option<&Path>) -> Option<Vec<f32>> {
 /// Run one trial. Returns None if that backend cannot run here at all, which is a
 /// perfectly ordinary outcome: a build may ship a CUDA backend to a machine with an
 /// AMD card in it.
-fn trial(bin_dir: &Path, model: &Path, wav: &Path, backend: Backend, threads: usize) -> Option<Trial> {
+///
+/// Decodes with the settings a real service uses, via `stt::cli_decode_args`. An
+/// earlier version left them out and so encoded whisper's full 30-second window on a
+/// four-second clip — four times the work, and skewed towards the encoder, which is
+/// the half a graphics card helps most with. It would have flattered the GPU.
+fn trial(
+    bin_dir: &Path,
+    model: &Path,
+    wav: &Path,
+    secs: f32,
+    backend: Backend,
+    threads: usize,
+) -> Option<Trial> {
     let exe = bin_dir.join(if cfg!(windows) { "whisper-cli.exe" } else { "whisper-cli" });
     let mut cmd = Command::new(&exe);
     cmd.args([
@@ -121,11 +137,32 @@ fn trial(bin_dir: &Path, model: &Path, wav: &Path, backend: Backend, threads: us
         "-nt",
         // No output file: the transcript is irrelevant, only the timings matter.
     ]);
+    cmd.args(crate::stt::cli_decode_args(crate::stt::Decode::for_model(model), secs));
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let out = cmd.output().ok()?;
     let ms = compute_ms(&String::from_utf8_lossy(&out.stderr))?;
     Some(Trial { backend, threads, ms })
+}
+
+/// Time one candidate more than once and keep the best.
+///
+/// A single reading is not worth much. This laptop was 69% busy with a browser
+/// during development and the ranking flipped between runs on that alone; taking the
+/// fastest of a few passes is the standard way to see the machine rather than
+/// whatever else it happened to be doing.
+fn best_of(
+    bin_dir: &Path,
+    model: &Path,
+    wav: &Path,
+    secs: f32,
+    backend: Backend,
+    threads: usize,
+    reps: usize,
+) -> Option<Trial> {
+    (0..reps)
+        .filter_map(|_| trial(bin_dir, model, wav, secs, backend, threads))
+        .min_by_key(|t| t.ms)
 }
 
 /// Time every backend this machine can run, then sweep the thread count on the
@@ -139,12 +176,15 @@ pub fn measure(
     model: &Path,
     captures: Option<&Path>,
     mut report: impl FnMut(&Trial),
-) -> Result<Vec<Trial>, String> {
+) -> Result<Measured, String> {
     let backends = crate::accel::available(bin_root);
     if backends.is_empty() {
         return Err("No whisper build was found to measure.".into());
     }
-    let clip = captured_clip(captures).unwrap_or_else(synthetic_clip);
+    let real = captured_clip(captures);
+    let real_audio = real.is_some();
+    let clip = real.unwrap_or_else(synthetic_clip);
+    let secs = clip.len() as f32 / crate::audio::TARGET_RATE as f32;
     let wav = std::env::temp_dir().join(format!("bibleapp_probe_{}.wav", std::process::id()));
     crate::stt::write_wav_16k_mono(&wav, &clip)?;
 
@@ -153,7 +193,7 @@ pub fn measure(
 
     for b in &backends {
         let Some(dir) = crate::accel::dir_for(bin_root, *b) else { continue };
-        if let Some(t) = trial(&dir, model, &wav, *b, base_threads) {
+        if let Some(t) = best_of(&dir, model, &wav, secs, *b, base_threads, REPS) {
             report(&t);
             results.push(t);
         }
@@ -168,7 +208,7 @@ pub fn measure(
                 if n == best.threads {
                     continue;
                 }
-                if let Some(t) = trial(&dir, model, &wav, best.backend, n) {
+                if let Some(t) = best_of(&dir, model, &wav, secs, best.backend, n, REPS) {
                     report(&t);
                     results.push(t);
                 }
@@ -180,12 +220,34 @@ pub fn measure(
     if results.is_empty() {
         return Err("No backend completed a trial transcription.".into());
     }
-    Ok(results)
+    Ok(Measured { trials: results, real_audio })
 }
 
-/// The winning trial: fewest milliseconds per utterance.
-pub fn best(trials: &[Trial]) -> Option<Trial> {
-    trials.iter().min_by_key(|t| t.ms).copied()
+/// The result of a measurement, and how much it is worth.
+pub struct Measured {
+    pub trials: Vec<Trial>,
+    /// True when a real captured utterance was timed. False means the synthetic
+    /// fallback was used, which ranks backends roughly but should not be read as a
+    /// precise figure — see `synthetic_clip`.
+    pub real_audio: bool,
+}
+
+impl Measured {
+    /// The winning trial: fewest milliseconds per utterance.
+    pub fn best(&self) -> Option<Trial> {
+        self.trials.iter().min_by_key(|t| t.ms).copied()
+    }
+
+    /// The fastest time seen for each backend, so a settings screen can show why the
+    /// winner won rather than only announcing it.
+    pub fn by_backend(&self) -> std::collections::HashMap<String, u64> {
+        let mut out: std::collections::HashMap<String, u64> = Default::default();
+        for t in &self.trials {
+            let e = out.entry(t.backend.key().into()).or_insert(t.ms);
+            *e = (*e).min(t.ms);
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -215,12 +277,39 @@ whisper_print_timings:    total time = 12370.97 ms";
         assert_eq!(compute_ms(""), None);
     }
 
+    fn t(backend: Backend, threads: usize, ms: u64) -> Trial {
+        Trial { backend, threads, ms }
+    }
+
     #[test]
     fn the_fastest_trial_wins() {
-        let t = |b, threads, ms| Trial { backend: b, threads, ms };
-        let trials =
-            [t(Backend::Cpu, 8, 7876), t(Backend::Vulkan, 8, 2100), t(Backend::Vulkan, 4, 2050)];
-        assert_eq!(best(&trials), Some(t(Backend::Vulkan, 4, 2050)));
-        assert_eq!(best(&[]), None);
+        let m = Measured {
+            trials: vec![
+                t(Backend::Cpu, 8, 7876),
+                t(Backend::Vulkan, 8, 2100),
+                t(Backend::Vulkan, 4, 2050),
+            ],
+            real_audio: true,
+        };
+        assert_eq!(m.best(), Some(t(Backend::Vulkan, 4, 2050)));
+        assert_eq!(Measured { trials: vec![], real_audio: false }.best(), None);
+    }
+
+    #[test]
+    fn each_backend_is_summarised_by_its_best_run() {
+        // The settings screen shows one number per processor, and it should be that
+        // processor at its best rather than at whatever thread count came last.
+        let m = Measured {
+            trials: vec![
+                t(Backend::Cpu, 8, 7876),
+                t(Backend::Cpu, 12, 6200),
+                t(Backend::Vulkan, 8, 2100),
+            ],
+            real_audio: true,
+        };
+        let by = m.by_backend();
+        assert_eq!(by.get("cpu"), Some(&6200));
+        assert_eq!(by.get("vulkan"), Some(&2100));
+        assert_eq!(by.get("cuda"), None);
     }
 }
