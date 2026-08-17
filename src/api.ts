@@ -471,6 +471,24 @@ export interface Candidate {
 
 export type SttModel = "tiny" | "base" | "small" | "medium";
 
+/** Which speakers video and music come out of.
+ *
+ *  Separate from the projection display on purpose, because Windows keeps them
+ *  separate: sound goes to the system default output regardless of which monitor a
+ *  window sits on. Put the projection on a TV over HDMI and, left alone, the picture
+ *  goes to the TV while the sound stays in the laptop.
+ */
+export interface AudioOutput {
+  /** Browser device id, passed to setSinkId. Empty means the Windows default. */
+  id: string;
+  label: string;
+}
+
+export const getAudioOutput = (): Promise<AudioOutput> => invoke<AudioOutput>("get_audio_output");
+
+export const setAudioOutput = (id: string, label: string): Promise<AudioOutput> =>
+  invoke<AudioOutput>("set_audio_output", { id, label });
+
 /** Where whisper can run on this machine. */
 export interface AccelOption {
   key: "cpu" | "vulkan" | "cuda";

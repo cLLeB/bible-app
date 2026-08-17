@@ -232,6 +232,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_audio_output,
+            commands::set_audio_output,
             commands::accel_status,
             commands::set_accel_preference,
             commands::measure_accel,

@@ -1284,6 +1284,62 @@ fn emit_audio(app: &tauri::AppHandle, audio: &crate::events::AudioState) -> Resu
     app.emit_to("projection", "set-audio", audio.clone()).map_err(|e| e.to_string())
 }
 
+// ---- Which speakers the sound comes out of ---------------------------------
+
+/// The sound output chosen for video and music, remembered between services.
+///
+/// This is a separate decision from which screen the projection goes to, and it
+/// has to be, because Windows does not connect the two: it routes sound per
+/// application to whatever the system default device is, and takes no notice of
+/// which monitor a window happens to be sitting on. Put the projection on a TV
+/// over HDMI and, left alone, the picture goes to the TV while the sound stays in
+/// the laptop's own speakers. That is the whole reason this exists.
+///
+/// The id is the browser's device id, which the projection window passes to
+/// `setSinkId`. The label is stored beside it because that id is not guaranteed to
+/// survive a reinstall, and a remembered name can be matched again when it does not.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioOutput {
+    /// Empty means "whatever Windows is using", which is the default and was the
+    /// only behaviour until now.
+    pub id: String,
+    pub label: String,
+}
+
+const AUDIO_OUT_ID: &str = "audio_output_id";
+const AUDIO_OUT_LABEL: &str = "audio_output_label";
+
+#[tauri::command]
+pub fn get_audio_output(state: tauri::State<'_, AppState>) -> Result<AudioOutput, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(AudioOutput {
+        id: db.get_setting(AUDIO_OUT_ID).unwrap_or_default(),
+        label: db.get_setting(AUDIO_OUT_LABEL).unwrap_or_default(),
+    })
+}
+
+/// Send the sound somewhere. An empty id hands it back to the Windows default.
+#[tauri::command]
+pub fn set_audio_output(
+    app: tauri::AppHandle,
+    id: String,
+    label: String,
+) -> Result<AudioOutput, String> {
+    let chosen = AudioOutput { id, label };
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_setting(AUDIO_OUT_ID, &chosen.id).map_err(|e| e.to_string())?;
+        db.set_setting(AUDIO_OUT_LABEL, &chosen.label).map_err(|e| e.to_string())?;
+    }
+    // The projection window owns the media elements, so it is the one that has to
+    // move the sound. Applied live: an operator who discovers mid-service that the
+    // music is coming out of the laptop should not have to restart anything.
+    let _ = app.emit_to("projection", "set-audio-output", chosen.clone());
+    Ok(chosen)
+}
+
 /// What is playing, so the projection window can pick it up again on (re)load
 /// and the console can draw the transport it is actually in.
 #[tauri::command]

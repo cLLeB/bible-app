@@ -4,15 +4,18 @@ import { listen } from "@tauri-apps/api/event";
 import {
   getAlert,
   getAudio,
+  getAudioOutput,
   getProjection,
   getProjectionSettings,
   videoEnded,
   type Alert,
+  type AudioOutput,
   type AudioState,
   type ProjectionSettings,
   type ProjectionState,
 } from "./api";
 import { alertVisible } from "./lib/alert";
+import { applyOutput } from "./lib/audioSink";
 import { coversScreen, needsAssetUrl } from "./lib/projection";
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
@@ -102,6 +105,30 @@ export function ProjectionView() {
   // every state change would restart the track when the operator only nudged
   // the volume.
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Which speakers the sound goes to. Windows sends it to the system default
+  // device whatever monitor this window is on, so projecting onto a TV over HDMI
+  // otherwise leaves the sound in the laptop. An empty id means the default, which
+  // is what every install had until this was added.
+  const [soundOut, setSoundOut] = useState("");
+
+  useEffect(() => {
+    void getAudioOutput()
+      .then((o) => setSoundOut(o.id))
+      .catch(() => {});
+    const sub = listen<AudioOutput>("set-audio-output", (e) => setSoundOut(e.payload.id));
+    return () => {
+      sub.then((f) => f());
+    };
+  }, []);
+
+  // Re-applied whenever the choice changes or an element is remounted: a fresh
+  // <video> starts out on the default device, so choosing the output once is not
+  // enough — every clip has to be pointed at it again.
+  useEffect(() => {
+    void applyOutput(audioRef.current, soundOut);
+    void applyOutput(videoRef.current, soundOut);
+  }, [soundOut, audio.src, state]);
 
   useEffect(() => {
     const el = audioRef.current;

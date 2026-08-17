@@ -2,12 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { listen } from "@tauri-apps/api/event";
 import {
+  getAudioOutput,
   listDisplays,
+  setAudioOutput,
   setOutputDisplay,
   showStage,
   startRemote,
   type DisplayInfo,
 } from "../api";
+import {
+  canChooseOutput,
+  listOutputs,
+  namesHidden,
+  resolveRemembered,
+  revealOutputNames,
+  type SoundOutput,
+} from "../lib/audioSink";
 
 /** Printed size of the QR, in CSS pixels. */
 const QR_PX = 190;
@@ -45,6 +55,49 @@ export function OutputsPanel() {
       sub.then((f) => f());
     };
   }, [loadDisplays]);
+
+  const [sounds, setSounds] = useState<SoundOutput[]>([]);
+  const [chosenSound, setChosenSound] = useState("");
+
+  // The remembered device is matched against what is plugged in right now, by id
+  // and then by name — a TV that comes back with a fresh id is still recognisable
+  // by what it is called, and one that is genuinely gone falls back to the default
+  // rather than leaving the service silent.
+  const loadSounds = useCallback(async (): Promise<void> => {
+    if (!canChooseOutput()) return;
+    try {
+      const [found, remembered] = await Promise.all([listOutputs(), getAudioOutput()]);
+      setSounds(found);
+      setChosenSound(resolveRemembered(found, remembered));
+    } catch {
+      /* the picker is an aid; the Windows default still plays without it */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSounds();
+  }, [loadSounds]);
+
+  async function pickSound(id: string): Promise<void> {
+    setChosenSound(id);
+    setError(null);
+    try {
+      await setAudioOutput(id, sounds.find((s) => s.id === id)?.label ?? "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function nameThem(): Promise<void> {
+    setError(null);
+    try {
+      setSounds(await revealOutputNames());
+    } catch {
+      setError(
+        "Windows did not allow the microphone, so the outputs stay unnamed. You can still try them one at a time.",
+      );
+    }
+  }
 
   async function pickDisplay(name: string): Promise<void> {
     setChosenDisplay(name);
@@ -142,6 +195,55 @@ export function OutputsPanel() {
             : "Output fills that screen and never takes keyboard focus, so you can keep typing here while it is live."}
         </p>
       </div>
+
+      {/* Which speakers video and music come out of. A separate decision from the
+          screen, because Windows treats it as one: sound goes to the system default
+          device no matter which monitor the window is on, so a TV on HDMI otherwise
+          shows the video while the laptop plays its sound. */}
+      {canChooseOutput() && (
+        <div className="rounded border p-2 text-sm" style={{ borderColor: "var(--border)" }}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-[var(--faint)]">Sound output</span>
+            <select
+              className="select ml-auto"
+              style={{ width: "auto" }}
+              value={chosenSound}
+              onChange={(e) => void pickSound(e.target.value)}
+            >
+              <option value="">Whatever Windows is using</option>
+              {sounds
+                .filter((s) => s.id !== "default")
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+            </select>
+            <button
+              onClick={() => void loadSounds()}
+              className="btn btn-sm"
+              title="Re-check after plugging in a TV"
+            >
+              Refresh
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-[var(--faint)]">
+            {namesHidden(sounds) ? (
+              <>
+                Windows will not tell us what these outputs are called until the app has
+                been allowed to use a microphone once.{" "}
+                <button className="underline" onClick={() => void nameThem()}>
+                  Show their names
+                </button>{" "}
+                asks for that, reads the list, and releases it immediately. Nothing is
+                recorded.
+              </>
+            ) : (
+              "Pick the TV or sound desk to send video and music to. Live listening still uses the sound input chosen under Live listening."
+            )}
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <button onClick={() => showStage()} className="btn">
