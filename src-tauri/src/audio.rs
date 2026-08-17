@@ -26,13 +26,38 @@ fn speech_above() -> f32 {
         f32::from_bits(bits)
     }
 }
-const SILENCE_FLUSH_MS: f32 = 1300.0;
+/// How long a pause has to run before we call the utterance finished.
+///
+/// This is dead time on every single reference: the preacher has stopped talking
+/// and the machine is deliberately doing nothing. It was 1300ms, which is roughly
+/// half the delay an operator actually feels — the whisper pass itself is ~1.3s on
+/// an idle machine.
+///
+/// 800ms is short enough to notice and still longer than the pause inside a spoken
+/// reference ("Habakkuk ... chapter two ... verse four"), which is what this guards
+/// against. Cutting an utterance early is not fatal in any case: the interim passes
+/// have usually already found the reference, and a chopped tail arrives as its own
+/// utterance a moment later.
+const SILENCE_FLUSH_MS: f32 = 800.0;
 const MAX_UTTER_MS: f32 = 12_000.0;
 const MIN_SPEECH_MS: f32 = 600.0;
 const PREROLL_SAMPLES: usize = (TARGET_RATE as usize) * 3 / 10; // 0.3s pre-speech
 const CTX_STALE_SECS: u64 = 300; // clear remembered book after 5min of no speech
 const IDLE_STOP_SECS: u64 = 20 * 60; // stop listening after 20min with nothing said
 const INTERIM_SAMPLES: usize = (TARGET_RATE as usize) * 4; // interim pass every 4s of long speech
+
+/// How much of a long utterance an interim pass looks at.
+///
+/// Interims used to re-transcribe the whole buffer from the beginning, so a pass at
+/// 12s cost three times a pass at 4s — the cost grew with the utterance, which is
+/// exactly when there is least time to spend. The tail is also the only part that is
+/// new; everything before it was already read by the previous pass.
+///
+/// Six seconds comfortably holds a whole spoken reference ("turn with me to the book
+/// of Habakkuk chapter two verse four" is about five), so nothing is cut in half that
+/// was not already seen by an earlier pass, and the endpointed final always reads the
+/// utterance entire.
+const INTERIM_WINDOW_SAMPLES: usize = (TARGET_RATE as usize) * 6;
 
 type RefKey = (String, u16, Option<u16>);
 
@@ -437,6 +462,79 @@ mod tests {
 
         let allusion = "we are supposed to be light in this dark generation somehow";
         assert!(quote_confidence(allusion, verse) < 0.82, "an allusion should only suggest");
+    }
+
+    // ---- What the transcription thread is asked to do -----------------------
+    // Transcription runs behind a queue now, and the queue throws work away on
+    // purpose. These pin what it may and may not drop, because the failure is
+    // silent: the app would just feel slow, or lose the one utterance that counted.
+
+    use super::{enqueue, Job, INTERIM_WINDOW_SAMPLES, TARGET_RATE};
+    use std::collections::VecDeque;
+
+    /// Readable shorthand for what is sitting in the queue.
+    fn shape(jobs: &VecDeque<Job>) -> Vec<&'static str> {
+        jobs.iter()
+            .map(|j| match j {
+                Job::Interim(_) => "interim",
+                Job::Final(_) => "final",
+            })
+            .collect()
+    }
+
+    fn interim(n: usize) -> Job {
+        Job::Interim(vec![0.0; n])
+    }
+
+    #[test]
+    fn only_the_newest_interim_is_kept() {
+        // Each interim contains the previous one's speech, so transcribing the older
+        // one costs a pass to learn less than the pass behind it already knows.
+        let mut q = VecDeque::new();
+        enqueue(&mut q, interim(1));
+        enqueue(&mut q, interim(2));
+        enqueue(&mut q, interim(3));
+        assert_eq!(shape(&q), ["interim"]);
+        match q.front() {
+            Some(Job::Interim(a)) => assert_eq!(a.len(), 3, "kept the wrong one"),
+            _ => panic!("expected an interim"),
+        }
+    }
+
+    #[test]
+    fn an_endpointed_utterance_clears_the_speculative_work_ahead_of_it() {
+        // This is the whole point of the queue. The final is what the operator is
+        // waiting for, and it says everything its own interims were guessing at.
+        let mut q = VecDeque::new();
+        enqueue(&mut q, interim(1));
+        enqueue(&mut q, Job::Final(vec![0.0; 9]));
+        assert_eq!(shape(&q), ["final"]);
+    }
+
+    #[test]
+    fn a_final_is_never_dropped_by_what_comes_after_it() {
+        // Two utterances in quick succession, and an interim of the second arriving
+        // while the first is still queued. Nothing spoken may be lost, and the order
+        // spoken is the order shown.
+        let mut q = VecDeque::new();
+        enqueue(&mut q, Job::Final(vec![0.0; 1]));
+        enqueue(&mut q, Job::Final(vec![0.0; 2]));
+        enqueue(&mut q, interim(3));
+        assert_eq!(shape(&q), ["final", "final", "interim"]);
+    }
+
+    #[test]
+    fn an_interim_reads_the_tail_not_the_whole_utterance() {
+        use super::interim_clip;
+        // Short utterance: there is no tail to take, so it is read entire.
+        let short = vec![0.0f32; TARGET_RATE as usize * 4];
+        assert_eq!(interim_clip(&short).len(), short.len());
+
+        // Long one: capped, so a pass late in an utterance costs no more than a pass
+        // early in it. This is what stopped interims getting slower as the preacher
+        // kept talking.
+        let long = vec![0.0f32; TARGET_RATE as usize * 12];
+        assert_eq!(interim_clip(&long).len(), INTERIM_WINDOW_SAMPLES);
     }
 
     use super::merge_ranked;
@@ -847,6 +945,145 @@ fn transcribe_detect(
     }
 }
 
+/// The tail of an utterance: the part an interim pass has not already read. Short
+/// utterances are returned whole. See `INTERIM_WINDOW_SAMPLES`.
+fn interim_clip(utter: &[f32]) -> Vec<f32> {
+    utter[utter.len().saturating_sub(INTERIM_WINDOW_SAMPLES)..].to_vec()
+}
+
+/// A clip handed to the transcription thread.
+enum Job {
+    /// Mid-utterance pass. Speculative, so it may be dropped if it has been
+    /// overtaken.
+    Interim(Vec<f32>),
+    /// An endpointed utterance. Never dropped: this is what the operator is
+    /// waiting for.
+    Final(Vec<f32>),
+}
+
+#[derive(Default)]
+struct Queue {
+    jobs: VecDeque<Job>,
+    stopping: bool,
+}
+
+/// What an arriving clip does to the queue. Kept apart from the thread so the rule
+/// can be tested rather than trusted, because getting it wrong is invisible: the app
+/// would simply feel slow, or drop the one utterance that mattered.
+fn enqueue(jobs: &mut VecDeque<Job>, job: Job) {
+    match job {
+        // A final covers every interim of the same utterance, and more besides.
+        // Transcribing those first would only delay it in order to say less.
+        Job::Final(_) => {
+            jobs.retain(|j| matches!(j, Job::Final(_)));
+            jobs.push_back(job);
+        }
+        // Only the newest interim is worth anything: it contains the older one's
+        // speech. An interim waiting behind a final belongs to the next utterance,
+        // so that one stays.
+        Job::Interim(_) => {
+            if matches!(jobs.back(), Some(Job::Interim(_))) {
+                jobs.pop_back();
+            }
+            jobs.push_back(job);
+        }
+    }
+}
+
+/// Transcription, moved off the capture loop.
+///
+/// It used to run inline, which cost more than the obvious "the microphone stops
+/// being read for a second". The real damage was to the *final* pass: an interim
+/// that began a fifth of a second before the preacher stopped talking held the
+/// endpointed utterance behind it for its whole duration, so the slowest passes
+/// landed on exactly the utterances that mattered. Now the loop only ever hands
+/// over a clip, and the queue decides what is still worth doing.
+struct Transcriber {
+    queue: Arc<(std::sync::Mutex<Queue>, std::sync::Condvar)>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Transcriber {
+    fn submit(&self, job: Job) {
+        let (lock, cv) = &*self.queue;
+        let Ok(mut q) = lock.lock() else { return };
+        if q.stopping {
+            return;
+        }
+        enqueue(&mut q.jobs, job);
+        cv.notify_one();
+    }
+
+    /// Stop, but finish any endpointed utterance still queued — the last thing the
+    /// preacher said should still reach the screen. Queued interims are dropped.
+    fn finish(mut self) {
+        {
+            let (lock, cv) = &*self.queue;
+            if let Ok(mut q) = lock.lock() {
+                q.stopping = true;
+                q.jobs.retain(|j| matches!(j, Job::Final(_)));
+            }
+            cv.notify_one();
+        }
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Start the transcription thread. It owns the detection state — remembered book,
+/// what is on screen, the confirm/refine loop — because it is the only thing that
+/// reads or writes it, and keeping it here means the capture loop cannot race it.
+fn spawn_transcriber(
+    app: AppHandle,
+    model: PathBuf,
+    binary: PathBuf,
+    decode: stt::Decode,
+) -> Transcriber {
+    let queue = Arc::new((std::sync::Mutex::new(Queue::default()), std::sync::Condvar::new()));
+    let mine = Arc::clone(&queue);
+    let handle = std::thread::spawn(move || {
+        let mut ctx = RefContext::default();
+        let mut last_ref: Option<RefKey> = None;
+        let mut pending: Option<crate::resolution::Pending> = None;
+        let mut recent_words: VecDeque<String> = VecDeque::new();
+        let mut last_final = Instant::now();
+
+        loop {
+            let job = {
+                let (lock, cv) = &*mine;
+                let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
+                while q.jobs.is_empty() && !q.stopping {
+                    q = cv.wait(q).unwrap_or_else(|e| e.into_inner());
+                }
+                match q.jobs.pop_front() {
+                    Some(j) => j,
+                    None => break, // stopping, and nothing left owed
+                }
+            };
+            match job {
+                Job::Interim(audio) => transcribe_detect(
+                    &app, &model, &binary, decode, &audio, &mut ctx, &mut last_ref,
+                    &mut pending, &mut recent_words, false,
+                ),
+                Job::Final(audio) => {
+                    // A book named before a long silence is no longer what "verse 12"
+                    // refers to. Measured from the last utterance actually transcribed.
+                    if last_final.elapsed().as_secs() > CTX_STALE_SECS {
+                        ctx.clear();
+                    }
+                    last_final = Instant::now();
+                    transcribe_detect(
+                        &app, &model, &binary, decode, &audio, &mut ctx, &mut last_ref,
+                        &mut pending, &mut recent_words, true,
+                    );
+                }
+            }
+        }
+    });
+    Transcriber { queue, handle: Some(handle) }
+}
+
 /// Cut a recording into utterances the way the live loop cuts the microphone:
 /// same silence threshold, same endpoint delay, same minimum speech, same cap.
 /// Returns each utterance with the second it began, so a replay of a recorded
@@ -1150,15 +1387,14 @@ fn run_inner(
     let (stream, rx) = open_mic(input)?;
     let _ = app.emit("listen-started", ());
 
+    let worker =
+        spawn_transcriber(app.clone(), model.to_path_buf(), binary.to_path_buf(), decode);
+
     let mut utter: Vec<f32> = Vec::new();
     let mut recent: Vec<f32> = Vec::new();
     let mut speech_ms = 0f32;
     let mut silence_ms = 0f32;
     let mut last_interim = 0usize;
-    let mut ctx = RefContext::default();
-    let mut last_ref: Option<RefKey> = None;
-    let mut pending: Option<crate::resolution::Pending> = None;
-    let mut recent_words: VecDeque<String> = VecDeque::new();
     let mut last_activity = Instant::now();
     let mut last_frame = Instant::now();
     let mut warned_silent = false;
@@ -1216,7 +1452,7 @@ fn run_inner(
                     && speech_ms >= MIN_SPEECH_MS
                     && utter.len().saturating_sub(last_interim) >= INTERIM_SAMPLES
                 {
-                    transcribe_detect(app, model, binary, decode, &utter, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, false);
+                    worker.submit(Job::Interim(interim_clip(&utter)));
                     last_interim = utter.len();
                     last_activity = Instant::now();
                 }
@@ -1230,12 +1466,8 @@ fn run_inner(
                     silence_ms = 0.0;
                     last_interim = 0;
                     if had >= MIN_SPEECH_MS {
-                        if last_activity.elapsed().as_secs() > CTX_STALE_SECS {
-                            ctx.clear();
-                        }
                         last_activity = Instant::now();
-                        let audio = trim_trailing_silence(&audio);
-                        transcribe_detect(app, model, binary, decode, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
+                        worker.submit(Job::Final(trim_trailing_silence(&audio)));
                     }
                 }
             }
@@ -1250,8 +1482,7 @@ fn run_inner(
                         last_interim = 0;
                         if had >= MIN_SPEECH_MS {
                             last_activity = Instant::now();
-                            let audio = trim_trailing_silence(&audio);
-                            transcribe_detect(app, model, binary, decode, &audio, &mut ctx, &mut last_ref, &mut pending, &mut recent_words, true);
+                            worker.submit(Job::Final(trim_trailing_silence(&audio)));
                         }
                     }
                 }
@@ -1260,6 +1491,8 @@ fn run_inner(
         }
     }
     drop(stream);
+    // Let the last endpointed utterance land before the session is torn down.
+    worker.finish();
     // Finalize the service recording (kept only if it ran long enough), writing the
     // moments captured during it into the sidecar.
     if let Some(r) = recorder {
@@ -1297,6 +1530,9 @@ pub fn run_listen_loop(
         Ok(_) => stt::Decode::from_env_or_model(&model),
         Err(_) => decode,
     };
+    // Start reading the model into memory now, while the microphone is still being
+    // opened, so the first utterance does not pay for it.
+    stt::prewarm(&model, &binary);
     // If recording is on, open the service recording. A failure here (e.g. disk) must not
     // stop the operator listening — just skip the recording.
     let recorder = record.and_then(|t| match crate::sessions::Recorder::start(t) {

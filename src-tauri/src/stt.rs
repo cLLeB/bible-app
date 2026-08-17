@@ -231,8 +231,65 @@ fn free_port() -> Result<u16, String> {
     sock.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
 }
 
-fn threads() -> String {
-    std::thread::available_parallelism().map(|n| n.get().min(8)).unwrap_or(4).to_string()
+/// How many threads to give whisper.
+///
+/// ggml puts a barrier between every layer, so a pass runs at the speed of its
+/// slowest thread. On the hybrid Intel chips now in most laptops (a few fast
+/// performance cores plus a bank of slow efficiency ones) that makes the count a
+/// real tuning knob rather than "use everything": threads landing on E-cores can
+/// hold back the ones on P-cores.
+///
+/// 8 is where this has sat, and it is a guess, not a measurement — a sweep on this
+/// machine was inconclusive because the laptop was 69% busy with a browser at the
+/// time, which itself cost more than any thread count could win back. So the number
+/// is now settable rather than silently assumed:
+///
+///   * `BIBLE_APP_THREADS` for benching and for an operator working around a
+///     machine that behaves oddly,
+///   * otherwise whatever a measurement on this machine found (`set_tuned_threads`,
+///     fed by the accelerator probe),
+///   * otherwise the old default, so nothing regresses on a machine that has not
+///     been measured.
+pub fn threads() -> String {
+    if let Ok(v) = std::env::var("BIBLE_APP_THREADS") {
+        if let Ok(n) = v.trim().parse::<usize>() {
+            if n > 0 {
+                return n.to_string();
+            }
+        }
+    }
+    if let Some(n) = tuned_threads() {
+        return n.to_string();
+    }
+    default_threads().to_string()
+}
+
+fn default_threads() -> usize {
+    std::thread::available_parallelism().map(|n| n.get().min(8)).unwrap_or(4)
+}
+
+/// The thread count measured for this machine, set once by `calibrate::tune_threads`.
+static TUNED_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn tuned_threads() -> Option<usize> {
+    match TUNED_THREADS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        n => Some(n),
+    }
+}
+
+pub fn set_tuned_threads(n: usize) {
+    TUNED_THREADS.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The thread counts worth trying on this machine, cheapest sweep that still
+/// brackets the answer: half the cores, the current default, and everything.
+pub fn thread_candidates() -> Vec<usize> {
+    let all = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let mut c = vec![(all / 2).max(2), default_threads(), all];
+    c.sort_unstable();
+    c.dedup();
+    c
 }
 
 /// Start whisper-server for `model` (or reuse the running one). The server loads
@@ -298,6 +355,30 @@ fn ensure_server(model: &Path, server_exe: &Path) -> Result<u16, String> {
     let _ = child.kill();
     let _ = child.wait();
     Err("whisper-server did not come up".into())
+}
+
+/// Load the model now, in the background, instead of on the first thing anyone says.
+///
+/// `ensure_server` is called from inside `transcribe`, so without this the first
+/// utterance of the service waits for half a gigabyte to be read off disk on top of
+/// its own transcription — measured at 2.3s to 4s for `small`. That is the very
+/// first impression the app gives, every Sunday, and it was the worst moment of the
+/// whole service.
+///
+/// Safe to call more than once: `ensure_server` reuses a server already running for
+/// the same model. A failure is not reported to the operator, because nothing is
+/// broken — the first utterance simply loads the model the old way.
+pub fn prewarm(model: &Path, binary: &Path) {
+    let server_exe = binary.with_file_name("whisper-server.exe");
+    if !server_exe.exists() {
+        return;
+    }
+    let model = model.to_path_buf();
+    std::thread::spawn(move || {
+        if let Err(e) = ensure_server(&model, &server_exe) {
+            eprintln!("whisper prewarm failed ({e}); the first utterance will load the model");
+        }
+    });
 }
 
 /// Stop the resident server and free its memory. Called when listening stops and
