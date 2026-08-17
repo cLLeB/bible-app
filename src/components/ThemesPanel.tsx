@@ -126,7 +126,7 @@ export function ThemesPanel() {
                 borderColor: t.id === activeId ? "var(--accent, #3b82f6)" : "var(--border)",
                 borderWidth: t.id === activeId ? 2 : 1,
               }}
-              title={t.builtIn ? "Built-in: use New to make an editable copy" : "Custom theme"}
+              
             >
               <span
                 className="inline-block h-4 w-4 rounded-full border"
@@ -194,7 +194,7 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
             <option value="video">Video</option>
           </select>
         </label>
-        <label className="flex items-center gap-1.5" title="Background / behind-media colour">
+        <label className="flex items-center gap-1.5">
           <input type="color" value={bg.color} onChange={(e) => setBg({ color: e.target.value })} />
         </label>
         {bg.kind === "gradient" && (
@@ -247,7 +247,7 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
                 <option value="contain">Contain</option>
               </select>
             </label>
-            <label className="flex items-center gap-1.5" title="Darken the media so text stays readable">
+            <label className="flex items-center gap-1.5">
               Dim
               <input
                 type="range"

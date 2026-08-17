@@ -116,7 +116,6 @@ export function AudioInputPicker({ disabled, onChanged }: AudioInputPickerProps)
           value={shown}
           disabled={disabled}
           onChange={(e) => choose(e.target.value)}
-          title="The sound-desk feed for a service; this laptop's own microphone only to demonstrate"
         >
           <option value="">Pick the sound-desk feed…</option>
           {devices.length > 0 && (
@@ -201,7 +200,7 @@ export function AudioInputPicker({ disabled, onChanged }: AudioInputPickerProps)
       {chosen === "" && pendingRoomMic === null && (
         <p className="text-sm text-[var(--muted)]">
           {devices.length === 0
-            ? "No sound-desk feed connected. Plug the laptop into the mixer (USB from the desk, or a USB audio interface) and press Rescan. To demonstrate the app without any of that, pick this laptop's own microphone below."
+            ? "No sound-desk feed connected. Plug into the mixer and press Rescan."
             : "Pick the sound-desk feed to start listening."}
         </p>
       )}

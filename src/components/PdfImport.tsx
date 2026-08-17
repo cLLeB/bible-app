@@ -122,11 +122,6 @@ export function PdfImport() {
           {busy ? "Importing…" : "Import deck"}
         </button>
       </div>
-      <p className="text-xs text-[var(--faint)]">
-        PowerPoint (.pptx), OpenDocument (.odp) and PDF. Pages become images in Media, so
-        they preview, project, step page by page, join a service order and run in the
-        announcements loop, and they are still there next Sunday.
-      </p>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
         {converters.length > 0 ? (
@@ -166,7 +161,6 @@ export function PdfImport() {
                 <button
                   onClick={() => stagePreview({ kind: "image", src: page.path })}
                   className="btn btn-sm"
-                  title="Show it in the preview pane"
                 >
                   Preview
                 </button>

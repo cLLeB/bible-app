@@ -185,15 +185,10 @@ export function OutputsPanel() {
               </option>
             ))}
           </select>
-          <button onClick={() => void loadDisplays()} className="btn btn-sm" title="Re-check after plugging in a TV">
+          <button onClick={() => void loadDisplays()} className="btn btn-sm">
             Refresh
           </button>
         </div>
-        <p className="mt-1 text-xs text-[var(--faint)]">
-          {displays.length <= 1
-            ? "Only this laptop's screen is connected, so output opens as a window instead of covering the console. Plug in a TV and press Refresh."
-            : "Output fills that screen and never takes keyboard focus, so you can keep typing here while it is live."}
-        </p>
       </div>
 
       {/* Which speakers video and music come out of. A separate decision from the
@@ -219,29 +214,17 @@ export function OutputsPanel() {
                   </option>
                 ))}
             </select>
-            <button
-              onClick={() => void loadSounds()}
-              className="btn btn-sm"
-              title="Re-check after plugging in a TV"
-            >
+            {/* Windows withholds the device names until the app has been allowed a
+                microphone once. The button asks, reads the list and releases it. */}
+            {namesHidden(sounds) && (
+              <button onClick={() => void nameThem()} className="btn btn-sm">
+                Show names
+              </button>
+            )}
+            <button onClick={() => void loadSounds()} className="btn btn-sm">
               Refresh
             </button>
           </div>
-          <p className="mt-1 text-xs text-[var(--faint)]">
-            {namesHidden(sounds) ? (
-              <>
-                Windows will not tell us what these outputs are called until the app has
-                been allowed to use a microphone once.{" "}
-                <button className="underline" onClick={() => void nameThem()}>
-                  Show their names
-                </button>{" "}
-                asks for that, reads the list, and releases it immediately. Nothing is
-                recorded.
-              </>
-            ) : (
-              "Pick the TV or sound desk to send video and music to. Live listening still uses the sound input chosen under Live listening."
-            )}
-          </p>
         </div>
       )}
 
@@ -286,11 +269,7 @@ export function OutputsPanel() {
 
                 {urls.length > 1 && (
                   <div className="mt-3">
-                    <p className="text-xs text-[var(--faint)]">
-                      This laptop is on more than one network. If the phone can&apos;t reach that
-                      address, pick the one matching the network the phone is on (a phone hotspot is
-                      usually 172.20.10.x):
-                    </p>
+                    <p className="text-xs text-[var(--faint)]">Other addresses</p>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {urls.map((u) => (
                         <button

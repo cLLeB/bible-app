@@ -89,11 +89,6 @@ export function LearnFromSermon({ model, who, disabled }: LearnFromSermonProps) 
         </span>
       </div>
 
-      <p className="text-sm text-[var(--muted)]">
-        Pick any recordings of {who || "this speaker"} preaching (MP3, M4A, WAV, FLAC). The
-        more, the better. The app learns their voice from the scriptures they read aloud.
-        Takes a while; stays on this machine.
-      </p>
 
       {running && progress && (
         <div className="space-y-1">

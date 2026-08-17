@@ -137,7 +137,6 @@ export function ServiceReview() {
               <button
                 onClick={() => setOpen(open === s.name ? null : s.name)}
                 className="text-sm font-semibold"
-                title="Show what happened during this service"
               >
                 {open === s.name ? "▾" : "▸"} {when(s.name)}
               </button>
@@ -156,7 +155,6 @@ export function ServiceReview() {
                     onClick={() => void approve(s)}
                     disabled={busy === s.name}
                     className="btn btn-sm btn-primary"
-                    title="Keep this service and let the app learn from it"
                   >
                     Approve
                   </button>
@@ -186,7 +184,7 @@ export function ServiceReview() {
                       <div key={momentKey(m, i)} className="flex items-start gap-2 rounded p-1.5 text-xs">
                         <span
                           className={`tint-strong rounded px-1.5 py-0.5 text-[10px] ${kind.tone}`}
-                          title={kind.hint}
+                          
                         >
                           {kind.label}
                         </span>

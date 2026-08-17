@@ -18,7 +18,6 @@ export function ThemeToggle() {
     <button
       onClick={toggle}
       className="btn btn-sm"
-      title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
       {dark ? "☀ Light" : "☾ Dark"}
     </button>

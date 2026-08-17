@@ -46,7 +46,6 @@ export function ResultCard() {
             })
           }
           className="btn"
-          title="Show it in the preview pane without putting it on the screen"
         >
           Preview
         </button>
@@ -76,7 +75,6 @@ export function ResultCard() {
                 projectParallel(result.bookOsis, result.chapter, result.verse, secondaryCode)
               }
               className="btn"
-              title="Show this verse in both translations side by side"
             >
               Both
             </button>

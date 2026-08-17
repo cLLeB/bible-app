@@ -287,7 +287,6 @@ export function ListenPanel() {
         {consent && (
           <label
             className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-            title="Record this service to improve the profile; stays on this machine. Set before starting."
           >
             <input
               type="checkbox"
@@ -373,7 +372,6 @@ export function ListenPanel() {
                         {onRunSheet(cues, c.verse) && (
                           <span
                             className="tint-strong tint-info rounded px-1.5 py-0.5 text-[10px]"
-                            title="This chapter is on the run sheet"
                           >
                             on run sheet
                           </span>
@@ -422,7 +420,6 @@ export function ListenPanel() {
           {onRoomMic && (
             <span
               className="tint tint-warn ml-2 rounded border px-1.5 py-0.5 text-xs font-normal"
-              title="Listening to this laptop's own microphone, which hears the room. For a service, use the feed from the sound desk."
             >
               room mic
             </span>
@@ -435,7 +432,6 @@ export function ListenPanel() {
             <div className="panel-title">When to project by itself</div>
             <label
               className="flex items-center gap-1.5 text-sm"
-              title="Auto-project at or above this confidence"
             >
               <input
                 type="checkbox"
@@ -456,7 +452,6 @@ export function ListenPanel() {
             </label>
             <label
               className="flex items-center gap-1.5 text-sm"
-              title="Auto-project a medium match when its chapter is on the run sheet"
             >
               <input
                 type="checkbox"

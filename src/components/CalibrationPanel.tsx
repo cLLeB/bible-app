@@ -160,7 +160,6 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
             value={who}
             disabled={disabled}
             onChange={(e) => void changeWho(e.target.value)}
-            title="Whose voice the app is tuned for"
           >
             {profiles.map((p) => (
               <option key={p} value={p}>
@@ -175,16 +174,10 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
             className="btn"
             disabled={disabled || protectedProfile}
             onClick={() => void removeWho()}
-            title={protectedProfile ? "Baked-in preachers can't be removed" : "Remove this profile"}
           >
             Remove
           </button>
         </div>
-
-        <p className="text-sm text-[var(--muted)]">
-          Each speaker is tuned on their own, so teaching one never affects the others.
-          Everything stays on this machine.
-        </p>
 
         {/* Recording a preacher is their call, not the app's. Off until asked for,
             asked per speaker, and undoable — including the recordings themselves. */}
@@ -199,10 +192,10 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
             />
             <span>
               Record services to improve {who || "this speaker"}
+              {/* Not a description of a control: this is what the person ticking the
+                  box is consenting to on someone else's behalf. Kept short, kept. */}
               <span className="block text-xs text-[var(--muted)]">
-                Keeps the last few services on this machine so the app can learn {who || "them"}’s
-                voice. Nothing leaves this machine, nothing is uploaded, and you can delete it all
-                at any time.
+                Kept on this machine, never uploaded, deletable any time.
               </span>
             </span>
           </label>
@@ -211,7 +204,6 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
               className="btn btn-sm"
               disabled={disabled || !who}
               onClick={() => void forgetAll()}
-              title="Delete every recording of this speaker"
             >
               Delete {who || "this speaker"}’s recordings
             </button>
@@ -220,7 +212,6 @@ export function CalibrationPanel({ model, disabled, onProfileChange }: Calibrati
                 className="btn btn-sm"
                 disabled={disabled || !who}
                 onClick={() => void resetToShipped()}
-                title="Discard everything this machine has learnt about this speaker and go back to the tuning the app was installed with"
               >
                 Reset {who} to as shipped
               </button>

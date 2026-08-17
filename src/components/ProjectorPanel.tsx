@@ -78,7 +78,6 @@ export function ProjectorPanel() {
           value={cfg.port}
           onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 4352 })}
           className="input w-20 text-center"
-          title="PJLink port (default 4352)"
         />
         <input
           type="password"

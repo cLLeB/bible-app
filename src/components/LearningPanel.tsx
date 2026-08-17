@@ -126,9 +126,6 @@ export function LearningPanel() {
               style={{ width: `${progress?.percent ?? 0}%`, background: "var(--live)" }}
             />
           </div>
-          <p className="text-xs text-[var(--muted)]">
-            It stops on its own the moment you start a service or put anything on the screen.
-          </p>
         </div>
       ) : proposal ? (
         <div className="space-y-1.5 rounded border p-2" style={{ background: "var(--surface)" }}>
@@ -149,7 +146,6 @@ export function LearningPanel() {
               onClick={() => void act(acceptProposal)}
               disabled={busy}
               className="btn btn-sm btn-primary"
-              title="Use these; you can put it back afterwards"
             >
               Use this
             </button>
@@ -191,7 +187,6 @@ export function LearningPanel() {
             onClick={() => void act(rollbackProfile)}
             disabled={busy}
             className="btn btn-sm"
-            title="Put back the settings in force before the last change"
           >
             Undo last change
           </button>

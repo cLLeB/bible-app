@@ -79,10 +79,6 @@ export function PlanningCenterPanel() {
   return (
     <section className="space-y-2">
       <h2 className="panel-title">Planning Center import</h2>
-      <p className="text-xs text-[var(--faint)]">
-        Uses your church's Personal Access Token (Application ID + Secret). Songs matched by
-        title are added to the service order; unmatched songs are listed to add first.
-      </p>
 
       <div className="grid grid-cols-2 gap-2 text-sm">
         <input

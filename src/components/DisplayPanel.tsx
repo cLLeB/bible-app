@@ -83,13 +83,11 @@ export function DisplayPanel() {
           value={alertSecs}
           onChange={(e) => setAlertSecs(Math.max(0, Number(e.target.value) || 0))}
           className="input w-16 text-center"
-          title="Auto-dismiss after this many seconds (0 = stays until cleared)"
         />
         <span className="text-sm text-[var(--muted)]">s</span>
         <button
           onClick={() => alertText.trim() && showAlert(alertText.trim(), alertSecs)}
           className="btn btn-primary"
-          title="Overlays the congregation screen without hiding what's live"
         >
           Alert
         </button>
@@ -111,7 +109,6 @@ export function DisplayPanel() {
         <button
           onClick={() => stageMsg.trim() && setStageMessage(stageMsg.trim())}
           className="btn btn-primary"
-          title="Shows only on the stage monitor, never on the projector"
         >
           Send
         </button>
@@ -128,7 +125,7 @@ export function DisplayPanel() {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-[var(--muted)]">Stage timer</span>
-        <button onClick={() => setStageTimer("countup", 0)} className="btn" title="Count up on the stage monitor only">
+        <button onClick={() => setStageTimer("countup", 0)} className="btn">
           Start elapsed
         </button>
         <button

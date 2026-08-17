@@ -185,9 +185,6 @@ export function MediaPanel() {
           <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
             Sound · {audio.title}
           </div>
-          <p className="mt-1 text-xs text-[var(--faint)]">
-            Plays under whatever is on the screen. Blanking the screen does not stop it.
-          </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
               onClick={() =>
@@ -256,10 +253,6 @@ export function MediaPanel() {
         <div className="text-xs uppercase tracking-wide text-[var(--faint)]">
           Announcements loop
         </div>
-        <p className="mt-1 text-xs text-[var(--faint)]">
-          Walks the library on a timer. Images are held for the dwell time; a video plays to
-          its own end before the loop moves on.
-        </p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <label className="flex items-center gap-1">
             <span className="text-[var(--muted)]">Hold each image</span>
@@ -374,7 +367,6 @@ export function MediaPanel() {
             <button
               onClick={() => addToService(m.id, m.title, m.kind)}
               className="btn btn-sm"
-              title="Add to the service run order"
             >
               ＋
             </button>
@@ -397,7 +389,6 @@ export function MediaPanel() {
             <button
               onClick={() => void guard(async () => setItems(await removeMedia(m.id)))}
               className="icon-btn"
-              title="Remove from library (the file itself is left alone)"
             >
               ✕
             </button>

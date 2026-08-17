@@ -66,7 +66,6 @@ export default function App() {
               onClick={() => changeTab("live")}
               aria-pressed={tab === "live"}
               className={`btn btn-sm ${tab === "live" ? "btn-primary" : ""}`}
-              title="What you use while a service is running"
             >
               Live
             </button>
@@ -74,7 +73,6 @@ export default function App() {
               onClick={() => changeTab("prepare")}
               aria-pressed={tab === "prepare"}
               className={`btn btn-sm ${tab === "prepare" ? "btn-primary" : ""}`}
-              title="Everything you set up before the service: songs, slides, themes, outputs"
             >
               Prepare
             </button>
@@ -164,10 +162,6 @@ export default function App() {
               <summary className="cursor-pointer select-none panel-title">
                 Admin &amp; integrations
               </summary>
-              <p className="mt-1 text-xs text-[var(--faint)]">
-                Only needed if your church uses Planning Center Online, or holds a CCLI licence and
-                has to file song-usage reports.
-              </p>
               <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
                 <PlanningCenterPanel />
                 <SongUsageReport />

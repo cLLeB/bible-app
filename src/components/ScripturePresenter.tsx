@@ -76,7 +76,7 @@ export function ScripturePresenter() {
       <span className="font-semibold">{current.reference}</span>
       <span className="hidden flex-1 truncate text-xs text-[var(--muted)] lg:inline">· {current.text}</span>
       <div className="ml-auto flex items-center gap-1">
-        <button onClick={() => go("prev-chapter")} className="btn btn-sm" title="Previous chapter (PageUp)">⏮ ch</button>
+        <button onClick={() => go("prev-chapter")} className="btn btn-sm">⏮ ch</button>
         <button onClick={() => go("prev-verse")} className="icon-btn" title="Previous verse (←)">◀</button>
         <button onClick={() => go("next-verse")} className="icon-btn" title="Next verse (→)">▶</button>
         <button onClick={() => go("next-chapter")} className="btn btn-sm" title="Next chapter (PageDown)">ch ⏭</button>
@@ -86,7 +86,6 @@ export function ScripturePresenter() {
             onChange={(e) => setJump(e.target.value)}
             placeholder="15 or 4:5"
             className="input h-9 w-20 text-sm"
-            title="Jump to verse, or chapter:verse, in this book"
           />
         </form>
       </div>

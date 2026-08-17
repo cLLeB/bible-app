@@ -184,7 +184,6 @@ export function ServicePanel() {
             }
           }}
           className="btn btn-sm"
-          title="Save the current run order as a reusable template"
         >
           Save
         </button>
@@ -225,7 +224,6 @@ export function ServicePanel() {
               }}
               className="btn btn-sm"
               disabled={!chosenTemplate}
-              title="Delete the selected template"
             >
               ✕
             </button>
