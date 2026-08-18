@@ -4,6 +4,7 @@ import {
   listSongs,
   lookupReference,
   projectMedia,
+  projectSlide,
   searchScripture,
   type MediaLibraryItem,
   type SongSummary,
@@ -103,9 +104,12 @@ export function GlobalSearch() {
         addVerse(v);
       } else if (h.kind === "media") {
         await projectMedia(Number(h.id.split(":")[1]));
+      } else if (h.kind === "song") {
+        // From the top. Any other slide would be a guess about where the operator
+        // means to come in, and the first one is the only answer that is never
+        // surprising - they can step forward from there in a keypress.
+        await projectSlide(Number(h.id.split(":")[1]), 0);
       }
-      // A song opens in its own panel, which owns the running order within it, so
-      // this only takes the operator there rather than projecting a guess.
       setQuery("");
       setHits([]);
     } catch {
