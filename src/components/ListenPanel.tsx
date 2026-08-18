@@ -46,8 +46,8 @@ export function ListenPanel() {
   // because the device is only known while a server is actually running, and again
   // when the startup check settles on a backend.
   const [accel, setAccel] = useState<AccelStatus | null>(null);
-  // Fixed by this build's flavor (base-personal / small-personal), not operator-switchable.
-  const [model, setModel] = useState<SttModel>("base");
+  // Fixed by this build's flavor (small-personal / medium-personal), not operator-switchable.
+  const [model, setModel] = useState<SttModel>("small");
   const [lines, setLines] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);

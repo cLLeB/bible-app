@@ -88,16 +88,15 @@ impl Decode {
     /// and the full window manages only 7-8/12. Trimming the encoder to the clip
     /// evidently keeps it from wandering off into the silence.
     ///
-    /// base and tiny want the FULL window: base resolves 10/12 with it and
-    /// collapses to 3-5/12 fitted, at any margin. The weak models are already
-    /// marginal on the hard words and a truncated window pushes them over.
-    pub fn for_model(model: &Path) -> Self {
-        let name = model.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        let weak = name.contains("tiny") || name.contains("base");
-        Self {
-            window: if weak { Window::Full } else { Window::Fit { margin: 1.5 } },
-            ..Self::default()
-        }
+    /// tiny and base wanted the opposite, and that is why this used to branch. They
+    /// are gone from the project, so it no longer does.
+    pub fn for_model(_model: &Path) -> Self {
+        // Every model still in the project is small or larger, and those want the
+        // fitted window. The full-window branch existed for tiny and base, which are
+        // no longer used anywhere: base transcribed badly enough to read as a
+        // detection fault, and on a graphics card small is faster than base ever was
+        // on the processor, so nothing is being traded for it.
+        Self::default()
     }
 
     /// Bench/dev override, e.g. `BIBLE_APP_DECODE=beam=1,prompt=0,window=full`.
@@ -696,13 +695,10 @@ mod tests {
     }
 
     #[test]
-    fn weak_models_keep_the_full_window_strong_ones_fit_it() {
-        assert_eq!(Decode::for_model(Path::new("ggml-base.en.bin")).window, Window::Full);
-        assert_eq!(Decode::for_model(Path::new("ggml-tiny.en.bin")).window, Window::Full);
-        assert_eq!(
-            Decode::for_model(Path::new("ggml-small.en.bin")).window,
-            Window::Fit { margin: 1.5 }
-        );
+    fn every_model_still_in_the_project_fits_the_window_to_the_clip() {
+        for m in ["ggml-small.en.bin", "ggml-medium.en.bin"] {
+            assert_eq!(Decode::for_model(Path::new(m)).window, Window::Fit { margin: 1.5 }, "{m}");
+        }
     }
 
     #[test]

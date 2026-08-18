@@ -254,7 +254,7 @@ mod tests {
     fn uncalibrated_speakers_fall_back_to_shipped_defaults() {
         let db = crate::db::open_at(Path::new(":memory:")).unwrap();
         db.migrate().unwrap();
-        let model = Path::new("ggml-base.en.bin");
+        let model = Path::new("ggml-small.en.bin");
         assert_eq!(load(&db, model, "Guest"), Decode::for_model(model));
     }
 
@@ -264,7 +264,7 @@ mod tests {
     fn calibrating_one_speaker_does_not_disturb_another() {
         let db = crate::db::open_at(Path::new(":memory:")).unwrap();
         db.migrate().unwrap();
-        let model = Path::new("ggml-base.en.bin");
+        let model = Path::new("ggml-small.en.bin");
 
         let hers = Decode { beam: 5, prompt: true, normalize: true, window: Window::Full };
         let theirs = Decode { beam: 1, prompt: true, normalize: false, window: Window::Fit { margin: 1.5 } };

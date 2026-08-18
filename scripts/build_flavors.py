@@ -71,7 +71,7 @@ LICENSED = ["NIV", "NLT", "ESV", "NKJV", "NASB", "CSB17", "AMP", "MSG", "NET",
 # up with live speech. A graphics card changes that (see src-tauri/src/accel.rs), so
 # it is a flavor worth building again. Its model file is ~1.5 GB, which the installer
 # carries, so it is not a default anyone should reach for without meaning to.
-MODELS = ["base", "small", "tiny", "medium"]
+MODELS = ["small", "medium"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"

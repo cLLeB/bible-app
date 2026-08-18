@@ -145,7 +145,7 @@ fn main() {
         eprintln!("no whisper binary at {}", binary.display());
         std::process::exit(2);
     }
-    let models: Vec<(&str, PathBuf)> = ["base", "small"]
+    let models: Vec<(&str, PathBuf)> = ["small", "medium"]
         .iter()
         .map(|m| (*m, root.join("models").join(format!("ggml-{m}.en.bin"))))
         .filter(|(_, p)| p.exists())

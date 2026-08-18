@@ -51,7 +51,7 @@ fn main() {
         std::process::exit(2);
     }
     let wav = PathBuf::from(&args[0]);
-    let kind = args.get(1).cloned().unwrap_or_else(|| "base".to_string());
+    let kind = args.get(1).cloned().unwrap_or_else(|| "small".to_string());
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
     let model = root.join("models").join(format!("ggml-{kind}.en.bin"));

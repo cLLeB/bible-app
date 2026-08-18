@@ -238,22 +238,18 @@ pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
 /// asked for on the wall.
 const STRICT_SIMILARITY: f64 = 0.90;
 
-/// Followed by "chapter four verse six", it is a book. Nothing else in scripture
-/// takes a chapter and verse: people, places and events do not. So the grammar
-/// after the word is stronger evidence than the spelling of the word itself, and the
-/// bar comes down.
+/// A word followed by "chapter four verse six" can only be a book, and it is tempting
+/// to lower the similarity bar on that reasoning. It was tried, at 0.82, and reverted.
 ///
-/// This is what "Zacchaeria, chapter 4 verse 6" needed. Heard for Zechariah, it
-/// scored too low to be recovered as a book, and being close to Zacchaeus the story
-/// index answered with Luke 19 - so asking for Zechariah 4:6 projected the tax
-/// collector. Enumerating mishearings would have fixed that one word; this fixes the
-/// class.
-const GRAMMAR_BACKED_SIMILARITY: f64 = 0.82;
-
-/// Fuzzy book recovery for a word that a chapter or verse number follows.
-pub fn resolve_book_fuzzy_followed_by_reference(input: &str) -> Option<&'static CanonicalBook> {
-    resolve_book_fuzzy_scored(input, GRAMMAR_BACKED_SIMILARITY)
-}
+/// It fixed nothing and broke something. The case it was built for, "Zacchaeria" for
+/// Zechariah, scores 0.683 and was never going to be reached by any threshold safe to
+/// ship. Meanwhile "Mach" — heard for Mark — scores 0.886 against *Malachi* and 0.667
+/// against Mark, so "Mach 4:1" stopped resolving to nothing and started confidently
+/// opening Malachi instead.
+///
+/// The grammar really is evidence that the word is a book. What it is not is evidence
+/// about *which* book, and that is the half that matters. Mishearings that land this
+/// far off belong in `corrections`, where they are named rather than guessed.
 
 fn resolve_book_fuzzy_scored(input: &str, floor: f64) -> Option<&'static CanonicalBook> {
     if let Some(b) = resolve_book(input) {

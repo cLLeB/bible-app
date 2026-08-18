@@ -469,7 +469,7 @@ export interface Candidate {
   source: string; // "explicit" | "fuzzy" | "context"
 }
 
-export type SttModel = "tiny" | "base" | "small" | "medium";
+export type SttModel = "small" | "medium";
 
 /** Which speakers video and music come out of.
  *

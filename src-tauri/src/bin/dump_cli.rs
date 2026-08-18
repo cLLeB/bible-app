@@ -24,7 +24,7 @@ fn main() {
     }
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let model = root.join("models").join("ggml-base.en.bin");
+    let model = root.join("models").join("ggml-small.en.bin");
     let binary = root.join("bin").join("whisper-cli.exe");
     let decode = stt::Decode::for_model(&model);
 

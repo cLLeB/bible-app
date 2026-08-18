@@ -200,7 +200,7 @@ mod tests {
         aliases.insert(alias.to_string(), "Neh".to_string());
         let mut decode = std::collections::BTreeMap::new();
         decode.insert(
-            crate::flavor::model_file("base"),
+            crate::flavor::model_file("small"),
             crate::profile_seed::DecodeSeed {
                 beam,
                 prompt: true,
@@ -218,7 +218,7 @@ mod tests {
     }
 
     fn beam_of(db: &Db, profile: &str) -> i32 {
-        crate::calibrate::load(db, Path::new(&crate::flavor::model_file("base")), profile).beam
+        crate::calibrate::load(db, Path::new(&crate::flavor::model_file("small")), profile).beam
     }
 
     #[test]
@@ -301,18 +301,18 @@ mod tests {
     #[test]
     fn settings_are_only_proposed_when_they_beat_what_is_already_in_force() {
         let db = open();
-        let base = crate::flavor::model_file("base");
+        let model = crate::flavor::model_file("small");
         apply_entry(&db, "President", &entry("hemaiah", 5, 0.01)).unwrap();
 
         // Worse on the same audio: nothing to say.
-        assert!(propose(&db, "President", &base, &learned(7, 9, &[]), services(3)).is_none());
+        assert!(propose(&db, "President", &model, &learned(7, 9, &[]), services(3)).is_none());
         // Equal is not better — a change that buys nothing is not worth being different for.
-        assert!(propose(&db, "President", &base, &learned(9, 9, &[]), services(3)).is_none());
+        assert!(propose(&db, "President", &model, &learned(9, 9, &[]), services(3)).is_none());
 
         // Better, with enough services behind it: propose the new settings.
-        let p = propose(&db, "President", &base, &learned(11, 9, &[]), services(3)).unwrap();
+        let p = propose(&db, "President", &model, &learned(11, 9, &[]), services(3)).unwrap();
         assert_eq!((p.incumbent_score, p.new_score, p.references), (9, 11, 12));
-        assert_eq!(p.next.decode.get(&base).unwrap().beam, 8);
+        assert_eq!(p.next.decode.get(&model).unwrap().beam, 8);
         // And a proposal, even once stored, changes nothing until it is accepted.
         save_proposal(&db, &p).unwrap();
         assert_eq!(beam_of(&db, "President"), 5);
@@ -326,35 +326,35 @@ mod tests {
     #[test]
     fn one_service_never_retunes_a_speaker_the_build_shipped_tuned() {
         let db = open();
-        let base = crate::flavor::model_file("base");
+        let model = crate::flavor::model_file("small");
         apply_entry(&db, "President", &entry("hemaiah", 5, 0.01)).unwrap();
 
         // A single Sunday, even a flattering one, must not overwrite baked tuning...
-        let one = propose(&db, "President", &base, &learned(12, 9, &[("nemayer", "Neh")]), services(1));
+        let one = propose(&db, "President", &model, &learned(12, 9, &[("nemayer", "Neh")]), services(1));
         let p = one.expect("but the misheard name it found is still worth having");
-        assert_eq!(p.next.decode.get(&base).unwrap().beam, 5, "settings untouched");
+        assert_eq!(p.next.decode.get(&model).unwrap().beam, 5, "settings untouched");
         assert_eq!(p.settings, "unchanged");
         assert_eq!(p.new_score, p.incumbent_score, "no acoustic claim is made");
         assert_eq!(p.new_aliases, vec!["nemayer".to_string()]);
         assert_eq!(p.next.aliases.get("hemaiah").map(String::as_str), Some("Neh"), "kept");
 
         // ...and with nothing else to offer, that same Sunday says nothing at all.
-        assert!(propose(&db, "President", &base, &learned(12, 9, &[]), services(1)).is_none());
+        assert!(propose(&db, "President", &model, &learned(12, 9, &[]), services(1)).is_none());
 
         // Enough services, and the same evidence does re-tune.
-        let p = propose(&db, "President", &base, &learned(12, 9, &[]), services(MIN_SERVICES_TO_RETUNE))
+        let p = propose(&db, "President", &model, &learned(12, 9, &[]), services(MIN_SERVICES_TO_RETUNE))
             .unwrap();
-        assert_eq!(p.next.decode.get(&base).unwrap().beam, 8);
+        assert_eq!(p.next.decode.get(&model).unwrap().beam, 8);
     }
 
     #[test]
     fn a_guest_can_be_tuned_from_their_very_first_service() {
         let db = open();
-        let base = crate::flavor::model_file("base");
+        let model = crate::flavor::model_file("small");
         // Nobody shipped a tuning for a guest, so there is nothing to protect — a
         // single sermon is all they have and it is better than nothing.
-        let p = propose(&db, "Guest — Pastor Mensah", &base, &learned(10, 4, &[]), services(1)).unwrap();
-        assert_eq!(p.next.decode.get(&base).unwrap().beam, 8);
+        let p = propose(&db, "Guest — Pastor Mensah", &model, &learned(10, 4, &[]), services(1)).unwrap();
+        assert_eq!(p.next.decode.get(&model).unwrap().beam, 8);
     }
 
     #[test]
@@ -362,7 +362,7 @@ mod tests {
         let db = open();
         crate::calibrate::save(
             &db,
-            Path::new(&crate::flavor::model_file("base")),
+            Path::new(&crate::flavor::model_file("small")),
             "Vice-President",
             &Decode { beam: 2, prompt: false, normalize: true, window: Window::Fit { margin: 1.5 } },
         )
@@ -376,7 +376,7 @@ mod tests {
         apply_entry(&db, "Vice-President", &snap).unwrap();
 
         assert_eq!(
-            crate::calibrate::load(&db, Path::new(&crate::flavor::model_file("base")), "Vice-President"),
+            crate::calibrate::load(&db, Path::new(&crate::flavor::model_file("small")), "Vice-President"),
             Decode { beam: 2, prompt: false, normalize: true, window: Window::Fit { margin: 1.5 } }
         );
         assert_eq!(crate::learn::load_translation(&db, "Vice-President"), Some("KJV".into()));

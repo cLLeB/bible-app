@@ -1546,7 +1546,8 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
 /// Locate the whisper model + binary. Searched in order: the packaged app's
 /// resource dir (`<res>/models`, `<res>/bin` — how shipped installers carry
 /// them), then the dev project's `models/` and `bin/` dirs. `kind` selects the
-/// flavor's model: "base" (normal), "small" (best), or "tiny" (low-end PCs).
+/// flavor's model: "small" (the floor) or "medium" (best). Nothing below small
+/// is used anywhere: see flavor::models.
 fn resolve_model_and_binary(
     res_dir: Option<&Path>,
     kind: &str,
@@ -1562,7 +1563,7 @@ fn resolve_model_and_binary(
     }
 
     let named = format!("ggml-{kind}.en.bin");
-    let fallbacks = ["ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin", "ggml-medium.en.bin"];
+    let fallbacks = ["ggml-small.en.bin", "ggml-medium.en.bin"];
     let model = model_dirs
         .iter()
         .find_map(|d| {
@@ -1816,7 +1817,7 @@ pub fn start_listening(app: tauri::AppHandle, model: Option<String>) -> Result<(
     begin_listening(&app, model.as_deref())
 }
 
-/// Start the listen loop for `kind` (default "base"). Shared by the console button
+/// Start the listen loop for `kind` (default: this flavor's model). Shared by the console button
 /// and the phone remote — the operator is usually standing at the projector when the
 /// preacher steps up, not sitting at the laptop.
 pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Result<(), String> {
@@ -1824,7 +1825,7 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     if state.listening.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let kind = model.unwrap_or("base").to_string();
+    let kind = model.unwrap_or_else(|| crate::flavor::default_model()).to_string();
     let res_dir = app.path().resource_dir().ok();
     let (model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
     // Use whatever calibration found for the speaker who is preaching today.
@@ -2206,7 +2207,7 @@ fn learn_from_approved(app: &tauri::AppHandle) -> Result<Option<crate::relearn::
     let res_dir = app.path().resource_dir().ok();
     let kind = crate::flavor::default_model().to_string();
     let (target_model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
-    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), "base")
+    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), crate::flavor::default_model())
         .unwrap_or_else(|_| (target_model.clone(), binary.clone()));
     let incumbent = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -2502,13 +2503,13 @@ fn learn_sermons(
     };
 
     let res_dir = app.path().resource_dir().ok();
-    let kind = model.unwrap_or_else(|| "base".to_string());
+    let kind = model.unwrap_or_else(|| crate::flavor::default_model().to_string());
     let (target_model, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
 
     // Finding what was read aloud does not need the good model — it needs the fast
     // one, because it has to listen to every second of every sermon. The settings are
     // then compared on the model the operator will actually use.
-    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), "base")
+    let (scout_model, _) = resolve_model_and_binary(res_dir.as_deref(), crate::flavor::default_model())
         .unwrap_or_else(|_| (target_model.clone(), binary.clone()));
 
     // The scripture lookups are the only thing that touches the database, so hand the
@@ -2722,7 +2723,7 @@ fn calibration_sweep(
     use crate::calibrate;
     use std::time::Instant;
 
-    let kind = model.unwrap_or_else(|| "base".to_string());
+    let kind = model.unwrap_or_else(|| crate::flavor::default_model().to_string());
     let res_dir = app.path().resource_dir().ok();
     let (model_path, binary) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
 

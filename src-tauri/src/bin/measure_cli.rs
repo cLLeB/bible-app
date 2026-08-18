@@ -85,8 +85,8 @@ fn main() {
     }
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let scout_model = root.join("models").join("ggml-base.en.bin");
-    let base_model = root.join("models").join("ggml-base.en.bin");
+    let scout_model = root.join("models").join("ggml-small.en.bin");
+    let base_model = root.join("models").join("ggml-small.en.bin");
     let small_model = root.join("models").join("ggml-small.en.bin");
     let binary = root.join("bin").join("whisper-cli.exe");
     let db = scripture_db(&root.join("data"));
@@ -95,7 +95,7 @@ fn main() {
     let seed: Option<profile_seed::Seed> = seed_path
         .and_then(|p| std::fs::read_to_string(&p).ok())
         .and_then(|s| serde_json::from_str(&s).ok());
-    let base_tuned = tuned(&seed, &profile, "ggml-base.en.bin", &base_model);
+    let base_tuned = tuned(&seed, &profile, "ggml-small.en.bin", &base_model);
     let small_tuned = tuned(&seed, &profile, "ggml-small.en.bin", &small_model);
 
     // Per-passage record.

@@ -69,7 +69,7 @@ fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let target_model = root.join("models").join(format!("ggml-{kind}.en.bin"));
     // Finding what was read aloud only needs the fast model — exactly as the app does.
-    let scout_model = root.join("models").join("ggml-base.en.bin");
+    let scout_model = root.join("models").join("ggml-small.en.bin");
     let binary = root.join("bin").join("whisper-cli.exe");
     let db = scripture_db(&root.join("data"));
 

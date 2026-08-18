@@ -23,7 +23,7 @@ fn bin_root() -> PathBuf {
 fn a_model() -> Option<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?.join("models");
     // Whichever is present; the comparison between backends holds for any of them.
-    ["small", "base", "medium", "tiny"]
+    ["small", "medium"]
         .iter()
         .map(|k| dir.join(format!("ggml-{k}.en.bin")))
         .find(|p| p.exists())

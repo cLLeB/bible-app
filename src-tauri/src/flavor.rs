@@ -50,12 +50,12 @@ pub fn models() -> Vec<&'static str> {
         // Speed is no longer the reason to prefer base either: on a graphics card
         // small runs an utterance in about 1.4s here, which is faster than base
         // managed on the processor.
-        _ => vec!["small", "base", "medium"],
+        _ => vec!["small", "medium"],
     }
 }
 
 pub fn default_model() -> &'static str {
-    models().first().copied().unwrap_or("base")
+    models().first().copied().unwrap_or("small")
 }
 
 /// The whisper file a model kind ("base") is kept under. Settings are stored per
