@@ -114,12 +114,28 @@ fn tokenize(text: &str) -> Vec<String> {
     let cleaned: Vec<String> = text
         .split_whitespace()
         .map(|t| {
-            t.trim_matches(|c: char| !c.is_alphanumeric() && c != ':')
-                .to_lowercase()
+            let trimmed = t
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != ':')
+                .to_lowercase();
+            // A token that is nothing but a separator would vanish here, and between
+            // two numbers it is the only thing saying "this is a reference": "4 - 1"
+            // means what "4:1" means. Kept as itself; everything else is unchanged,
+            // so a trailing comma or full stop still goes.
+            if trimmed.is_empty() && is_reference_separator(t) {
+                t.to_string()
+            } else {
+                trimmed
+            }
         })
         .filter(|t| !t.is_empty())
         .collect();
     fold_number_words(cleaned)
+}
+
+/// A token that is purely reference punctuation, e.g. ":" or "-".
+fn is_reference_separator(tok: &str) -> bool {
+    const SEPARATORS: [&str; 4] = [":", "-", "–", "—"];
+    SEPARATORS.contains(&tok.trim())
 }
 
 /// Read an optional "verse N" after a chapter has been consumed at index `j`.
@@ -227,6 +243,15 @@ fn valid_end(start: Option<u16>, end: Option<u16>) -> Option<u16> {
 
 /// Detect references in a transcript, using and updating `ctx` so bare
 /// continuations ("look at verse 28") resolve against a remembered book/chapter.
+/// Is there a lone ":" or "-" sitting between two numbers? That is a written
+/// reference with spaces around its punctuation, and little else looks like it.
+fn separator_between_numbers(tokens: &[String]) -> bool {
+    let is_num = |t: &String| parse_num_token(t).is_some();
+    tokens
+        .windows(3)
+        .any(|w| is_num(&w[0]) && is_reference_separator(&w[1]) && is_num(&w[2]))
+}
+
 /// "chapter two verse one of Exodus": the numbers first, the book at the end.
 ///
 /// Preachers reach for the reference and name the book last as often as first. The
@@ -297,7 +322,13 @@ fn lone_book(tokens: &[String]) -> Option<String> {
 fn lone_numbers(tokens: &[String]) -> Option<(u16, Option<u16>)> {
     let words: Vec<String> = tokens
         .iter()
-        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|t| {
+            if is_reference_separator(t) {
+                t.trim().to_string()
+            } else {
+                t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
+            }
+        })
         .filter(|w| !w.is_empty())
         .collect();
     // "chapter" and "verse" are both things a preacher drops: "Leviticus ... four
@@ -305,7 +336,12 @@ fn lone_numbers(tokens: &[String]) -> Option<(u16, Option<u16>)> {
     // a reference somehow - by naming chapter or verse, or by gluing the two numbers
     // ("4:1"). Bare "four" on its own stays out: numbers are everywhere in speech.
     let says_reference = words.iter().any(|w| w == "chapter" || w == "verse" || w == "verses")
-        || words.iter().any(|w| matches!(parse_num_token(w), Some((_, Some(_)))));
+        || words.iter().any(|w| matches!(parse_num_token(w), Some((_, Some(_)))))
+        // "4 - 1" with the separator standing alone. Whisper punctuates numbers a
+        // dozen ways, and a dash between two of them says "reference" as plainly as a
+        // colon does. Two *bare* numbers still say nothing, which is the line that
+        // matters: "four one" could be anything at all.
+        || separator_between_numbers(tokens);
     if words.is_empty() || !says_reference {
         return None;
     }
@@ -326,6 +362,11 @@ fn lone_numbers(tokens: &[String]) -> Option<(u16, Option<u16>)> {
                     expecting_verse = true;
                 }
             }
+            continue;
+        }
+        // ":" or "-" between the numbers means the same as saying "verse".
+        if is_reference_separator(w) {
+            expecting_verse = true;
             continue;
         }
         if !ALLOWED.contains(&w.as_str()) {
@@ -801,6 +842,12 @@ mod tests {
         assert_eq!(run(&["leviticus", "four"]), None);
         // A book on its own projects nothing yet: it is not a place to turn to.
         assert_eq!(run(&["leviticus"]), None);
+
+        // Whisper punctuates numbers however it likes. A dash reads as a colon,
+        // glued or spaced.
+        assert_eq!(run(&["leviticus", "4-1"]), lev41);
+        assert_eq!(run(&["leviticus", "4 - 1"]), lev41);
+        assert_eq!(run(&["4-1", "leviticus"]), lev41);
         // Ordinary references are untouched.
         assert_eq!(
             run(&["john chapter 3 verse 16"]),

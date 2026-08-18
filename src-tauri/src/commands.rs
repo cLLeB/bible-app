@@ -8,9 +8,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
+/// What a fresh install opens on, before anyone chooses.
+///
+/// KJV rather than WEB: it is the wording most congregations know by heart, and
+/// the one a preacher is most likely to be reading from. Public domain, so every
+/// flavor ships it.
+pub const DEFAULT_TRANSLATION: &str = "KJV";
+
 pub struct AppState {
     pub db: Mutex<Db>,
-    pub translation: Mutex<String>, // active translation code, e.g. "WEB"
+    pub translation: Mutex<String>, // active translation code, e.g. "KJV"
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
@@ -50,7 +57,7 @@ pub struct Cursor {
 
 impl AppState {
     pub fn active_translation(&self) -> String {
-        self.translation.lock().map(|t| t.clone()).unwrap_or_else(|_| "WEB".into())
+        self.translation.lock().map(|t| t.clone()).unwrap_or_else(|_| DEFAULT_TRANSLATION.into())
     }
 }
 

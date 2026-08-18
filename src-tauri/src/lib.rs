@@ -159,7 +159,7 @@ pub fn run() {
             let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
                 db: Mutex::new(db),
-                translation: Mutex::new("WEB".into()),
+                translation: Mutex::new(commands::DEFAULT_TRANSLATION.into()),
                 current: Mutex::new(ProjectionState::Blank),
                 settings: Mutex::new(initial_settings),
                 stage: Mutex::new(crate::events::StageInfo::default()),
