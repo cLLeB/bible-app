@@ -1571,7 +1571,11 @@ fn resolve_model_and_binary(
         })
         .ok_or("No whisper model found (looked in bundled resources and the project 'models' folder).")?;
 
-    let binary = bin_roots(res_dir)
+    let roots: Vec<PathBuf> = best_bin_root(res_dir)
+        .into_iter()
+        .chain(bin_roots(res_dir))
+        .collect();
+    let binary = roots
         .iter()
         .find_map(|root| {
             // The chosen backend first (CPU until something faster is installed and
@@ -1600,6 +1604,26 @@ pub(crate) fn whisper_model_for_default_flavor(
 ) -> Result<(PathBuf, PathBuf), String> {
     let res_dir = app.path().resource_dir().ok();
     resolve_model_and_binary(res_dir.as_deref(), crate::flavor::default_model())
+}
+
+/// The bin root offering the most backends.
+///
+/// Not simply the first one that holds anything. Under `tauri dev` the resource dir
+/// is `target/debug`, which accumulates a flat CPU-only bin/ from earlier builds,
+/// while the project's own bin/ has cpu, cuda and vulkan beside it. Taking the first
+/// non-empty root found the stale one, reported CPU, and no amount of waiting fixed
+/// it - the verdict in the database said vulkan the whole time, but vulkan was not
+/// among the backends that root could offer, so `choose` fell back to the processor.
+pub(crate) fn best_bin_root(res_dir: Option<&Path>) -> Option<PathBuf> {
+    bin_roots(res_dir)
+        .into_iter()
+        .map(|root| {
+            let n = crate::accel::available(&root).len();
+            (root, n)
+        })
+        .filter(|(_, n)| *n > 0)
+        .max_by_key(|(_, n)| *n)
+        .map(|(root, _)| root)
 }
 
 /// Where whisper builds are kept: the packaged app's resources, then the dev
@@ -1652,15 +1676,9 @@ fn accel_status_from(app: &tauri::AppHandle) -> Result<AccelStatus, String> {
     let state = app.state::<AppState>();
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let res_dir = app.path().resource_dir().ok();
-    let roots = bin_roots(res_dir.as_deref());
-    let root = roots.first().cloned().unwrap_or_default();
-    // The dev tree and a packaged install both count: whichever actually holds a
-    // whisper build is the one being asked about.
-    let root = roots
-        .iter()
-        .find(|r| !crate::accel::available(r).is_empty())
-        .cloned()
-        .unwrap_or(root);
+    let root = best_bin_root(res_dir.as_deref())
+        .or_else(|| bin_roots(res_dir.as_deref()).first().cloned())
+        .unwrap_or_default();
 
     let chosen = crate::accel::refresh(&db, &root);
     let preference = db
@@ -1728,11 +1746,7 @@ pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(),
     let kind = model.unwrap_or_else(|| crate::flavor::default_model().to_string());
     let res_dir = app.path().resource_dir().ok();
     let (model_path, _) = resolve_model_and_binary(res_dir.as_deref(), &kind)?;
-    let roots = bin_roots(res_dir.as_deref());
-    let root = roots
-        .iter()
-        .find(|r| !crate::accel::available(r).is_empty())
-        .cloned()
+    let root = best_bin_root(res_dir.as_deref())
         .ok_or("No whisper build was found to measure.")?;
     let captures = crate::capture::dir(&app);
 

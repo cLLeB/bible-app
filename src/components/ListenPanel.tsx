@@ -10,7 +10,6 @@ import {
   blankProjection,
   recordChoice,
   recordMoment,
-  recordingConsent,
   listeningEnabled,
   recordingEnabled,
   accelStatus,
@@ -125,14 +124,14 @@ export function ListenPanel() {
     : `Projects by itself at ${Math.round(threshold * 100)}%${useRunSheet ? " · run sheet trusted" : ""}`;
 
   const [recording, setRecordingState] = useState(false);
-  // Whether today's speaker has agreed to be recorded at all. Without that there is
-  // no switch to offer: the app does not ask the operator to decide for the preacher.
-  const [consent, setConsent] = useState(false);
   const [reviewKey, setReviewKey] = useState(0);
 
+  // Consent is not mirrored here on purpose. The switch used to be hidden without it,
+  // which made the feature look absent rather than unauthorised; the backend refuses
+  // and names the setting to turn on, which is a better answer than a greyed box with
+  // no route out of it.
   function loadRecording(): void {
     void recordingEnabled().then(setRecordingState).catch(() => undefined);
-    void recordingConsent().then(setConsent).catch(() => undefined);
   }
   useEffect(loadRecording, []);
 
@@ -318,18 +317,18 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop listening" : "● Start listening"}
         </button>
-        {/* Always shown, disabled until the speaker has opted in. It used to
-            disappear entirely without consent, which reads as a feature that
-            vanished rather than one that is waiting for permission. */}
+        {/* Always shown. Without the speaker's opt-in it stays unticked, but it is
+            NOT disabled: a greyed control with no route to ungreying it is a dead
+            end. Ticking it without consent surfaces the backend's refusal, which
+            names the switch to turn on and where. */}
         <label className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
           <input
             type="checkbox"
             checked={recording}
-            disabled={listening || !consent}
+            disabled={listening}
             onChange={(e) => changeRecording(e.target.checked)}
           />
           Record service
-          {!consent && <span className="text-xs text-[var(--faint)]">needs opt-in</span>}
         </label>
       </div>
 

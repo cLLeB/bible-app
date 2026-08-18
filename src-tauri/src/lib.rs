@@ -148,9 +148,7 @@ pub fn run() {
             // so the first listen of the day does not have to work it out. This reads
             // the stored verdict only; proving a graphics card actually works costs a
             // transcription and happens in the background just below.
-            let accel_root = commands::bin_roots(app.path().resource_dir().ok().as_deref())
-                .into_iter()
-                .find(|root| !accel::available(root).is_empty());
+            let accel_root = commands::best_bin_root(app.path().resource_dir().ok().as_deref());
             let needs_verifying = if let Some(root) = &accel_root {
                 accel::refresh(&db, root);
                 !accel::verdict_is_current(&db)
