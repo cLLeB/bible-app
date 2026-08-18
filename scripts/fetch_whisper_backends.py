@@ -97,6 +97,22 @@ offering the backend, and measures before preferring it.
 """
 
 
+def wanted_file(name: str) -> bool:
+    """Is this file worth putting in a church's installer?
+
+    The upstream archives carry a lot besides the two binaries the app runs: a
+    llama chat demo, a chess demo, benchmarks, and a dozen test harnesses. Every
+    DLL is kept, because working out which ones the two binaries actually link
+    against means guessing, and they are small next to the backend itself. The
+    stray executables are not kept, because nothing should be shipped to a church
+    that nobody can explain.
+    """
+    low = name.lower()
+    if low.endswith(".dll"):
+        return True
+    return low in ("whisper-cli.exe", "whisper-server.exe", "whisper-cli", "whisper-server")
+
+
 def download_exactly(url: str, expected: int, what: str, attempts: int = 3):
     """Download `url`, or return None. Never returns a partial answer.
 
@@ -223,9 +239,10 @@ def build_vulkan(force: bool = False) -> bool:
     if target.is_dir():
         shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
-    keep = (".exe", ".dll", ".so", ".dylib")
     for f in src_dir.iterdir():
-        if f.is_file() and (f.suffix.lower() in keep or f.suffix == ""):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() in (".so", ".dylib") or wanted_file(f.name):
             shutil.copy2(f, target / f.name)
 
     missing = [f for f in REQUIRED if not (target / f).exists()]
@@ -305,7 +322,7 @@ def install(backend: str, force: bool = False) -> bool:
             if member.is_dir():
                 continue
             name = pathlib.PurePosixPath(member.filename).name
-            if not name.lower().endswith((".exe", ".dll")):
+            if not wanted_file(name):
                 continue
             with z.open(member) as src, open(target / name, "wb") as dst:
                 shutil.copyfileobj(src, dst)

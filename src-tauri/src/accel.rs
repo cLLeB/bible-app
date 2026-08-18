@@ -402,7 +402,7 @@ pub fn verify_in_background(
             .into_iter()
             .find(|&b| match dir_for(&bin_root, b) {
                 Some(dir) => {
-                    let ok = crate::accel_probe::smoke_test(&dir, &model);
+                    let ok = crate::accel_probe::smoke_test(&dir, &model, b);
                     if !ok {
                         eprintln!(
                             "accel: {} is installed and its driver loads, but it could not                              transcribe; trying the next one",

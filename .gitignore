@@ -62,3 +62,4 @@ sermons/
 
 # Learning/measurement run artifacts + private sermon transcripts + seed snapshots
 learning-results/
+/whisper-cublas-*/

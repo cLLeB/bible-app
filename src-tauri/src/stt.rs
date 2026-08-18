@@ -226,7 +226,7 @@ pub fn device() -> Option<String> {
 /// Each backend announces itself differently, and the exact wording is upstream's to
 /// change, so this is deliberately forgiving: anything it does not recognise simply
 /// leaves the device unknown, which reads as "processor" and is the safe thing to say.
-fn parse_device(line: &str) -> Option<String> {
+pub(crate) fn parse_device(line: &str) -> Option<String> {
     // "ggml_vulkan: 0 = Intel(R) Iris(R) Xe Graphics (Intel Corporation) | uma: 1 | ..."
     if let Some(rest) = line.strip_prefix("ggml_vulkan:") {
         let after_eq = rest.split_once('=')?.1.trim();

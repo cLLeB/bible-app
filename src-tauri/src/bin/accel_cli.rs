@@ -55,9 +55,17 @@ fn main() {
             std::process::exit(1);
         };
         println!("\nProving each one can transcribe:");
+        let usable = accel::available(&root);
         for b in accel::Backend::RANKED {
             let Some(dir) = accel::dir_for(&root, b) else { continue };
-            let ok = accel_probe::smoke_test(&dir, &model);
+            // Skipped rather than tested when the drivers rule it out: the app would
+            // never choose it either, and a GPU build with no card behind it quietly
+            // falls back to the processor and would otherwise report "works".
+            if !usable.contains(&b) {
+                println!("  {:<28} skipped - no driver on this machine", b.label());
+                continue;
+            }
+            let ok = accel_probe::smoke_test(&dir, &model, b);
             println!("  {:<28} {}", b.label(), if ok { "works" } else { "FAILED" });
         }
         return;

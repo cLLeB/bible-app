@@ -159,7 +159,7 @@ fn trial(
 ///
 /// One second of audio and the smallest encoder window allowed, because none of the
 /// numbers are kept — only whether it survived.
-pub fn smoke_test(bin_dir: &Path, model: &Path) -> bool {
+pub fn smoke_test(bin_dir: &Path, model: &Path, backend: Backend) -> bool {
     let clip: Vec<f32> = synthetic_clip().into_iter().take(crate::audio::TARGET_RATE as usize).collect();
     let wav = std::env::temp_dir().join(format!("bibleapp_smoke_{}.wav", std::process::id()));
     if crate::stt::write_wav_16k_mono(&wav, &clip).is_err() {
@@ -173,13 +173,24 @@ pub fn smoke_test(bin_dir: &Path, model: &Path) -> bool {
     cmd.creation_flags(CREATE_NO_WINDOW);
     let out = cmd.output();
     let _ = std::fs::remove_file(&wav);
-    match out {
-        // Timings only appear when a pass actually completed, so their presence is the
-        // test. An exit code alone is not: some backends print an error, fall back
-        // internally and still exit zero.
-        Ok(o) => o.status.success() && compute_ms(&String::from_utf8_lossy(&o.stderr)).is_some(),
-        Err(_) => false,
+    let Ok(o) = out else { return false };
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    // Timings only appear when a pass actually completed, so their presence is the
+    // test that it ran at all. An exit code alone is not enough: a backend can print
+    // an error, fall back internally and still exit zero.
+    if !o.status.success() || compute_ms(&stderr).is_none() {
+        return false;
     }
+    if backend == Backend::Cpu {
+        return true;
+    }
+    // For a graphics backend, "did it run" is the wrong question — "did it run on the
+    // graphics card" is the right one. The CUDA build was seen transcribing quite
+    // happily on a machine with no NVIDIA card in it, by quietly falling back to the
+    // processor. Verifying that as a working GPU would mean believing we had
+    // acceleration we were not getting, and never finding out. So the device whisper
+    // names for itself is the proof.
+    stderr.lines().any(|l| crate::stt::parse_device(l).is_some())
 }
 
 /// Time one candidate more than once and keep the best.
