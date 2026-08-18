@@ -18,6 +18,12 @@ export const DEFAULT_THEME: Theme = {
     shadow: false,
     uppercase: false,
   },
+  layout: {
+    captionPosition: "below",
+    vertical: "center",
+    captionScale: 1,
+    sideMargin: 4,
+  },
   builtIn: true,
 };
 

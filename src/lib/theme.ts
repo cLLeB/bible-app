@@ -71,6 +71,30 @@ export function captionStyle(theme: Theme, fontScale: number): CSSProperties {
     color: t.captionColor,
     textAlign: t.align,
     textShadow: t.shadow ? LEGIBILITY_SHADOW : "none",
-    fontSize: `${1.4 * (fontScale || 1)}rem`,
+    fontSize: `${1.4 * (fontScale || 1) * (theme.layout?.captionScale ?? 1)}rem`,
   };
+}
+
+/**
+ * How the slide is arranged: where the body sits and how much room is kept clear
+ * down the sides.
+ *
+ * Optional chaining throughout because a theme saved before layouts existed has no
+ * `layout` at all, and the answer for one of those is what the app always did.
+ */
+export function frameStyle(theme: Theme): CSSProperties {
+  const l = theme.layout;
+  const vertical = l?.vertical ?? "center";
+  const margin = l?.sideMargin ?? 4;
+  return {
+    justifyContent:
+      vertical === "top" ? "flex-start" : vertical === "bottom" ? "flex-end" : "center",
+    paddingLeft: `${margin}%`,
+    paddingRight: `${margin}%`,
+  };
+}
+
+/** Is the reference shown, and if so, above or below the words? */
+export function captionPlacement(theme: Theme): "above" | "below" | "hidden" {
+  return theme.layout?.captionPosition ?? "below";
 }

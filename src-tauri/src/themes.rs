@@ -63,6 +63,58 @@ pub struct TextStyle {
     pub uppercase: bool,
 }
 
+/// Where things sit on the slide, as opposed to how they look.
+///
+/// `TextStyle` already carries the look - font, colour, weight. This is the
+/// arrangement, and it is part of a theme rather than a global setting so a church
+/// can keep more than one and switch between them: a reference tucked under the
+/// verse for a teaching series, hidden entirely for a reading, the words held high
+/// on the screen when a lower third is being keyed over the stream.
+///
+/// Every field has a default matching what the app did before this existed, so a
+/// theme saved by an older build loads unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Layout {
+    /// "below" | "above" | "hidden" - where the reference or song title goes.
+    #[serde(default = "default_caption_position")]
+    pub caption_position: String,
+    /// "center" | "top" | "bottom" - where the body sits in the frame.
+    #[serde(default = "default_vertical")]
+    pub vertical: String,
+    /// Caption size relative to the body. 1.0 is the old fixed relationship.
+    #[serde(default = "default_caption_scale")]
+    pub caption_scale: f32,
+    /// Leave room down the sides. A percentage of the screen width, per side, so
+    /// text does not run into the bezel or under a stream's lower third.
+    #[serde(default = "default_side_margin")]
+    pub side_margin: f32,
+}
+
+fn default_caption_position() -> String {
+    "below".into()
+}
+fn default_vertical() -> String {
+    "center".into()
+}
+fn default_caption_scale() -> f32 {
+    1.0
+}
+fn default_side_margin() -> f32 {
+    4.0
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            caption_position: default_caption_position(),
+            vertical: default_vertical(),
+            caption_scale: default_caption_scale(),
+            side_margin: default_side_margin(),
+        }
+    }
+}
+
 /// A named, self-contained look for the congregation screen.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +123,9 @@ pub struct Theme {
     pub name: String,
     pub background: Background,
     pub text: TextStyle,
+    /// Where things sit. Defaulted, so themes saved before it existed still load.
+    #[serde(default)]
+    pub layout: Layout,
     /// Ships in code; can be duplicated + edited but never deleted.
     pub built_in: bool,
 }
@@ -124,6 +179,7 @@ pub fn builtin_themes() -> Vec<Theme> {
             name: "Dark".into(),
             background: solid("#000000"),
             text: text(FONT_SANS, "#ffffff", "#c9c9c9", 400, false),
+            layout: Layout::default(),
             built_in: true,
         },
         Theme {
@@ -131,6 +187,7 @@ pub fn builtin_themes() -> Vec<Theme> {
             name: "Light".into(),
             background: solid("#ffffff"),
             text: text(FONT_SANS, "#101010", "#555555", 400, false),
+            layout: Layout::default(),
             built_in: true,
         },
         Theme {
@@ -138,6 +195,7 @@ pub fn builtin_themes() -> Vec<Theme> {
             name: "Sepia".into(),
             background: solid("#f4ecd8"),
             text: text(FONT_SERIF, "#5b4636", "#8a725a", 400, false),
+            layout: Layout::default(),
             built_in: true,
         },
         Theme {
@@ -145,6 +203,7 @@ pub fn builtin_themes() -> Vec<Theme> {
             name: "Spotlight".into(),
             background: gradient("#000000", "#161616", 160),
             text: text(FONT_SANS, "#ffffff", "#d0d0d0", 700, true),
+            layout: Layout::default(),
             built_in: true,
         },
         Theme {
@@ -152,6 +211,7 @@ pub fn builtin_themes() -> Vec<Theme> {
             name: "Ocean".into(),
             background: gradient("#0b1e3a", "#0a1024", 160),
             text: text(FONT_SANS, "#f5f8ff", "#9db4d6", 600, true),
+            layout: Layout::default(),
             built_in: true,
         },
     ]
@@ -262,6 +322,25 @@ mod tests {
         assert!(json.contains("\"builtIn\""), "got {json}");
         let back: Theme = serde_json::from_str(&json).unwrap();
         assert_eq!(back, t);
+    }
+
+    /// A theme saved before layouts existed must load and look exactly as it did.
+    ///
+    /// Themes are stored as JSON, so every field added later is a chance to break
+    /// what a church already has. This is the same guard the media fields have.
+    #[test]
+    fn old_themes_without_a_layout_still_load() {
+        let json = r##"{
+            "id": "custom",
+            "name": "Ours",
+            "background": {"kind":"color","color":"#101010","color2":"#000000","angle":0,"src":"","fit":"cover","dim":0},
+            "text": {"fontFamily":"serif","color":"#fff","captionColor":"#ccc","align":"center","weight":400,"shadow":false,"uppercase":false},
+            "builtIn": false
+        }"##;
+        let t: Theme = serde_json::from_str(json).expect("a theme without a layout still loads");
+        assert_eq!(t.layout, Layout::default());
+        assert_eq!(t.layout.caption_position, "below", "the reference stays where it was");
+        assert_eq!(t.layout.vertical, "center");
     }
 
     #[test]

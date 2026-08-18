@@ -17,7 +17,14 @@ import {
 import { alertVisible } from "./lib/alert";
 import { applyOutput } from "./lib/audioSink";
 import { coversScreen, needsAssetUrl } from "./lib/projection";
-import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "./lib/theme";
+import {
+  backgroundCss,
+  bodyStyle,
+  captionPlacement,
+  captionStyle,
+  frameStyle,
+  mediaBackground,
+} from "./lib/theme";
 import { defaultProjectionSettings } from "./lib/themeDefaults";
 
 function useNow(active: boolean): number {
@@ -166,15 +173,25 @@ export function ProjectionView() {
   function body() {
     switch (state.kind) {
       case "verse":
-      case "song":
+      case "song": {
+        // The reference can sit under the words, over them, or not appear at all -
+        // a reading wants the text alone, and a stream keying a lower third wants
+        // nothing near the bottom of the frame.
+        const place = captionPlacement(theme);
+        const caption = place === "hidden" ? null : <p style={capCss}>{state.caption}</p>;
         return (
           <>
-            <p className="mb-8 max-w-6xl whitespace-pre-line" style={bodyCss}>
+            {place === "above" && caption}
+            <p
+              className={`max-w-6xl whitespace-pre-line ${place === "below" ? "mb-8" : "mt-8"}`}
+              style={bodyCss}
+            >
               {state.text}
             </p>
-            <p style={capCss}>{state.caption}</p>
+            {place === "below" && caption}
           </>
         );
+      }
       case "parallel":
         return (
           <>
@@ -332,8 +349,15 @@ export function ProjectionView() {
           element are settled by stylesheet order rather than by class order. */}
       <div
         key={contentKey}
-        className="proj-fade z-10 flex flex-col items-center justify-center"
-        style={fullScreen ? { position: "absolute", inset: 0 } : { position: "relative" }}
+        className="proj-fade z-10 flex flex-col items-center"
+        style={
+          fullScreen
+            ? { position: "absolute", inset: 0, justifyContent: "center" }
+            : // Text obeys the theme's arrangement: held high, low or centred, with
+              // room kept clear down the sides. Media ignores it and stays centred,
+              // since a picture has no caption to place and margins would letterbox it.
+              { position: "relative", ...frameStyle(theme) }
+        }
       >
         {body()}
       </div>

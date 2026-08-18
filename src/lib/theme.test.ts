@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Theme } from "../api";
-import { backgroundCss, bodyRem, bodyStyle, captionStyle, mediaBackground } from "./theme";
+import {
+  backgroundCss,
+  bodyRem,
+  bodyStyle,
+  captionPlacement,
+  captionStyle,
+  frameStyle,
+  mediaBackground,
+} from "./theme";
 
 const solid: Theme = {
   id: "t",
@@ -15,6 +23,7 @@ const solid: Theme = {
     shadow: true,
     uppercase: true,
   },
+  layout: { captionPosition: "below", vertical: "center", captionScale: 1, sideMargin: 4 },
   builtIn: false,
 };
 
@@ -94,5 +103,40 @@ describe("captionStyle", () => {
   it("uses the caption colour and scales with fontScale", () => {
     expect(captionStyle(solid, 1).color).toBe("#cccccc");
     expect(captionStyle(solid, 2).fontSize).toBe(`${1.4 * 2}rem`);
+  });
+});
+
+describe("slide arrangement", () => {
+  it("holds the body where the theme says", () => {
+    expect(frameStyle(solid).justifyContent).toBe("center");
+    const high = { ...solid, layout: { ...solid.layout, vertical: "top" as const } };
+    expect(frameStyle(high).justifyContent).toBe("flex-start");
+    const low = { ...solid, layout: { ...solid.layout, vertical: "bottom" as const } };
+    expect(frameStyle(low).justifyContent).toBe("flex-end");
+  });
+
+  it("keeps the asked-for margin clear down each side", () => {
+    const wide = { ...solid, layout: { ...solid.layout, sideMargin: 12 } };
+    expect(frameStyle(wide).paddingLeft).toBe("12%");
+    expect(frameStyle(wide).paddingRight).toBe("12%");
+  });
+
+  it("places or hides the reference", () => {
+    expect(captionPlacement(solid)).toBe("below");
+    expect(captionPlacement({ ...solid, layout: { ...solid.layout, captionPosition: "hidden" } })).toBe("hidden");
+  });
+
+  it("falls back to the old behaviour for a theme saved before layouts existed", () => {
+    // Themes are stored as JSON and older ones have no `layout` at all. They must
+    // render exactly as they always did rather than collapsing to nothing.
+    const legacy = { ...solid, layout: undefined } as unknown as Theme;
+    expect(frameStyle(legacy).justifyContent).toBe("center");
+    expect(frameStyle(legacy).paddingLeft).toBe("4%");
+    expect(captionPlacement(legacy)).toBe("below");
+  });
+
+  it("scales the caption with the theme", () => {
+    const big = { ...solid, layout: { ...solid.layout, captionScale: 2 } };
+    expect(captionStyle(big, 1).fontSize).toBe(`${1.4 * 2}rem`);
   });
 });

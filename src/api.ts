@@ -82,12 +82,30 @@ export interface TextStyle {
   uppercase: boolean;
 }
 
+/** Where things sit on the slide, as opposed to how they look.
+ *
+ *  Part of a theme rather than a global setting, so a church can keep more than one
+ *  arrangement and switch: the reference under the verse for a teaching series,
+ *  hidden for a reading, the words held high when a stream keys a lower third over
+ *  the bottom of the screen. */
+export interface Layout {
+  /** Where the reference or song title goes. */
+  captionPosition: "below" | "above" | "hidden";
+  /** Where the body sits in the frame. */
+  vertical: "center" | "top" | "bottom";
+  /** Caption size relative to the body; 1.0 is the original relationship. */
+  captionScale: number;
+  /** Percent of screen width kept clear down each side. */
+  sideMargin: number;
+}
+
 /** A named, self-contained look for the congregation screen. */
 export interface Theme {
   id: string;
   name: string;
   background: Background;
   text: TextStyle;
+  layout: Layout;
   builtIn: boolean;
 }
 

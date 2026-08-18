@@ -169,6 +169,16 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
   const t = theme.text;
   const setBg = (patch: Partial<Theme["background"]>) => onChange({ ...theme, background: { ...bg, ...patch } });
   const setText = (patch: Partial<Theme["text"]>) => onChange({ ...theme, text: { ...t, ...patch } });
+  // Layouts arrived after themes did, so a theme loaded from an older save has none.
+  // Fill it here rather than at every use site.
+  const lay: Theme["layout"] = theme.layout ?? {
+    captionPosition: "below",
+    vertical: "center",
+    captionScale: 1,
+    sideMargin: 4,
+  };
+  const setLayout = (patch: Partial<Theme["layout"]>) =>
+    onChange({ ...theme, layout: { ...lay, ...patch } });
 
   return (
     <div className="space-y-3 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
@@ -279,6 +289,64 @@ function ThemeEditor({ theme, onChange, onSave, onDelete, onCancel }: EditorProp
         </label>
         <label className="flex items-center gap-1.5" title="Caption colour">
           Caption<input type="color" value={t.captionColor} onChange={(e) => setText({ captionColor: e.target.value })} />
+        </label>
+      </div>
+
+      {/* Arrangement, as against appearance. Saved with the theme, so a church can
+          keep one look for teaching and another for readings and switch between
+          them rather than re-adjusting every week. */}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-1.5">
+          Reference
+          <select
+            className="select"
+            style={{ width: "auto" }}
+            value={lay.captionPosition}
+            onChange={(e) => setLayout({ captionPosition: e.target.value as Theme["layout"]["captionPosition"] })}
+          >
+            <option value="below">Below</option>
+            <option value="above">Above</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5">
+          Words
+          <select
+            className="select"
+            style={{ width: "auto" }}
+            value={lay.vertical}
+            onChange={(e) => setLayout({ vertical: e.target.value as Theme["layout"]["vertical"] })}
+          >
+            <option value="center">Centred</option>
+            <option value="top">High</option>
+            <option value="bottom">Low</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5">
+          Side margin
+          <input
+            type="number"
+            className="input"
+            style={{ width: "4.5rem" }}
+            min={0}
+            max={30}
+            value={lay.sideMargin}
+            onChange={(e) => setLayout({ sideMargin: Math.min(30, Math.max(0, Number(e.target.value) || 0)) })}
+          />
+          %
+        </label>
+        <label className="flex items-center gap-1.5">
+          Reference size
+          <input
+            type="number"
+            className="input"
+            style={{ width: "4.5rem" }}
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={lay.captionScale}
+            onChange={(e) => setLayout({ captionScale: Math.min(2, Math.max(0.5, Number(e.target.value) || 1)) })}
+          />
         </label>
       </div>
 
