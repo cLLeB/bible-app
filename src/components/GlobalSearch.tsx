@@ -11,6 +11,7 @@ import {
   type VersePayload,
 } from "../api";
 import { present } from "../present";
+import { useServiceStore } from "../services";
 import {
   capPerKind,
   rank,
@@ -38,6 +39,10 @@ export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
+  const addVerse = useServiceStore((st) => st.addVerse);
+  const addSong = useServiceStore((st) => st.addSong);
+  const addMedia = useServiceStore((st) => st.addMedia);
 
   // The two small libraries, kept to hand so typing does not hit the backend for
   // every keystroke.
@@ -132,6 +137,33 @@ export function GlobalSearch() {
     }
   }
 
+  /**
+   * Put a hit on the running order without projecting it.
+   *
+   * The deliberate half of what one click used to do by itself. Building the order
+   * and putting something on the wall are separate decisions, so they are separate
+   * buttons - which is how every other list in the console already worked.
+   */
+  function add(h: Hit): void {
+    if (h.kind === "reference" || h.kind === "verse") {
+      const v = h.verse as VersePayload | undefined;
+      if (v) {
+        addVerse(v);
+      } else {
+        void lookupReference(h.title).then(addVerse).catch(() => undefined);
+      }
+    } else if (h.kind === "song") {
+      addSong(Number(h.id.split(":")[1]), h.title);
+    } else if (h.kind === "media") {
+      const kind = h.detail === "video" || h.detail === "audio" ? h.detail : "image";
+      addMedia(Number(h.id.split(":")[1]), h.title, kind);
+    }
+    // Named rather than counted: "Added" on the row the operator just pressed is
+    // the only confirmation needed, and it clears itself.
+    setAdded(h.id);
+    setTimeout(() => setAdded((cur) => (cur === h.id ? null : cur)), 1200);
+  }
+
   return (
     <div className="space-y-1.5">
       <input
@@ -151,18 +183,25 @@ export function GlobalSearch() {
       {hits.length > 0 && (
         <ul className="rounded border" style={{ borderColor: "var(--border)" }}>
           {hits.map((h) => (
-            <li key={h.id}>
+            <li key={h.id} className="flex items-center gap-1 pr-1">
               <button
-                className="flex w-full items-baseline gap-2 px-2 py-1 text-left text-sm hover:bg-[var(--surface)]"
+                className="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1 text-left text-sm hover:bg-[var(--surface)]"
                 onClick={() => void choose(h)}
               >
                 <span className="text-xs uppercase tracking-wide text-[var(--faint)]">
                   {h.kind === "reference" ? "go" : h.kind}
                 </span>
-                <span>{h.title}</span>
+                <span className="flex-none">{h.title}</span>
                 {h.detail && (
                   <span className="truncate text-xs text-[var(--muted)]">{h.detail}</span>
                 )}
+              </button>
+              <button
+                className="btn btn-sm flex-none"
+                onClick={() => add(h)}
+                aria-label={`Add ${h.title} to the running order`}
+              >
+                {added === h.id ? "Added" : "Add"}
               </button>
             </li>
           ))}

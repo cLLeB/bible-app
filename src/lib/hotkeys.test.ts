@@ -48,6 +48,9 @@ describe("looking up what a key does", () => {
 
   it("matches the named keys exactly", () => {
     expect(lookup("ArrowRight")?.label).toBe("Next verse");
+    // Left/right is a verse, up/down is a chapter: two axes, two sizes of move.
+    expect(lookup("ArrowDown")?.label).toBe("Next chapter");
+    expect(lookup("ArrowUp")?.label).toBe("Previous chapter");
     expect(lookup("Escape")?.label).toContain("Clear the alert");
   });
 

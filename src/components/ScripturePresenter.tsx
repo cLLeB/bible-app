@@ -27,16 +27,20 @@ export function ScripturePresenter() {
     function onKey(e: KeyboardEvent): void {
       if (isTypingTarget(e.target)) return;
       if (useLiveStore.getState().owner !== "scripture" || !curRef.current) return;
-      if (["ArrowRight", "ArrowDown", " "].includes(e.key)) {
+      // Left and right step a verse; up and down step a chapter. The two axes mean
+      // two different sizes of move, which is easier to hold in the hand than
+      // remembering that PageUp was the chapter one. Space stays on next verse: it
+      // is the key an operator rests a thumb on.
+      if (["ArrowRight", " "].includes(e.key)) {
         e.preventDefault();
         void go("next-verse");
-      } else if (["ArrowLeft", "ArrowUp"].includes(e.key)) {
+      } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         void go("prev-verse");
-      } else if (e.key === "PageDown") {
+      } else if (e.key === "ArrowDown" || e.key === "PageDown") {
         e.preventDefault();
         void go("next-chapter");
-      } else if (e.key === "PageUp") {
+      } else if (e.key === "ArrowUp" || e.key === "PageUp") {
         e.preventDefault();
         void go("prev-chapter");
       }
