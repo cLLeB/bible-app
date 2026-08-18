@@ -1785,6 +1785,18 @@ pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(),
     Ok(())
 }
 
+/// Is the app listening right now?
+///
+/// The console only learned this from the `listen-started` / `listen-stopped`
+/// events, which is fine until the panel is unmounted - switching to Prepare and
+/// back does exactly that, and the remounted panel came up showing "Start
+/// listening" while the microphone was still open. It looked like listening had
+/// stopped by itself. It had not; only the button had forgotten.
+#[tauri::command]
+pub fn listening_enabled(state: tauri::State<'_, AppState>) -> bool {
+    state.listening.load(Ordering::SeqCst)
+}
+
 #[tauri::command]
 pub fn start_listening(app: tauri::AppHandle, model: Option<String>) -> Result<(), String> {
     begin_listening(&app, model.as_deref())

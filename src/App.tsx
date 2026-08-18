@@ -13,6 +13,7 @@ import { RecentVerses } from "./components/RecentVerses";
 import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
+import { Hotkeys } from "./components/Hotkeys";
 import { MediaPanel } from "./components/MediaPanel";
 import { PreviewPane } from "./components/PreviewPane";
 import { ScripturePresenter } from "./components/ScripturePresenter";
@@ -91,6 +92,10 @@ export default function App() {
             remote and the listening loop present while the operator is on
             Prepare, and the stage monitor has to follow them there. */}
         <LiveSync />
+
+        {/* Service-wide keyboard shortcuts and the ? sheet. Outside the tab switch:
+            an operator reaching for Blank does not first check which tab is open. */}
+        <Hotkeys />
 
         {/* Always visible, on both tabs: what the congregation is seeing right now. */}
         <LiveNow />

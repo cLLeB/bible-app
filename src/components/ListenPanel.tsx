@@ -11,6 +11,7 @@ import {
   recordChoice,
   recordMoment,
   recordingConsent,
+  listeningEnabled,
   recordingEnabled,
   accelStatus,
   setRecording,
@@ -80,6 +81,9 @@ export function ListenPanel() {
   // This build's flavor decides the model; the operator doesn't choose it.
   useEffect(() => {
     void appFlavor().then((f) => setModel(f.defaultModel));
+    // Switching to Prepare unmounts this panel, so on the way back the button has
+    // forgotten a session that never stopped. Ask rather than assume.
+    void listeningEnabled().then(setListening).catch(() => undefined);
   }, []);
 
   // The device name is only known while a whisper server is up, so this is re-read
@@ -314,19 +318,19 @@ export function ListenPanel() {
         >
           {listening ? "■ Stop listening" : "● Start listening"}
         </button>
-        {consent && (
-          <label
-            className="flex items-center gap-1.5 text-sm text-[var(--muted)]"
-          >
-            <input
-              type="checkbox"
-              checked={recording}
-              disabled={listening}
-              onChange={(e) => changeRecording(e.target.checked)}
-            />
-            Record service
-          </label>
-        )}
+        {/* Always shown, disabled until the speaker has opted in. It used to
+            disappear entirely without consent, which reads as a feature that
+            vanished rather than one that is waiting for permission. */}
+        <label className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={recording}
+            disabled={listening || !consent}
+            onChange={(e) => changeRecording(e.target.checked)}
+          />
+          Record service
+          {!consent && <span className="text-xs text-[var(--faint)]">needs opt-in</span>}
+        </label>
       </div>
 
       {error && <p className="tint tint-bad rounded-lg p-2 text-sm">{error}</p>}

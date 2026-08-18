@@ -531,6 +531,10 @@ export const startListening = (model: SttModel): Promise<void> =>
   invoke<void>("start_listening", { model });
 export const stopListening = (): Promise<void> => invoke<void>("stop_listening");
 
+/** Is it listening right now? Asked when the panel mounts, because switching to
+ *  Prepare unmounts it and the events alone leave it showing the wrong button. */
+export const listeningEnabled = (): Promise<boolean> => invoke<boolean>("listening_enabled");
+
 // Record the live service (for on-device learning). Off by default; set before Start.
 // Refused for a speaker who hasn't been opted in.
 export const setRecording = (on: boolean): Promise<void> => invoke<void>("set_recording", { on });

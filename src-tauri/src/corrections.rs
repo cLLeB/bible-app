@@ -24,10 +24,46 @@ fn correction(word: &str) -> Option<&'static str> {
         ("habbakuk", "habakkuk"),
         ("nicodemas", "nicodemus"),
         ("zerubabel", "zerubbabel"),
+        // Zechariah, heard in a real service as these. They are worse than a plain
+        // miss: each is close enough to "Zacchaeus" that the story index answered
+        // with Luke 19, so asking for Zechariah 4:6 put the tax collector on the
+        // wall. The fuzzy book matcher cannot help, because the misheard word is
+        // nearer a famous name than it is to the book.
+        ("zacchaeria", "zechariah"),
+        ("zacchaediah", "zechariah"),
+        ("zachariah", "zechariah"),
+        ("zechariiah", "zechariah"),
+        ("zakariah", "zechariah"),
         ("goliad", "goliath"),
         ("bethsaida", "bethesda"),
     ];
     m.iter().find(|(k, _)| *k == word).map(|(_, v)| *v)
+}
+
+#[cfg(test)]
+mod zechariah_tests {
+    use super::correct;
+
+    /// Heard in a real service. Each of these is nearer "Zacchaeus" than it is to
+    /// "Zechariah", so the story index answered with Luke 19 and the tax collector
+    /// went on the wall when the preacher asked for Zechariah 4:6.
+    #[test]
+    fn zechariah_survives_being_misheard_as_zacchaeus() {
+        for said in [
+            "Zacchaeria, chapter 4 verse 6.",
+            "Zacchaediah, chapter 4, verse 6.",
+            "zachariah chapter 4 verse 6",
+        ] {
+            let out = correct(said).to_lowercase();
+            assert!(out.contains("zechariah"), "{said} -> {out}");
+        }
+    }
+
+    /// The real Zacchaeus must still come through, or fixing one name breaks another.
+    #[test]
+    fn the_actual_zacchaeus_is_left_alone() {
+        assert!(correct("Zaccheus climbed the tree").to_lowercase().contains("zacchaeus"));
+    }
 }
 
 /// Apply corrections word-by-word, preserving surrounding text. A token is

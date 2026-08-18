@@ -227,6 +227,35 @@ pub fn is_learned_alias(word: &str) -> bool {
 /// Exact match first, then anything learned from this speaker, then fuzzy recovery
 /// for near-misses from speech-to-text ("roman" → Romans, "mathew" → Matthew).
 pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
+    resolve_book_fuzzy_scored(input, STRICT_SIMILARITY)
+}
+
+/// How alike a spoken word has to be to a book name before we call it that book.
+///
+/// Two thresholds, because the same word carries different weight depending on what
+/// follows it. Bare, a near-miss has to be very close: "zacchaeria" on its own is far
+/// more likely to be a person than a book, and guessing wrong puts a verse nobody
+/// asked for on the wall.
+const STRICT_SIMILARITY: f64 = 0.90;
+
+/// Followed by "chapter four verse six", it is a book. Nothing else in scripture
+/// takes a chapter and verse: people, places and events do not. So the grammar
+/// after the word is stronger evidence than the spelling of the word itself, and the
+/// bar comes down.
+///
+/// This is what "Zacchaeria, chapter 4 verse 6" needed. Heard for Zechariah, it
+/// scored too low to be recovered as a book, and being close to Zacchaeus the story
+/// index answered with Luke 19 - so asking for Zechariah 4:6 projected the tax
+/// collector. Enumerating mishearings would have fixed that one word; this fixes the
+/// class.
+const GRAMMAR_BACKED_SIMILARITY: f64 = 0.82;
+
+/// Fuzzy book recovery for a word that a chapter or verse number follows.
+pub fn resolve_book_fuzzy_followed_by_reference(input: &str) -> Option<&'static CanonicalBook> {
+    resolve_book_fuzzy_scored(input, GRAMMAR_BACKED_SIMILARITY)
+}
+
+fn resolve_book_fuzzy_scored(input: &str, floor: f64) -> Option<&'static CanonicalBook> {
     if let Some(b) = resolve_book(input) {
         return Some(b);
     }
@@ -247,7 +276,7 @@ pub fn resolve_book_fuzzy(input: &str) -> Option<&'static CanonicalBook> {
         }
     }
     match best {
-        Some((b, s)) if s >= 0.90 => Some(b),
+        Some((b, s)) if s >= floor => Some(b),
         _ => None,
     }
 }

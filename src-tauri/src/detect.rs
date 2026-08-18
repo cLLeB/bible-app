@@ -43,6 +43,18 @@ impl RefContext {
     }
 }
 
+/// Does a chapter/verse reference begin at `at`? Either the word "chapter", or a
+/// bare number as in "Romans 8". This is the grammar that can only follow a book.
+fn starts_reference(tokens: &[String], at: usize) -> bool {
+    match tokens.get(at) {
+        None => false,
+        Some(t) => {
+            let w = t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            w == "chapter" || w == "chapters" || parse_num_token(t).is_some()
+        }
+    }
+}
+
 /// Pull number(s) out of a token, treating ANY non-digit as a separator, so
 /// whatever symbol whisper inserts between chapter and verse works:
 /// "3:16", "3.16", "7-7", "7/7" all yield (chapter, Some(verse)); "7" yields
@@ -249,7 +261,22 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
             for len in 1..=2 {
                 if i + len <= tokens.len() {
                     let joined = tokens[i..i + len].join(" ");
-                    if let Some(b) = resolve_book_fuzzy(&joined) {
+                    // A word that a chapter or verse number follows is a book: nothing
+                    // else in scripture takes one. People, places and events do not.
+                    // That grammar is better evidence than the spelling, so when it is
+                    // present the similarity bar comes down.
+                    //
+                    // "Zacchaeria chapter 4 verse 6" is the case. Too far from
+                    // Zechariah to recover on spelling alone, and near enough to
+                    // Zacchaeus that the story index offered Luke 19 instead - so the
+                    // preacher asked for Zechariah and got the tax collector.
+                    let followed_by_reference = starts_reference(&tokens, i + len);
+                    let hit = if followed_by_reference {
+                        crate::books::resolve_book_fuzzy_followed_by_reference(&joined)
+                    } else {
+                        resolve_book_fuzzy(&joined)
+                    };
+                    if let Some(b) = hit {
                         via_learned = crate::books::is_learned_alias(&joined);
                         book = Some((b.osis.to_string(), len, DetectSource::Fuzzy));
                         break;
@@ -550,6 +577,36 @@ mod tests {
     }
 
     #[test]
+    /// The word before a chapter and verse can only be a book: people, places and
+    /// events do not have chapters. Heard in a real service as "Zacchaeria chapter 4
+    /// verse 6" for Zechariah - near enough to Zacchaeus that the story index
+    /// answered Luke 19, so the preacher asked for Zechariah and got the tax
+    /// collector.
+    ///
+    /// Worth recording what the grammar rule can and cannot do here. "zacchaeria"
+    /// scores 0.683 against "zechariah" on jaro-winkler, so no threshold that is safe
+    /// to ship recovers it from the spelling: 0.68 would match almost anything. The
+    /// grammar-backed threshold covers the 0.82-0.90 band, and this particular word
+    /// is named by `corrections`. The pipeline applies corrections before detection
+    /// (see `audio::clean_transcript`), which is why this test does too.
+    #[test]
+    fn a_chapter_and_verse_prove_the_word_before_them_is_a_book() {
+        let find = |said: &str| {
+            let cleaned = crate::corrections::correct(said);
+            let mut ctx = super::RefContext::default();
+            super::detect_with_context(&cleaned, &mut ctx)
+                .into_iter()
+                .find(|d| d.source != super::DetectSource::Story)
+                .map(|d| (d.reference.book_osis, d.reference.chapter, d.reference.verse))
+        };
+        assert_eq!(find("zacchaeria chapter 4 verse 6"), Some(("Zech".into(), 4, Some(6))));
+        assert_eq!(find("zacchaediah chapter 4 verse 6"), Some(("Zech".into(), 4, Some(6))));
+        // Without that grammar the same word must NOT become a book. This is the
+        // safety half: a relaxed threshold everywhere would put a verse on the wall
+        // every time a preacher named a person.
+        assert_eq!(find("zacchaeus climbed up a tree to see jesus"), None);
+    }
+
     fn recovers_fuzzy_book_names() {
         let a = one("roman chapter 8 verse 28");
         assert_eq!((a.book_osis.as_str(), a.chapter, a.verse), ("Rom", 8, Some(28)));

@@ -817,7 +817,18 @@ fn transcribe_detect(
             .rev()
             .find(|d| d.reference.verse.is_some())
             .or_else(|| confident.last())
-            .copied();
+            .copied()
+            // Mid-utterance, a chapter with no verse is not a reference yet — it is
+            // the first half of one. "1 Chronicles chapter 20 ... verse 22" reaches an
+            // interim pass as "1 Chronicles chapter 20", which resolves to 20:1 and
+            // projects it at 0.85, above the auto bar. The right verse arrives a
+            // moment later and replaces it, so the congregation sees the wrong verse
+            // flash first. Observed in a real service, and the reason it happens more
+            // now is that interim passes run on more models than they used to.
+            //
+            // Waiting costs nothing: the endpointed pass reads the whole utterance,
+            // and a genuinely bare chapter ("turn to Romans 8") still projects then.
+            .filter(|d| emit_transcript || d.reference.verse.is_some());
         for d in chosen.iter() {
             let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
