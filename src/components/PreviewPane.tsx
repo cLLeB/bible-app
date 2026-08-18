@@ -81,6 +81,13 @@ export function PreviewPane() {
     };
   }, []);
 
+  // A length read from the previous clip must never be shown against this one.
+  useEffect(() => {
+    setDuration(null);
+    setRate(1);
+    setHushed(true);
+  }, [staged?.kind === "video" ? staged.src : null]);
+
   if (!staged) return null;
 
   const theme = settings.theme;
@@ -114,12 +121,6 @@ export function PreviewPane() {
     if (clipRef.current) clipRef.current.playbackRate = next;
   }
 
-  // A length read from the previous clip must never be shown against this one.
-  useEffect(() => {
-    setDuration(null);
-    setRate(1);
-    setHushed(true);
-  }, [staged?.kind === "video" ? staged.src : null]);
 
   return (
     <section className="space-y-2">
