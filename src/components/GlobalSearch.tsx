@@ -18,7 +18,6 @@ import {
   worthSearching,
   type Hit,
 } from "../lib/search";
-import { useServiceStore } from "../services";
 
 /** How many of each kind to show, so one sort cannot bury the others. */
 const CAP = 4;
@@ -39,7 +38,6 @@ export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [busy, setBusy] = useState(false);
-  const addVerse = useServiceStore((s) => s.addVerse);
 
   // The two small libraries, kept to hand so typing does not hit the backend for
   // every keystroke.
@@ -111,9 +109,14 @@ export function GlobalSearch() {
       if (h.kind === "reference" || h.kind === "verse") {
         // A reference hit already holds the resolved verse, so clicking it cannot
         // re-parse the query and land somewhere else.
+        // Projected, and nothing more. Putting a verse on the wall is not the same
+        // as putting it in the running order: the order is a plan the operator built
+        // on purpose, and a verse looked up mid-sermon because the preacher went
+        // somewhere unexpected has no business appending itself to it. Every other
+        // list in the console has a separate Add button for that, and this one was
+        // the odd one out.
         const v = (h.verse as VersePayload | undefined) ?? (await lookupReference(h.title));
         await present(v);
-        addVerse(v);
       } else if (h.kind === "media") {
         await projectMedia(Number(h.id.split(":")[1]));
       } else if (h.kind === "song") {
