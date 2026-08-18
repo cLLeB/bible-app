@@ -180,6 +180,24 @@ def stage_runtime(models: list) -> None:
         print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
 
 
+# makensis is a 32-bit program and maps its payload into memory, so it fails once a
+# flavor gets big enough:
+#     Internal compiler error #12345: error mmapping file (...) is out of range
+# medium (1.5 GB of model) plus CUDA (574 MB) is comfortably past it. WiX has no such
+# trouble, so those flavors ship as an .msi and skip the .exe rather than failing.
+NSIS_PAYLOAD_LIMIT = 1_800_000_000
+
+
+def payload_bytes() -> int:
+    total = 0
+    for f in BUNDLED.rglob("*"):
+        if f.is_file():
+            total += f.stat().st_size
+    for f in DATA.glob("*.canonical.json"):
+        total += f.stat().st_size
+    return total
+
+
 def backend_resources_config():
     """A --config override listing each per-processor directory explicitly.
 
@@ -263,10 +281,26 @@ def build(name: str, spec: dict, reuse_data: bool = False) -> None:
     env = dict(os.environ)
     env["BIBLE_APP_TIER"] = spec["tier"]
     env["BIBLE_APP_MODELS"] = ",".join(spec["models"])
+    # Wipe the shared bundle dir first. It is not per-flavor, so anything left in it
+    # from the previous build gets picked up by collect_outputs and filed under this
+    # flavor's name. That is how a medium-personal-...-setup.exe appeared that was
+    # actually the small build: same shared directory, stale file, plausible name.
+    bundle_dir = ROOT / "src-tauri" / "target" / "release" / "bundle"
+    if bundle_dir.exists():
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+
     cmd = ["npm", "run", "tauri", "build"]
+    extra = []
     override = backend_resources_config()
     if override:
-        cmd += ["--", "--config", str(override)]
+        extra += ["--config", str(override)]
+    size = payload_bytes()
+    if size > NSIS_PAYLOAD_LIMIT:
+        extra += ["--bundles", "msi"]
+        print(f"  payload is {size/1e9:.1f} GB, past what makensis can map: "
+              f"building the .msi only")
+    if extra:
+        cmd += ["--", *extra]
     try:
         subprocess.check_call(cmd, cwd=ROOT, env=env, shell=(os.name == "nt"))
     finally:
