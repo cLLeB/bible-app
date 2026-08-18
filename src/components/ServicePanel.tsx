@@ -17,6 +17,7 @@ import {
   useTemplateStore,
 } from "../services";
 import { slideSlot, verseSlot } from "../stage";
+import { dropIndex, moveTo } from "../lib/reorder";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -24,7 +25,19 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 export function ServicePanel() {
+  // Which row is being dragged, or null. The up/down buttons stay: they are precise
+  // and work without a mouse. Dragging is for rebuilding an order before a service,
+  // where nudging an item from the bottom to the top is six clicks and six chances
+  // to lose your place.
+  const [dragging, setDragging] = useState<number | null>(null);
   const { cues, remove, move, clear, setCues } = useServiceStore();
+
+  /** Drop the row being dragged onto position `over`. */
+  function dropOn(over: number): void {
+    if (dragging === null) return;
+    setCues(moveTo(cues, dragging, dropIndex(dragging, over)));
+    setDragging(null);
+  }
   const { templates, save: saveTemplate, remove: removeTemplate } = useTemplateStore();
   const [item, setItem] = useState(-1); // current cue index (-1 = none live)
   const [slide, setSlide] = useState(0); // slide index within a song cue
@@ -242,7 +255,25 @@ export function ServicePanel() {
       ) : (
         <ol className="space-y-1">
           {cues.map((cue, i) => (
-            <li key={cue.id} className="flex items-center gap-2">
+            <li
+              key={cue.id}
+              className="flex items-center gap-2"
+              draggable
+              onDragStart={() => setDragging(i)}
+              onDragEnd={() => setDragging(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                dropOn(i);
+              }}
+              style={
+                dragging === i
+                  ? { opacity: 0.5 }
+                  : dragging !== null
+                    ? { borderTop: "2px solid transparent" }
+                    : undefined
+              }
+            >
               <button
                 onClick={() => projectItem(i)}
                 className={`flex-1 rounded border px-2 py-1 text-left ${

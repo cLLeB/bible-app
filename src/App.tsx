@@ -14,6 +14,7 @@ import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
 import { Hotkeys } from "./components/Hotkeys";
+import { GlobalSearch } from "./components/GlobalSearch";
 import { MediaPanel } from "./components/MediaPanel";
 import { PreviewPane } from "./components/PreviewPane";
 import { ScripturePresenter } from "./components/ScripturePresenter";
@@ -117,6 +118,10 @@ export default function App() {
               </div>
               <div className="card space-y-3">
                 <h2 className="panel-title">Scripture</h2>
+                {/* One box for scripture, songs and media. Above the scripture-only
+                    lookup because mid-service the operator rarely knows, or cares,
+                    which kind of thing they are reaching for. */}
+                <GlobalSearch />
                 <LookupBar />
                 <RecentVerses />
                 <ResultCard />
