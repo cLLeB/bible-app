@@ -50,6 +50,16 @@ trusting it, and falls back to the processor otherwise.
 Whatever is missing is simply not bundled; the build still succeeds and those
 machines use the processor.
 
+--only-vulkan / --only-cuda / --only-cpu: build a variant carrying just that one
+  graphics backend (the processor always goes along, being what the app falls back
+  to). Without one of these the installer carries everything in bin/. The variant is
+  part of the output name, so small-personal, small-personal-vulkan and
+  small-personal-cuda sit side by side rather than overwriting each other.
+
+  Worth choosing rather than always shipping everything: CUDA alone is ~574 MB in
+  every installer, which is dead weight on the many churches whose laptops have
+  Intel or AMD graphics.
+
 --reuse-data: skip the wipe+re-download of data/*.canonical.json; use whatever is
   already in data/. Useful when translations were downloaded in a prior run that
   was interrupted before the Tauri compile, or when bolls.life is unreachable.
@@ -140,7 +150,18 @@ def check_models(models: list) -> None:
         )
 
 
-def stage_runtime(models: list) -> None:
+# Which processor builds a variant carries. "all" is everything that is in bin/;
+# the rest name exactly one graphics backend, and the processor always goes along
+# because it is what the app falls back to.
+BACKEND_SETS = {
+    "all": None,  # whatever bin/ holds
+    "vulkan": {"cpu", "vulkan"},
+    "cuda": {"cpu", "cuda"},
+    "cpu": {"cpu"},
+}
+
+
+def stage_runtime(models: list, backends: str = "all") -> None:
     """Fill bundled/ with THIS flavor's whisper model(s), so tauri.conf `resources`
     bundle exactly what the flavor needs (and no other model). Cleared each build
     so flavors never leak assets into each other.
@@ -165,15 +186,18 @@ def stage_runtime(models: list) -> None:
         else:
             print(f"  WARNING: model {src.name} missing — STT unavailable in this flavor", file=sys.stderr)
     if BIN_DIR.is_dir():
-        backends = []
+        carried = []
         for f in BIN_DIR.iterdir():
             if f.is_file():
                 shutil.copy2(f, BUNDLED / "bin" / f.name)
             elif f.is_dir():
+                allowed = BACKEND_SETS.get(backends)
+                if allowed is not None and f.name not in allowed:
+                    continue  # this variant does not carry that processor
                 shutil.copytree(f, BUNDLED / "bin" / f.name, dirs_exist_ok=True)
-                backends.append(f.name)
-        if backends:
-            print(f"  processors bundled: {', '.join(sorted(backends))}")
+                carried.append(f.name)
+        if carried:
+            print(f"  processors bundled: {', '.join(sorted(carried))}")
         else:
             print("  processors bundled: cpu only (see scripts/fetch_whisper_backends.py)")
     else:
@@ -267,11 +291,11 @@ def verify_packaged(models: list) -> None:
         print(f"  verified in package: {', '.join(want)}")
 
 
-def build(name: str, spec: dict, reuse_data: bool = False) -> None:
+def build(name: str, spec: dict, reuse_data: bool = False, backends: str = "all") -> None:
     print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
     check_models(spec["models"])
     prepare_translations(spec["codes"], spec["tier"] == "personal", reuse_data=reuse_data)
-    stage_runtime(spec["models"])
+    stage_runtime(spec["models"], backends)
     # Never bundle personal songs into a distribution build.
     personal_songs = DATA / "personal.songs.json"
     hidden = None
@@ -326,8 +350,11 @@ def build(name: str, spec: dict, reuse_data: bool = False) -> None:
         if override:
             override.unlink(missing_ok=True)
     verify_packaged(spec["models"])
-    collect_outputs(name)
-    print(f"=== '{name}' built. Installers in {DIST / name} ===")
+    # Variants of one flavor must not overwrite each other, so the processor set is
+    # part of the name an operator downloads.
+    label = name if backends == "all" else f"{name}-{backends}"
+    collect_outputs(label)
+    print(f"=== '{label}' built. Installers in {DIST / label} ===")
 
 
 def collect_outputs(name: str) -> None:
@@ -366,8 +393,13 @@ def main(argv: list) -> None:
         want = ["cpu", "vulkan"]
     elif "--with-cuda" in argv:
         want = ["cpu", "cuda"]
+    backends = "all"
+    for choice in ("vulkan", "cuda", "cpu"):
+        if f"--only-{choice}" in argv:
+            backends = choice
     argv = [a for a in argv
-            if a not in ("--reuse-data", "--with-gpu", "--with-vulkan", "--with-cuda")]
+            if a not in ("--reuse-data", "--with-gpu", "--with-vulkan", "--with-cuda",
+                         "--only-vulkan", "--only-cuda", "--only-cpu")]
     if want:
         print(f"=== Preparing whisper builds: {', '.join(want)} ===")
         # Not check_call: a missing Vulkan SDK or an unreachable CUDA download should
@@ -385,7 +417,7 @@ def main(argv: list) -> None:
         if t not in fl:
             print(f"unknown flavor '{t}'. Options: {', '.join(fl)}", file=sys.stderr)
             continue
-        build(t, fl[t], reuse_data=reuse_data)
+        build(t, fl[t], reuse_data=reuse_data, backends=backends)
 
 
 if __name__ == "__main__":
