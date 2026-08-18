@@ -7,6 +7,11 @@
 //! Usage (from src-tauri/):
 //!     cargo run --release --bin accel_cli                 # list what is available
 //!     cargo run --release --bin accel_cli -- --measure    # time each of them
+//!     cargo run --release --bin accel_cli -- --measure --clip speech.wav
+//!
+//! `--clip` points the measurement at a real recording of speech, which is worth
+//! far more than the synthetic fallback: the synthetic clip contains no words, and
+//! whisper answers that by looping, which distorts the very comparison being made.
 
 use bible_app_lib::{accel, accel_probe};
 use std::path::{Path, PathBuf};
@@ -50,7 +55,18 @@ fn main() {
     println!("\nMeasuring with {}", model.file_name().unwrap_or_default().to_string_lossy());
     println!("(milliseconds of compute per utterance; model loading excluded)\n");
 
-    match accel_probe::measure(&root, &model, None, |t| {
+    // --clip <path>
+    let args: Vec<String> = std::env::args().collect();
+    let clip: Option<PathBuf> = args
+        .iter()
+        .position(|a| a == "--clip")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
+    if let Some(c) = &clip {
+        println!("Timing against {}", c.display());
+    }
+
+    match accel_probe::measure(&root, &model, clip.as_deref(), None, |t| {
         println!("  {:<28} {:>2} threads   {:>6} ms", t.backend.label(), t.threads, t.ms);
     }) {
         Ok(measured) => match measured.best() {

@@ -16,13 +16,20 @@
 //!     most ordinary laptops. A couple of megabytes, riding on the display driver
 //!     that is already installed.
 //!
-//! Preferring the GPU is the default. But it is *checked*, not assumed: on a
-//! low-power integrated chip a Vulkan pass can genuinely lose to eight CPU threads,
-//! and a change that makes the app slower on the machine actually in the sound booth
-//! is worse than no change at all. So `measure` times real transcription on every
-//! backend this machine can run, and the winner is what gets used. Until someone
-//! measures, the ranking below is the guess, and the operator can always overrule
-//! both.
+//! Preferring the GPU is the default, and it is *checked* rather than assumed:
+//! `measure` times real transcription on every backend this machine can run, and the
+//! winner is what gets used.
+//!
+//! That check was built expecting integrated graphics to be a close call. It is not.
+//! Measured on a 15W i5-1334U with Intel Iris Xe, on eleven seconds of real speech,
+//! `small`, with the decode settings a service actually uses:
+//!
+//!     Vulkan (Iris Xe)   1503 ms      CPU (8 threads)  10201 ms
+//!
+//! Nearly seven times faster, from the integrated graphics that come free with the
+//! chip, and the transcript is identical character for character. The check stays
+//! because the answer will not be seven times on every machine and could still go the
+//! other way on some, but the expectation it was guarding against was wrong.
 
 use std::path::{Path, PathBuf};
 

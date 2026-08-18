@@ -1734,7 +1734,7 @@ pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(),
                 }),
             );
         };
-        match crate::accel_probe::measure(&root, &model_path, captures.as_deref(), report) {
+        match crate::accel_probe::measure(&root, &model_path, None, captures.as_deref(), report) {
             Ok(measured) => {
                 let best = match measured.best() {
                     Some(b) => b,

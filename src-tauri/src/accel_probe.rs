@@ -83,18 +83,8 @@ fn synthetic_clip() -> Vec<f32> {
         .collect()
 }
 
-/// The newest real utterance this machine has captured, if any. Preferred over
-/// synthetic audio: it exercises the decoder the way a sermon does.
-fn captured_clip(captures: Option<&Path>) -> Option<Vec<f32>> {
-    let dir = captures?;
-    let mut wavs: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x.eq_ignore_ascii_case("wav")).unwrap_or(false))
-        .collect();
-    wavs.sort();
-    let path = wavs.last()?;
+/// Read a 16 kHz mono WAV to samples.
+fn read_wav(path: &Path) -> Option<Vec<f32>> {
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     let samples: Vec<f32> = match spec.sample_format {
@@ -105,6 +95,19 @@ fn captured_clip(captures: Option<&Path>) -> Option<Vec<f32>> {
         }
     };
     (!samples.is_empty()).then_some(samples)
+}
+
+/// The newest real utterance this machine has captured, if any. Preferred over
+/// synthetic audio: it exercises the decoder the way a sermon does.
+fn captured_clip(captures: Option<&Path>) -> Option<Vec<f32>> {
+    let mut wavs: Vec<PathBuf> = std::fs::read_dir(captures?)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x.eq_ignore_ascii_case("wav")).unwrap_or(false))
+        .collect();
+    wavs.sort();
+    read_wav(wavs.last()?)
 }
 
 /// Run one trial. Returns None if that backend cannot run here at all, which is a
@@ -171,9 +174,13 @@ fn best_of(
 ///
 /// `report` is called after each trial so a long measurement can show progress
 /// rather than appearing to hang.
+/// `clip` names a specific WAV to time against, which beats everything else when
+/// one is to hand — any recording of real speech will do. Otherwise the newest
+/// captured utterance, and failing that the synthetic fallback.
 pub fn measure(
     bin_root: &Path,
     model: &Path,
+    clip: Option<&Path>,
     captures: Option<&Path>,
     mut report: impl FnMut(&Trial),
 ) -> Result<Measured, String> {
@@ -181,7 +188,7 @@ pub fn measure(
     if backends.is_empty() {
         return Err("No whisper build was found to measure.".into());
     }
-    let real = captured_clip(captures);
+    let real = clip.and_then(read_wav).or_else(|| captured_clip(captures));
     let real_audio = real.is_some();
     let clip = real.unwrap_or_else(synthetic_clip);
     let secs = clip.len() as f32 / crate::audio::TARGET_RATE as f32;
