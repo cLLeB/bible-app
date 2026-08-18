@@ -3182,6 +3182,7 @@ mod tests {
             settings: Mutex::new(ProjectionSettings::default()),
             stage: Mutex::new(StageInfo::default()),
             alert: Mutex::new(crate::events::Alert::default()),
+            ticker: Mutex::new(crate::events::Ticker::default()),
             audio: Mutex::new(crate::events::AudioState::default()),
             ready: Arc::new(AtomicBool::new(true)),
             listening: Arc::new(AtomicBool::new(false)),
