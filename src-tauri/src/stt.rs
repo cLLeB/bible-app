@@ -211,6 +211,70 @@ fn tie_to_our_lifetime(child: &Child) {
 #[cfg(not(windows))]
 fn tie_to_our_lifetime(_child: &Child) {}
 
+/// The device whisper reported loading onto, as it named it — "Intel(R) Iris(R) Xe
+/// Graphics", "NVIDIA GeForce RTX 4060", or None while nothing is running.
+static DEVICE: Mutex<Option<String>> = Mutex::new(None);
+
+/// What is actually doing the work right now, in whisper's own words. None means no
+/// server is running, or it did not say — in which case it is on the processor.
+pub fn device() -> Option<String> {
+    DEVICE.lock().ok().and_then(|g| g.clone())
+}
+
+/// Pick the device name out of a line of whisper's startup chatter.
+///
+/// Each backend announces itself differently, and the exact wording is upstream's to
+/// change, so this is deliberately forgiving: anything it does not recognise simply
+/// leaves the device unknown, which reads as "processor" and is the safe thing to say.
+fn parse_device(line: &str) -> Option<String> {
+    // "ggml_vulkan: 0 = Intel(R) Iris(R) Xe Graphics (Intel Corporation) | uma: 1 | ..."
+    if let Some(rest) = line.strip_prefix("ggml_vulkan:") {
+        let after_eq = rest.split_once('=')?.1.trim();
+        let name = after_eq.split('|').next()?.trim();
+        // Trim the vendor in brackets at the end, keeping any inside the name itself.
+        let name = name.rsplit_once(" (").map(|(n, _)| n).unwrap_or(name);
+        return (!name.is_empty()).then(|| name.to_string());
+    }
+    // "ggml_cuda: Device 0: NVIDIA GeForce RTX 4060, compute capability 8.9, ..."
+    if line.starts_with("ggml_cuda:") {
+        if let Some((_, rest)) = line.split_once("Device ") {
+            let name = rest.split_once(':').map(|(_, n)| n).unwrap_or(rest);
+            let name = name.split(',').next()?.trim();
+            return (!name.is_empty()).then(|| name.to_string());
+        }
+    }
+    // "ggml_metal_init: picking default device: Apple M2 Pro"
+    if let Some((_, name)) = line.split_once("picking default device:") {
+        let name = name.trim();
+        return (!name.is_empty()).then(|| name.to_string());
+    }
+    None
+}
+
+/// Read the server's startup output, note which device it landed on, and keep the
+/// pipe drained.
+///
+/// Draining matters as much as reading: a piped child that nobody reads from blocks
+/// once the pipe buffer fills, which would hang transcription solid. So the thread
+/// keeps consuming for the life of the process and simply discards what it does not
+/// need.
+fn watch_startup_output(child: &mut Child) {
+    let Some(stderr) = child.stderr.take() else { return };
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        if let Ok(mut guard) = DEVICE.lock() {
+            *guard = None;
+        }
+        for line in std::io::BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(name) = parse_device(&line) {
+                if let Ok(mut guard) = DEVICE.lock() {
+                    *guard = Some(name);
+                }
+            }
+        }
+    });
+}
+
 /// The running whisper-server: model loaded, waiting for audio.
 struct Server {
     child: Child,
@@ -321,10 +385,15 @@ fn ensure_server(model: &Path, server_exe: &Path) -> Result<u16, String> {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.stdout(std::process::Stdio::null());
-    cmd.stderr(std::process::Stdio::null());
+    // Kept rather than discarded, because whisper announces here which device it
+    // actually loaded onto — and that is the only trustworthy answer to "is the
+    // graphics card being used". What backend the app *chose* is a belief; this is
+    // the engine reporting what it did.
+    cmd.stderr(std::process::Stdio::piped());
 
-    let child = cmd.spawn().map_err(|e| format!("could not start whisper-server: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("could not start whisper-server: {e}"))?;
     tie_to_our_lifetime(&child);
+    watch_startup_output(&mut child);
 
     // The server binds its port before it has finished reading the model — half a
     // gigabyte, for small — so an open port does not mean it can answer. Firing an
@@ -563,6 +632,45 @@ fn dedupe_repeats(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real startup lines, copied from this machine and from upstream's output. The
+    /// operator is told which processor is doing the work, and this is where that
+    /// answer comes from, so a silent parsing failure would mean quietly reporting
+    /// "processor" while the graphics card is busy.
+    #[test]
+    fn reads_the_device_whisper_says_it_loaded_onto() {
+        assert_eq!(
+            parse_device(
+                "ggml_vulkan: 0 = Intel(R) Iris(R) Xe Graphics (Intel Corporation) | uma: 1 | fp16: 1"
+            )
+            .as_deref(),
+            Some("Intel(R) Iris(R) Xe Graphics")
+        );
+        assert_eq!(
+            parse_device("ggml_cuda: Device 0: NVIDIA GeForce RTX 4060, compute capability 8.9")
+                .as_deref(),
+            Some("NVIDIA GeForce RTX 4060")
+        );
+        assert_eq!(
+            parse_device("ggml_metal_init: picking default device: Apple M2 Pro").as_deref(),
+            Some("Apple M2 Pro")
+        );
+    }
+
+    #[test]
+    fn ordinary_chatter_does_not_become_a_device_name() {
+        // Unknown wording must leave the device unset, which reads as "processor".
+        // Claiming a graphics card that is not there would be worse than saying
+        // nothing.
+        for line in [
+            "whisper_model_load: n_vocab = 51864",
+            "system_info: n_threads = 8",
+            "",
+            "ggml_vulkan: Found 1 Vulkan devices:",
+        ] {
+            assert_eq!(parse_device(line), None, "should not parse: {line}");
+        }
+    }
 
     #[test]
     fn collapses_a_repeated_phrase() {

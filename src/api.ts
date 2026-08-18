@@ -509,6 +509,9 @@ export interface AccelStatus {
   chosenLabel: string;
   threads: number;
   options: AccelOption[];
+  /** What is doing the work right now, named by whisper itself. Empty when nothing
+   *  is listening, or when it named nothing, which means the processor. */
+  device: string;
 }
 
 export const accelStatus = (): Promise<AccelStatus> => invoke<AccelStatus>("accel_status");

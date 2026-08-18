@@ -12,9 +12,11 @@ import {
   recordMoment,
   recordingConsent,
   recordingEnabled,
+  accelStatus,
   setRecording,
   startListening,
   stopListening,
+  type AccelStatus,
   type Candidate,
   type Moment,
   type SttModel,
@@ -40,6 +42,10 @@ function onRunSheet(cues: Cue[], v: { bookOsis: string; chapter: number }): bool
 
 export function ListenPanel() {
   const [listening, setListening] = useState(false);
+  // Which processor whisper is on. Refreshed when listening starts and stops,
+  // because the device is only known while a server is actually running, and again
+  // when the startup check settles on a backend.
+  const [accel, setAccel] = useState<AccelStatus | null>(null);
   // Fixed by this build's flavor (base-personal / small-personal), not operator-switchable.
   const [model, setModel] = useState<SttModel>("base");
   const [lines, setLines] = useState<string[]>([]);
@@ -75,6 +81,20 @@ export function ListenPanel() {
   useEffect(() => {
     void appFlavor().then((f) => setModel(f.defaultModel));
   }, []);
+
+  // The device name is only known while a whisper server is up, so this is re-read
+  // when listening starts and stops, and again when the startup check finishes
+  // proving which backend works.
+  const refreshAccel = useCallback((): void => {
+    void accelStatus().then(setAccel).catch(() => undefined);
+  }, []);
+  useEffect(refreshAccel, [listening, refreshAccel]);
+  useEffect(() => {
+    const sub = listen("accel-verified", () => refreshAccel());
+    return () => {
+      sub.then((f) => f());
+    };
+  }, [refreshAccel]);
 
   // Until a sound input is chosen the app will not listen at all, so that setting is
   // not something to hide behind a fold — it is the whole job.
@@ -275,6 +295,16 @@ export function ListenPanel() {
         )}
         <span className="ml-auto text-xs text-[var(--muted)]">{autoSummary}</span>
       </div>
+
+      {/* Which processor is doing the transcribing. `device` is whisper's own report
+          of what it loaded onto, not our belief about what we picked, so this is
+          evidence rather than a claim. */}
+      {accel && (
+        <div className="text-xs text-[var(--faint)]">
+          {accel.device || accel.chosenLabel}
+          {accel.chosen === "cpu" && ` · ${accel.threads} threads`}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <button

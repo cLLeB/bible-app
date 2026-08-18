@@ -1642,6 +1642,10 @@ pub struct AccelStatus {
     pub chosen_label: String,
     pub threads: usize,
     pub options: Vec<AccelOption>,
+    /// What is doing the work right now, in whisper's own words, e.g. "Intel(R)
+    /// Iris(R) Xe Graphics". Empty when nothing is listening, or when the engine
+    /// did not name a device, which means the processor.
+    pub device: String,
 }
 
 fn accel_status_from(app: &tauri::AppHandle) -> Result<AccelStatus, String> {
@@ -1684,6 +1688,7 @@ fn accel_status_from(app: &tauri::AppHandle) -> Result<AccelStatus, String> {
         chosen_label: chosen.label().into(),
         threads: crate::stt::threads().parse().unwrap_or(4),
         options,
+        device: crate::stt::device().unwrap_or_default(),
     })
 }
 
