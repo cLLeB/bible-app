@@ -149,17 +149,22 @@ export function PreviewPane() {
 
       {error && <p className="tint tint-bad rounded px-2 py-1 text-sm">{error}</p>}
 
-      {/* Sized to the format, not to the column it happens to sit in.
-          A preview is a check, not a second congregation screen: it only has to be
-          big enough to read a reference and recognise a picture, and a half-metre of
-          it pushes the run sheet and the transport off the bottom of the window. */}
+      {/* Sized to what is in it, not to a fixed rectangle.
+          A preview is a check, not a second congregation screen. It used to be a
+          16:9 letterbox whatever it held, so a portrait photo sat between two black
+          bars and a two-line verse sat in a mostly empty box - and the empty space
+          pushed the transport and the run sheet down the window for no gain. Media
+          now sets the height from its own shape, and text from how much of it there
+          is. */}
       <div
         className="relative overflow-hidden rounded border"
         style={{
           maxWidth: previewWidth(staged.kind),
-          aspectRatio: "16 / 9",
           borderColor: "var(--border)",
           background: dark ? "#000000" : backgroundCss(theme),
+          // Only a floor, and only so a blackout - which has nothing in it at all -
+          // is still a visible thing on the screen rather than a hairline.
+          minHeight: "4rem",
         }}
       >
         {!dark && media && media.kind === "image" && (
@@ -177,12 +182,13 @@ export function PreviewPane() {
           />
         )}
 
+        {/* In normal flow, so the picture's own proportions decide the box. */}
         {staged.kind === "image" && (
           <img
             src={needsAssetUrl(staged.src) ? convertFileSrc(staged.src) : staged.src}
             alt=""
-            className="absolute inset-0 h-full w-full"
-            style={{ objectFit: "contain", background: "#000000" }}
+            className="block h-auto w-full"
+            style={{ background: "#000000" }}
           />
         )}
         {staged.kind === "video" && (
@@ -193,11 +199,13 @@ export function PreviewPane() {
           // one" nor "what happens when it starts". Controls here are safe in a way
           // they never are on the wall - this pane is the operator's own screen, and
           // the point of a preview is to find out before the congregation does.
+          //
+          // In normal flow too, so a 4:3 clip is not letterboxed into 16:9.
           <video
             ref={clipRef}
             src={convertFileSrc(staged.src)}
-            className="absolute inset-0 h-full w-full"
-            style={{ objectFit: "contain", background: "#000000" }}
+            className="block h-auto w-full"
+            style={{ background: "#000000" }}
             muted={hushed}
             controls
             playsInline
@@ -213,8 +221,11 @@ export function PreviewPane() {
           />
         )}
 
+        {/* Words also flow, so a short verse gives a short box. The caption comes
+            after the body rather than pinned to the bottom, which it has to now that
+            there is no fixed height to pin it against. */}
         {!lines.visual && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-[6%] text-center">
+          <div className="flex flex-col items-center gap-1 px-[6%] py-4 text-center">
             {lines.body && (
               <p
                 className="whitespace-pre-line"
@@ -229,20 +240,23 @@ export function PreviewPane() {
                 {lines.body}
               </p>
             )}
+            {lines.caption && (
+              <p
+                className="truncate max-w-full"
+                style={{ ...captionStyle(theme, 1), fontSize: "0.7rem" }}
+              >
+                {lines.caption}
+              </p>
+            )}
           </div>
-
         )}
 
-        {lines.caption && (
+        {/* Over a picture or a clip the caption still sits on the media, where it
+            reads as a label rather than as part of the slide. */}
+        {lines.visual && lines.caption && (
           <p
             className="absolute inset-x-0 bottom-1 truncate px-2 text-center"
-            style={{
-              ...captionStyle(theme, 1),
-              fontSize: "0.7rem",
-              // Visual items sit on their own black letterbox, so the caption
-              // needs a colour that survives it rather than the theme's.
-              color: lines.visual ? "#d0d0d0" : captionStyle(theme, 1).color,
-            }}
+            style={{ ...captionStyle(theme, 1), fontSize: "0.7rem", color: "#d0d0d0" }}
           >
             {lines.caption}
           </p>
