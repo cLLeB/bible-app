@@ -110,17 +110,19 @@ export default function App() {
         {/* And what it will see next. Staged from Prepare (media) as readily as
             from Live (scripture), so it sits outside the tab switch too, and
             renders nothing at all until something is staged. */}
-        {/* The card wraps the preview rather than the column. The box is sized to
-            what it holds, so a full-width card left a band of empty card beside a
-            portrait photo or a short verse - the same wasted space, moved. */}
-        <div className="card w-fit max-w-full empty:hidden">
-          <PreviewPane />
-        </div>
-
         {tab === "live" ? (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
             {/* Left: finding scripture and hearing it */}
             <div className="space-y-4">
+              {/* At the top of this column rather than on a row of its own. The box
+                  is sized to what it holds, so a full-width row left a band of empty
+                  space beside a portrait photo - and left the run sheet and the
+                  screen controls waiting below it for no reason. Here the right
+                  column starts level with it and takes the height back, whatever
+                  shape the preview happens to be. */}
+              <div className="card w-fit max-w-full empty:hidden">
+                <PreviewPane />
+              </div>
               <ScripturePresenter />
               <div className="card">
                 <ListenPanel />
@@ -150,6 +152,9 @@ export default function App() {
           /* This Sunday: what will be sung, shown and read. */
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
             <div className="space-y-4">
+              <div className="card w-fit max-w-full empty:hidden">
+                <PreviewPane />
+              </div>
               <div className="card">
                 <SongsPanel />
               </div>
