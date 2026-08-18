@@ -29,4 +29,12 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  test: {
+    // Our tests only ever live in src/. Without this, a whisper.cpp checkout in the
+    // project root (cloned to build the Vulkan backend) gets collected too, and its
+    // own suite fails for reasons that have nothing to do with this app.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["**/node_modules/**", "**/dist/**", "whisper.cpp/**", "src-tauri/**"],
+  },
 }));
