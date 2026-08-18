@@ -281,6 +281,23 @@ def build(name: str, spec: dict, reuse_data: bool = False) -> None:
     env = dict(os.environ)
     env["BIBLE_APP_TIER"] = spec["tier"]
     env["BIBLE_APP_MODELS"] = ",".join(spec["models"])
+    # Tauri stages resources next to the exe and never clears them, so every model
+    # and backend ever built piles up there. Two reasons to sweep it:
+    #
+    #   * 2.1 GB of models from four flavors was sitting in it. Harmless to the
+    #     installers - packaging works from the resource map, which was checked -
+    #     but it is disk nobody asked for.
+    #   * verify_packaged reads that directory to confirm this build's backends
+    #     arrived. Left dirty, a stale bin/cuda from an earlier flavor would let the
+    #     check pass for a build that never copied one. Sweeping first is what makes
+    #     the guard mean anything.
+    #
+    # data/ is deliberately spared: prepare_translations uses it as an offline cache
+    # for the ~35 translations, and re-downloading those is slow and network-fragile.
+    staging = ROOT / "src-tauri" / "target" / "release"
+    for stale in ("models", "bin"):
+        shutil.rmtree(staging / stale, ignore_errors=True)
+
     # Wipe the shared bundle dir first. It is not per-flavor, so anything left in it
     # from the previous build gets picked up by collect_outputs and filed under this
     # flavor's name. That is how a medium-personal-...-setup.exe appeared that was
