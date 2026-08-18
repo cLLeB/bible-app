@@ -1,10 +1,11 @@
 //! Measuring this machine, rather than assuming things about laptops in general.
 //!
-//! The ranking in `accel` says a graphics card beats a processor, which is true of
-//! most hardware and false of some. Integrated Intel graphics in a 15W laptop is the
-//! awkward case: a Vulkan pass there can lose outright to eight CPU threads, and the
-//! machines where that happens are exactly the ones already short of speed. The only
-//! way to know is to run it.
+//! The ranking in `accel` says a graphics card beats a processor, which holds on the
+//! hardware measured so far but is still a claim about laptops in general rather than
+//! about the one in the sound booth. Integrated graphics was expected to be the
+//! awkward case; on a 15W Iris Xe it won by about five times. That is a reason to keep
+//! measuring, not to stop: the number will not be five everywhere, and a machine where
+//! the ranking is wrong is exactly the machine that can least afford it.
 //!
 //! The probe times `whisper-cli` and reads the model's own timing report rather than
 //! the wall clock, so loading half a gigabyte of weights is left out of the number.
@@ -146,6 +147,39 @@ fn trial(
     let out = cmd.output().ok()?;
     let ms = compute_ms(&String::from_utf8_lossy(&out.stderr))?;
     Some(Trial { backend, threads, ms })
+}
+
+/// Can this backend transcribe at all on this machine?
+///
+/// The question is not how fast but whether it works, so it is deliberately the
+/// cheapest thing that still exercises the whole path: load the model onto the
+/// device, encode, decode, report timings. A backend whose driver loads but whose GPU
+/// cannot run whisper's shaders fails right here, at launch, instead of in the middle
+/// of a service.
+///
+/// One second of audio and the smallest encoder window allowed, because none of the
+/// numbers are kept — only whether it survived.
+pub fn smoke_test(bin_dir: &Path, model: &Path) -> bool {
+    let clip: Vec<f32> = synthetic_clip().into_iter().take(crate::audio::TARGET_RATE as usize).collect();
+    let wav = std::env::temp_dir().join(format!("bibleapp_smoke_{}.wav", std::process::id()));
+    if crate::stt::write_wav_16k_mono(&wav, &clip).is_err() {
+        return false;
+    }
+    let exe = bin_dir.join(if cfg!(windows) { "whisper-cli.exe" } else { "whisper-cli" });
+    let mut cmd = Command::new(&exe);
+    let (Some(m), Some(w)) = (model.to_str(), wav.to_str()) else { return false };
+    cmd.args(["-m", m, "-f", w, "-l", "en", "-t", "2", "-nt", "-ac", "256", "-bs", "1", "-bo", "1"]);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let out = cmd.output();
+    let _ = std::fs::remove_file(&wav);
+    match out {
+        // Timings only appear when a pass actually completed, so their presence is the
+        // test. An exit code alone is not: some backends print an error, fall back
+        // internally and still exit zero.
+        Ok(o) => o.status.success() && compute_ms(&String::from_utf8_lossy(&o.stderr)).is_some(),
+        Err(_) => false,
+    }
 }
 
 /// Time one candidate more than once and keep the best.

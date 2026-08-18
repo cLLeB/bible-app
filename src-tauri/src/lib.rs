@@ -145,13 +145,18 @@ pub fn run() {
             // Appearance persists across restarts (theme + font scale).
             let initial_settings = themes::load_projection_settings(&db);
             // Settle which processor whisper will run on before anything asks for it,
-            // so the first listen of the day does not have to work it out.
-            for root in commands::bin_roots(app.path().resource_dir().ok().as_deref()) {
-                if !accel::available(&root).is_empty() {
-                    accel::refresh(&db, &root);
-                    break;
-                }
-            }
+            // so the first listen of the day does not have to work it out. This reads
+            // the stored verdict only; proving a graphics card actually works costs a
+            // transcription and happens in the background just below.
+            let accel_root = commands::bin_roots(app.path().resource_dir().ok().as_deref())
+                .into_iter()
+                .find(|root| !accel::available(root).is_empty());
+            let needs_verifying = if let Some(root) = &accel_root {
+                accel::refresh(&db, root);
+                !accel::verdict_is_current(&db)
+            } else {
+                false
+            };
 
             let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
@@ -173,6 +178,18 @@ pub fn run() {
                 moments: Mutex::new(Vec::new()),
                 learning: Arc::new(AtomicBool::new(false)),
             });
+
+            // Find out which graphics card, if any, can really run whisper on this
+            // machine — once per machine, in the background, so the operator never has
+            // to know it happened. Until it answers we stay on the processor, which
+            // always works. See `accel::verify_in_background`.
+            if needs_verifying {
+                if let Some(root) = accel_root {
+                    if let Ok((model, _)) = commands::whisper_model_for_default_flavor(app.handle()) {
+                        accel::verify_in_background(app.handle().clone(), root, model);
+                    }
+                }
+            }
 
             // The asset-protocol scope is rebuilt every run, so files the
             // operator added from outside their user folders have to be allowed

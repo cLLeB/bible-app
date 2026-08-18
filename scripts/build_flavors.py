@@ -33,14 +33,22 @@ Usage:
   python scripts/build_flavors.py base-distribution
   python scripts/build_flavors.py --all
   python scripts/build_flavors.py --all --reuse-data   # skip translation download if data/ already populated
-  python scripts/build_flavors.py small-personal --with-cuda   # + NVIDIA acceleration
+  python scripts/build_flavors.py small-personal --with-gpu    # + graphics cards
 
---with-cuda: fetch and bundle the CUDA whisper build (~670 MB, once) so installers
-  from this run can use an NVIDIA graphics card. Nobody installing the app has to do
-  anything for it: the app detects the card and uses it by itself, falling back to the
-  processor on machines without one. Intel and AMD integrated graphics need the Vulkan
-  build instead, which upstream does not publish -- run
-  `python scripts/fetch_whisper_backends.py --how vulkan` for the recipe.
+Graphics acceleration. Nobody installing the app does anything for any of this: it
+detects what the machine has, proves the backend can actually transcribe before
+trusting it, and falls back to the processor otherwise.
+
+  --with-gpu     everything: Vulkan (Intel, AMD and NVIDIA alike) and CUDA (NVIDIA,
+                 faster still). Vulkan is compiled here, which needs the Vulkan SDK
+                 and takes 10-20 minutes the first time; CUDA is a ~670 MB download.
+  --with-vulkan  Vulkan only. A few megabytes in the installer, covers every GPU
+                 vendor, and on a 15W Iris Xe laptop it was about five times faster
+                 than the processor. The best value of the three.
+  --with-cuda    CUDA only. NVIDIA machines, where it beats Vulkan.
+
+Whatever is missing is simply not bundled; the build still succeeds and those
+machines use the processor.
 
 --reuse-data: skip the wipe+re-download of data/*.canonical.json; use whatever is
   already in data/. Useful when translations were downloaded in a prior run that
@@ -217,16 +225,29 @@ def main(argv: list) -> None:
         return
     reuse_data = "--reuse-data" in argv
     # Opting the build in to graphics-card acceleration. Doing it here means nobody
-    # installing the app has to do anything: whatever is in bin/ gets bundled, and the
-    # app detects and uses it by itself. --with-cuda is a ~670 MB download, once.
-    want_cuda = "--with-cuda" in argv
-    argv = [a for a in argv if a not in ("--reuse-data", "--with-cuda")]
-    if want_cuda:
-        print("=== Fetching the CUDA whisper build (NVIDIA) ===")
-        subprocess.check_call(
-            [sys.executable, str(ROOT / "scripts" / "fetch_whisper_backends.py"), "cpu", "cuda"],
+    # installing the app has to do anything at all: whatever is in bin/ is bundled,
+    # and the app detects, proves and uses it by itself.
+    want = []
+    if "--with-gpu" in argv:
+        want = ["cpu", "vulkan", "cuda"]
+    elif "--with-vulkan" in argv:
+        want = ["cpu", "vulkan"]
+    elif "--with-cuda" in argv:
+        want = ["cpu", "cuda"]
+    argv = [a for a in argv
+            if a not in ("--reuse-data", "--with-gpu", "--with-vulkan", "--with-cuda")]
+    if want:
+        print(f"=== Preparing whisper builds: {', '.join(want)} ===")
+        # Not check_call: a missing Vulkan SDK or an unreachable CUDA download should
+        # not throw away a build that is otherwise fine. The app falls back to the
+        # processor for whatever is absent, which is exactly what it is designed to do.
+        rc = subprocess.call(
+            [sys.executable, str(ROOT / "scripts" / "fetch_whisper_backends.py"), *want],
             cwd=ROOT,
         )
+        if rc != 0:
+            print("  WARNING: not every backend could be prepared; building with what "
+                  "is in bin/", file=sys.stderr)
     targets = list(fl) if argv[0] == "--all" else argv
     for t in targets:
         if t not in fl:

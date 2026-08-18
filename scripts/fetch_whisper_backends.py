@@ -38,14 +38,18 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import pathlib
+import platform
 import shutil
+import subprocess
 import sys
 import urllib.request
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin"
+SRC = ROOT / "whisper.cpp"
 API = "https://api.github.com/repos/ggml-org/whisper.cpp/releases"
 
 # Which release asset holds which backend. Matched by substring against the asset
@@ -93,6 +97,106 @@ offering the backend, and measures before preferring it.
 """
 
 
+def vulkan_sdk():
+    """Where the Vulkan SDK is, if it is anywhere.
+
+    The installer sets VULKAN_SDK, but a shell opened before the install will not have
+    it, which is an easy way to waste twenty minutes deciding the SDK is missing when
+    it is sitting right there. So the usual install locations are checked too.
+
+    Returns "" on Linux when nothing is found: the distro's own vulkan headers and
+    glslc are normally enough there, and cmake locates them without help.
+    """
+    if os.environ.get("VULKAN_SDK"):
+        return os.environ["VULKAN_SDK"]
+    for root in (pathlib.Path("C:/VulkanSDK"), pathlib.Path.home() / "VulkanSDK"):
+        if root.is_dir():
+            versions = sorted((d for d in root.iterdir() if d.is_dir()), reverse=True)
+            if versions:
+                return str(versions[0])
+    return "" if platform.system() == "Linux" else None
+
+
+def build_vulkan(force: bool = False) -> bool:
+    """Compile the Vulkan backend from source.
+
+    Upstream publishes no Vulkan binary, and Vulkan is the backend that covers Intel
+    and AMD graphics — which is what most church laptops have. Doing the build here
+    rather than describing it in a README means it is one command like every other
+    backend, and nobody has to follow instructions correctly to get a working GPU.
+    """
+    target = BIN / "vulkan"
+    if target.is_dir() and all((target / f).exists() for f in REQUIRED) and not force:
+        print(f"  vulkan: already present ({target}) - pass --force to rebuild")
+        return True
+
+    sdk = vulkan_sdk()
+    if sdk is None:
+        print("  vulkan: needs the Vulkan SDK, from https://vulkan.lunarg.com/sdk/home",
+              file=sys.stderr)
+        print("          install it, then run this again", file=sys.stderr)
+        return False
+    if not shutil.which("cmake") or not shutil.which("git"):
+        print("  vulkan: needs cmake and git on PATH", file=sys.stderr)
+        return False
+
+    env = dict(os.environ)
+    if sdk:
+        env["VULKAN_SDK"] = sdk
+        env["PATH"] = str(pathlib.Path(sdk) / "Bin") + os.pathsep + env.get("PATH", "")
+        print(f"  vulkan: using SDK at {sdk}")
+
+    if not SRC.is_dir():
+        print("  vulkan: cloning whisper.cpp ...")
+        subprocess.check_call(
+            ["git", "clone", "--depth", "1",
+             "https://github.com/ggml-org/whisper.cpp", str(SRC)],
+            cwd=ROOT,
+        )
+
+    print("  vulkan: configuring ...")
+    subprocess.check_call(
+        ["cmake", "-B", "build",
+         "-DGGML_VULKAN=ON",
+         "-DCMAKE_BUILD_TYPE=Release",
+         "-DWHISPER_BUILD_TESTS=OFF",
+         "-DWHISPER_BUILD_SERVER=ON"],
+        cwd=SRC, env=env,
+    )
+    print("  vulkan: building - the shaders are the slow part, allow 10-20 minutes ...")
+    subprocess.check_call(
+        ["cmake", "--build", "build", "--config", "Release", "--parallel"],
+        cwd=SRC, env=env,
+    )
+
+    # Multi-config generators (MSVC) put artefacts under build/bin/Release; the
+    # single-config ones under build/bin. Take whichever actually holds the binary.
+    exe = "whisper-cli.exe" if platform.system() == "Windows" else "whisper-cli"
+    src_dir = next(
+        (d for d in (SRC / "build" / "bin" / "Release", SRC / "build" / "bin")
+         if (d / exe).exists()),
+        None,
+    )
+    if src_dir is None:
+        print("  vulkan: build finished but produced no whisper-cli", file=sys.stderr)
+        return False
+
+    if target.is_dir():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    keep = (".exe", ".dll", ".so", ".dylib")
+    for f in src_dir.iterdir():
+        if f.is_file() and (f.suffix.lower() in keep or f.suffix == ""):
+            shutil.copy2(f, target / f.name)
+
+    missing = [f for f in REQUIRED if not (target / f).exists()]
+    if missing and platform.system() == "Windows":
+        print(f"  vulkan: WARNING - build did not produce {missing}", file=sys.stderr)
+        return False
+    print(f"  vulkan: built and installed into {target}")
+    return True
+
+
 def releases(pages: int = 8, attempts: int = 3) -> list:
     """Recent releases, newest first.
 
@@ -133,8 +237,7 @@ def install(backend: str, force: bool = False) -> bool:
         return True
 
     if backend == "vulkan":
-        print(f"\n{VULKAN_RECIPE}")
-        return False
+        return build_vulkan(force)
 
     names = ASSETS.get(backend)
     if not names:

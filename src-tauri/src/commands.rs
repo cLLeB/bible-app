@@ -1593,6 +1593,15 @@ fn resolve_model_and_binary(
     Ok((model, binary))
 }
 
+/// The model this build would use if nobody chose one, for work that needs a model
+/// before the operator has touched anything — the startup accelerator check.
+pub(crate) fn whisper_model_for_default_flavor(
+    app: &tauri::AppHandle,
+) -> Result<(PathBuf, PathBuf), String> {
+    let res_dir = app.path().resource_dir().ok();
+    resolve_model_and_binary(res_dir.as_deref(), crate::flavor::default_model())
+}
+
 /// Where whisper builds are kept: the packaged app's resources, then the dev
 /// project's `bin/`.
 pub(crate) fn bin_roots(res_dir: Option<&Path>) -> Vec<PathBuf> {

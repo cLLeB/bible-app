@@ -43,8 +43,28 @@ fn main() {
         println!("  {:<28} {}", b.label(), note);
     }
 
-    if !std::env::args().any(|a| a == "--measure") {
-        println!("\nPass --measure to time them.");
+    let argv: Vec<String> = std::env::args().collect();
+
+    // --verify: the same check the app runs by itself at startup. "ready" above only
+    // means the build is on disk and its driver loads; this asks the backend to
+    // actually transcribe, which is the difference between a graphics card that is
+    // installed and one that works.
+    if argv.iter().any(|a| a == "--verify") {
+        let Some(model) = a_model() else {
+            eprintln!("\nNo whisper model in models/ to verify with.");
+            std::process::exit(1);
+        };
+        println!("\nProving each one can transcribe:");
+        for b in accel::Backend::RANKED {
+            let Some(dir) = accel::dir_for(&root, b) else { continue };
+            let ok = accel_probe::smoke_test(&dir, &model);
+            println!("  {:<28} {}", b.label(), if ok { "works" } else { "FAILED" });
+        }
+        return;
+    }
+
+    if !argv.iter().any(|a| a == "--measure") {
+        println!("\nPass --measure to time them, or --verify to check they work.");
         return;
     }
 
@@ -56,7 +76,7 @@ fn main() {
     println!("(milliseconds of compute per utterance; model loading excluded)\n");
 
     // --clip <path>
-    let args: Vec<String> = std::env::args().collect();
+    let args = &argv;
     let clip: Option<PathBuf> = args
         .iter()
         .position(|a| a == "--clip")
