@@ -40,9 +40,17 @@ pub fn models() -> Vec<&'static str> {
         Some(s) if !s.trim().is_empty() => {
             s.split(',').map(|m| m.trim()).filter(|m| !m.is_empty()).collect()
         }
-        // Base is the practical floor (fast, accurate enough for references);
-        // small and medium trade speed for accuracy. Tiny is dropped.
-        _ => vec!["base", "small", "medium"],
+        // No flavor set, so this is `npm run tauri dev` or a plain `cargo run`.
+        // `small` leads deliberately: the first entry is what `default_model` hands
+        // out, and a dev build that quietly transcribes with a weaker model than any
+        // shipped flavor is a trap. It cost a testing session that judged accuracy on
+        // `base` while the installed build ran `small`, produced transcripts like
+        // "John Torey, Sistine", and looked for all the world like a regression.
+        //
+        // Speed is no longer the reason to prefer base either: on a graphics card
+        // small runs an utterance in about 1.4s here, which is faster than base
+        // managed on the processor.
+        _ => vec!["small", "base", "medium"],
     }
 }
 
