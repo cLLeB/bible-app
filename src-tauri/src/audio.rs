@@ -496,6 +496,37 @@ mod tests {
         Job::Interim(vec![0.0; n])
     }
 
+    /// Holding an interim pass back must not cost the sentence its context.
+    ///
+    /// Reported from a service: "2 Chronicles, 1 Chronicles, chapter 20 verse 22" was
+    /// transcribed correctly and nothing at all was detected. An interim pass had seen
+    /// the bare chapter, been deferred (right), and then cleared the remembered book
+    /// and chapter on the way out (wrong) - so the rest of the sentence had nothing
+    /// left to attach to. A cosmetic flash had been traded for a silent miss.
+    ///
+    /// This checks the rule the code now follows: a deferred interim leaves context
+    /// alone, an unresolvable reference still clears it.
+    #[test]
+    fn deferring_an_interim_is_not_the_same_as_failing_to_find_anything() {
+        // A bare chapter mid-utterance: deferred, context kept.
+        assert!(defers(false, Some(false)), "interim, no verse yet: should defer");
+        assert!(!clears_context(false, Some(false)), "deferring must keep the context");
+        // The same words at the endpoint: projected, not deferred.
+        assert!(!defers(true, Some(false)), "final: a bare chapter still projects");
+        // Nothing found at all still clears, whichever pass it was.
+        assert!(clears_context(true, None), "no reference at all should clear");
+    }
+
+    /// The two rules from `transcribe_detect`, extracted so they can be checked
+    /// without a database, a microphone or a whisper build.
+    fn defers(emit_transcript: bool, best_has_verse: Option<bool>) -> bool {
+        !emit_transcript && best_has_verse.map(|v| !v).unwrap_or(false)
+    }
+    fn clears_context(emit_transcript: bool, best_has_verse: Option<bool>) -> bool {
+        let projected = best_has_verse.is_some() && !defers(emit_transcript, best_has_verse);
+        !projected && !defers(emit_transcript, best_has_verse)
+    }
+
     #[test]
     fn medium_gets_no_interim_passes_until_a_graphics_card_is_settled_on() {
         use super::model_is_fast;
@@ -812,23 +843,24 @@ fn transcribe_detect(
         // when none do. A self-correction ends on the verse the speaker meant, so
         // this still lands on "1 Chronicles 20:22" and "Colossians 1:13"; a trailing
         // bare chapter no longer outranks a complete reference.
-        let chosen = confident
+        let best = confident
             .iter()
             .rev()
             .find(|d| d.reference.verse.is_some())
             .or_else(|| confident.last())
-            .copied()
-            // Mid-utterance, a chapter with no verse is not a reference yet — it is
-            // the first half of one. "1 Chronicles chapter 20 ... verse 22" reaches an
-            // interim pass as "1 Chronicles chapter 20", which resolves to 20:1 and
-            // projects it at 0.85, above the auto bar. The right verse arrives a
-            // moment later and replaces it, so the congregation sees the wrong verse
-            // flash first. Observed in a real service, and the reason it happens more
-            // now is that interim passes run on more models than they used to.
-            //
-            // Waiting costs nothing: the endpointed pass reads the whole utterance,
-            // and a genuinely bare chapter ("turn to Romans 8") still projects then.
-            .filter(|d| emit_transcript || d.reference.verse.is_some());
+            .copied();
+
+        // Mid-utterance, a chapter with no verse is not a reference yet — it is the
+        // first half of one. "1 Chronicles chapter 20 ... verse 22" reaches an interim
+        // pass as "1 Chronicles chapter 20", which resolves to 20:1 and projects it at
+        // 0.85, above the auto bar; the right verse replaces it a moment later, so the
+        // congregation sees the wrong verse flash first.
+        //
+        // Waiting costs nothing: the endpointed pass reads the whole utterance, and a
+        // genuinely bare chapter ("turn to Romans 8") still projects then.
+        let waiting_for_the_verse =
+            !emit_transcript && best.map(|d| d.reference.verse.is_none()).unwrap_or(false);
+        let chosen = best.filter(|_| !waiting_for_the_verse);
         for d in chosen.iter() {
             let r = &d.reference;
             let key: RefKey = (r.book_osis.clone(), r.chapter, r.verse);
@@ -900,7 +932,14 @@ fn transcribe_detect(
         // the twelve tribes of Israel" and saying "verse 29" produced an
         // impossible Colossians 22:29 and nothing else, when the words themselves
         // were Luke 22:30 and the quote matcher could have found them.
-        if !projected {
+        //
+        // Not when we deliberately held an interim pass back, though. Deferring is
+        // not failing, and clearing here wiped the remembered book and chapter in the
+        // middle of the very sentence that was still being spoken — so a "verse 22"
+        // arriving in the next breath had nothing to attach to and resolved to
+        // nothing at all. That turned a cosmetic flash into a silent miss, which is
+        // far worse than the problem it was fixing.
+        if !projected && !waiting_for_the_verse {
             ctx.clear();
         }
     }
@@ -1444,7 +1483,7 @@ fn run_inner(
             warned_silent = true;
             let _ = app.emit(
                 "listen-error",
-                "No sound is arriving from the audio input — check the cable and that the desk is still sending.",
+                "No sound is arriving from the audio input: check the cable and that the desk is still sending.",
             );
         }
         // A listening session left running transcribes room noise indefinitely,

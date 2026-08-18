@@ -1741,7 +1741,7 @@ pub fn set_accel_preference(app: tauri::AppHandle, preference: String) -> Result
 pub fn measure_accel(app: tauri::AppHandle, model: Option<String>) -> Result<(), String> {
     let state = app.state::<AppState>();
     if state.listening.load(Ordering::SeqCst) {
-        return Err("Stop listening first — measuring runs several test transcriptions, which would slow down the service it is trying to speed up.".into());
+        return Err("Stop listening first: measuring runs several test transcriptions, which would slow down the service it is trying to speed up.".into());
     }
     let kind = model.unwrap_or_else(|| crate::flavor::default_model().to_string());
     let res_dir = app.path().resource_dir().ok();
@@ -1843,7 +1843,7 @@ pub(crate) fn begin_listening(app: &tauri::AppHandle, model: Option<&str>) -> Re
     // different thing — and that is what `Input::room_mic_ok` carries.
     if input.name.is_none() {
         return Err(
-            "Choose the sound input first — the feed from the sound desk, under Live \
+            "Choose the sound input first: the feed from the sound desk, under Live \
              listening → Sound input."
                 .into(),
         );
@@ -1925,7 +1925,7 @@ pub fn set_recording(on: bool, state: tauri::State<'_, AppState>) -> Result<(), 
         let who = crate::calibrate::active_profile(&db);
         if !crate::sessions::consented(&db, &who) {
             return Err(format!(
-                "Turn on “Record services to improve {who}” first — recording a preacher is \
+                "Turn on “Record services to improve {who}” first: recording a preacher is \
                  their call to make."
             ));
         }
@@ -2169,7 +2169,7 @@ pub fn learn_now(app: tauri::AppHandle) -> Result<(), String> {
                 let _ = app2.emit("learn-idle-done", "Nothing new to learn from those services.");
             }
             Err(e) if e == crate::learn::CANCELLED => {
-                let _ = app2.emit("learn-idle-done", "Stopped — the machine was needed.");
+                let _ = app2.emit("learn-idle-done", "Stopped: the machine was needed.");
             }
             Err(e) => {
                 let _ = app2.emit("learn-error", e);
@@ -2605,7 +2605,7 @@ pub fn set_voice_profile(name: String, state: tauri::State<'_, AppState>) -> Res
     // A speaker's settings are stored under keys built as `alias:<name>:<word>`, so a
     // colon in the name would let one speaker's learned words be read as another's.
     if name.contains(':') {
-        return Err("A speaker's name can't contain a colon — use a dash instead.".into());
+        return Err("A speaker's name can't contain a colon. Use a dash instead.".into());
     }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     crate::calibrate::set_active_profile(&db, name).map_err(|e| e.to_string())?;
@@ -2661,7 +2661,7 @@ pub async fn record_calibration_line(
         // Calibrate through the same input the service will use, or the tuning is for
         // a signal that never occurs.
         let audio = crate::audio::record_one_utterance(20, &selected_input(&app)?)?
-            .ok_or("Didn't hear anything — check the input and try again.")?;
+            .ok_or("Didn't hear anything: check the input and try again.")?;
         let dir = speaker_dir(&app)?;
         let path = dir.join(format!("calib_{index:02}.wav"));
         crate::stt::write_wav_16k_mono(&path, &audio)?;
