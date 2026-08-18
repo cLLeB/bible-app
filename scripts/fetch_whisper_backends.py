@@ -97,6 +97,45 @@ offering the backend, and measures before preferring it.
 """
 
 
+def download_exactly(url: str, expected: int, what: str, attempts: int = 3):
+    """Download `url`, or return None. Never returns a partial answer.
+
+    Written after a 1.5 GB model download on this network stopped at 3.9 MB and
+    still reported success: the connection closed early, and nothing checked the
+    size. A truncated archive unpacks into a backend that looks installed and fails
+    at the worst possible moment, so the byte count the API gave us is checked
+    against what actually arrived, and a short read is retried rather than kept.
+
+    Progress is printed, because at the speeds seen here a silent half-hour looks
+    exactly like a hang.
+    """
+    for attempt in range(1, attempts + 1):
+        got = bytearray()
+        try:
+            with urllib.request.urlopen(url, timeout=120) as r:
+                last_pct = -10
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    got.extend(chunk)
+                    pct = int(len(got) * 100 / expected) if expected else 0
+                    if pct >= last_pct + 10:
+                        print(f"    {what}: {pct}% ({len(got)/1e6:.0f} of {expected/1e6:.0f} MB)")
+                        last_pct = pct
+        except Exception as e:
+            print(f"    {what}: attempt {attempt} failed after "
+                  f"{len(got)/1e6:.0f} MB ({e})", file=sys.stderr)
+            continue
+        if len(got) == expected:
+            return bytes(got)
+        print(f"    {what}: attempt {attempt} was short - got {len(got)} bytes, "
+              f"expected {expected}", file=sys.stderr)
+    print(f"  {what}: could not download it in one piece; skipping this backend",
+          file=sys.stderr)
+    return None
+
+
 def vulkan_sdk():
     """Where the Vulkan SDK is, if it is anywhere.
 
@@ -251,8 +290,9 @@ def install(backend: str, force: bool = False) -> bool:
 
     size_mb = asset["size"] / 1e6
     print(f"  {backend}: {asset['name']} from {tag} ({size_mb:.0f} MB) ...")
-    with urllib.request.urlopen(asset["browser_download_url"], timeout=1800) as r:
-        blob = r.read()
+    blob = download_exactly(asset["browser_download_url"], asset["size"], backend)
+    if blob is None:
+        return False
 
     if target.is_dir():
         shutil.rmtree(target)
