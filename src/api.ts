@@ -278,6 +278,25 @@ export interface Alert {
   untilMs: number;
 }
 
+/** A line of announcements crawling under whatever is on the wall.
+ *
+ *  Not an alert, which interrupts and then goes; not a projection state, which would
+ *  take the screen. This runs underneath a verse for twenty minutes without
+ *  disturbing it. */
+export interface Ticker {
+  /** Empty means nothing is showing. */
+  text: string;
+  /** Seconds for one pass across the screen. Lower is faster. */
+  seconds: number;
+  /** Hold it still instead of scrolling, for one short line. */
+  still: boolean;
+}
+
+export const getTicker = (): Promise<Ticker> => invoke<Ticker>("get_ticker");
+
+export const setTicker = (text: string, seconds: number, still: boolean): Promise<void> =>
+  invoke<void>("set_ticker", { text, seconds, still });
+
 export const getAlert = (): Promise<Alert> => invoke<Alert>("get_alert");
 
 export const showAlert = (text: string, seconds: number): Promise<void> =>

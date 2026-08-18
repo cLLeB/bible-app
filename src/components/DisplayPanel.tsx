@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   blankProjection,
   clearAlert,
+  getTicker,
+  setTicker,
   getProjectionSettings,
   setFontScale,
   setProjection,
@@ -23,6 +25,20 @@ export function DisplayPanel() {
   const [minutes, setMinutes] = useState(5);
   const [label, setLabel] = useState("Starting soon");
   const [alertText, setAlertText] = useState("");
+  // The announcement crawl. Read back on mount so reopening the console shows what
+  // is actually running rather than an empty box over a live ticker.
+  const [ticker, setTickerText] = useState("");
+  const [tickerSecs, setTickerSecs] = useState(30);
+  const [tickerStill, setTickerStill] = useState(false);
+  useEffect(() => {
+    void getTicker()
+      .then((t) => {
+        setTickerText(t.text);
+        setTickerSecs(t.seconds || 30);
+        setTickerStill(t.still);
+      })
+      .catch(() => undefined);
+  }, []);
   const [alertSecs, setAlertSecs] = useState(10);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
 
@@ -93,6 +109,52 @@ export function DisplayPanel() {
         </button>
         <button onClick={() => clearAlert()} className="btn">
           Clear
+        </button>
+      </div>
+
+      {/* The announcement crawl. Unlike an alert it has no timeout: it runs under
+          the welcome for as long as the operator wants and stops when they say so. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={ticker}
+          onChange={(e) => setTickerText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void setTicker(ticker, tickerSecs, tickerStill);
+          }}
+          placeholder="Announcement crawl (runs under the live verse/song)"
+          className="input flex-1"
+        />
+        <input
+          type="number"
+          min={5}
+          max={120}
+          value={tickerSecs}
+          onChange={(e) => setTickerSecs(Math.min(120, Math.max(5, Number(e.target.value) || 30)))}
+          className="input w-16 text-center"
+        />
+        <span className="text-sm text-[var(--muted)]">s</span>
+        <label className="flex items-center gap-1 text-sm text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={tickerStill}
+            onChange={(e) => setTickerStill(e.target.checked)}
+          />
+          Still
+        </label>
+        <button
+          onClick={() => void setTicker(ticker, tickerSecs, tickerStill)}
+          className="btn btn-primary"
+        >
+          Crawl
+        </button>
+        <button
+          onClick={() => {
+            setTickerText("");
+            void setTicker("", tickerSecs, tickerStill);
+          }}
+          className="btn"
+        >
+          Stop
         </button>
       </div>
 

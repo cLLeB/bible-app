@@ -371,3 +371,11 @@ html.dark .text-blue-700 {
 .proj-fade {
   animation: projFadeIn 0.35s ease-out;
 }
+
+/* The announcement crawl along the foot of the projection.
+   Translating the element rather than animating `left` keeps it on the compositor,
+   so a twenty-minute crawl costs no repaints behind a verse. */
+@keyframes proj-crawl {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}

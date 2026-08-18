@@ -21,7 +21,9 @@ pub struct AppState {
     pub current: Mutex<ProjectionState>, // what the projection should show
     pub settings: Mutex<ProjectionSettings>, // display appearance
     pub stage: Mutex<StageInfo>,         // what the stage/confidence monitor shows
-    pub alert: Mutex<crate::events::Alert>, // lower-third alert over the congregation screen
+    pub alert: Mutex<crate::events::Alert>,
+    /// Announcements crawling under whatever is on the wall.
+    pub ticker: Mutex<crate::events::Ticker>, // lower-third alert over the congregation screen
     // Sound under the service. Separate from `current` on purpose: music plays
     // *while* a verse or song holds the screen (see events::AudioState).
     pub audio: Mutex<crate::events::AudioState>,
@@ -1272,6 +1274,39 @@ pub fn get_alert(state: tauri::State<'_, AppState>) -> Alert {
 
 /// Overlay an alert band over whatever is live. `seconds > 0` auto-dismisses;
 /// 0 keeps it up until cleared. Empty text clears it.
+/// What the ticker is saying, so a reloaded projection window picks it up again.
+#[tauri::command]
+pub fn get_ticker(state: tauri::State<'_, AppState>) -> crate::events::Ticker {
+    state.ticker.lock().map(|t| t.clone()).unwrap_or_default()
+}
+
+/// Put a line of announcements under whatever is on the screen, or clear it.
+///
+/// Empty text stops it. There is no timeout: this is the notice that runs for the
+/// whole of the welcome and then stops when the operator says so, which is a
+/// different thing from an alert that shows itself and goes away.
+#[tauri::command]
+pub fn set_ticker(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    text: String,
+    seconds: f32,
+    still: bool,
+) -> Result<(), String> {
+    let ticker = crate::events::Ticker {
+        text: text.trim().to_string(),
+        // A pass that takes under five seconds cannot be read; one over two minutes
+        // looks stuck. Clamped rather than validated, so a stray keystroke in the
+        // box cannot produce something unreadable on the wall.
+        seconds: seconds.clamp(5.0, 120.0),
+        still,
+    };
+    if let Ok(mut t) = state.ticker.lock() {
+        *t = ticker.clone();
+    }
+    app.emit("set-ticker", ticker).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn show_alert(
     app: tauri::AppHandle,

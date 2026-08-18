@@ -7,12 +7,14 @@ import {
   getAudioOutput,
   getProjection,
   getProjectionSettings,
+  getTicker,
   videoEnded,
   type Alert,
   type AudioOutput,
   type AudioState,
   type ProjectionSettings,
   type ProjectionState,
+  type Ticker,
 } from "./api";
 import { alertVisible } from "./lib/alert";
 import { applyOutput } from "./lib/audioSink";
@@ -53,6 +55,8 @@ export function ProjectionView() {
   const [state, setState] = useState<ProjectionState>({ kind: "blank" });
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [alert, setAlert] = useState<Alert>({ text: "", untilMs: 0 });
+  // Announcements crawling along the foot of the screen, under whatever else is up.
+  const [ticker, setTicker] = useState<Ticker>({ text: "", seconds: 30, still: false });
   const [audio, setAudio] = useState<AudioState>({
     src: "",
     title: "",
@@ -65,11 +69,13 @@ export function ProjectionView() {
     getProjection().then(setState).catch(() => setState({ kind: "blank" }));
     getProjectionSettings().then(setSettings).catch(() => {});
     getAlert().then(setAlert).catch(() => {});
+    getTicker().then(setTicker).catch(() => {});
     getAudio().then(setAudio).catch(() => {});
     const subs = [
       listen<ProjectionState>("set-projection", (e) => setState(e.payload)),
       listen<ProjectionSettings>("set-settings", (e) => setSettings(e.payload)),
       listen<Alert>("set-alert", (e) => setAlert(e.payload)),
+      listen<Ticker>("set-ticker", (e) => setTicker(e.payload)),
       listen<AudioState>("set-audio", (e) => setAudio(e.payload)),
     ];
     return () => {
@@ -373,6 +379,36 @@ export function ProjectionView() {
           loop={audio.looping}
           autoPlay={!audio.paused}
         />
+      )}
+
+      {/* The announcement crawl. Sits above the content and below an alert: an alert
+          is an interruption and has to win, while this is meant to be read at
+          leisure without the verse behind it moving. Hidden during a blackout,
+          which means "nothing on this screen" and must mean it. */}
+      {ticker.text !== "" && state.kind !== "blackout" && (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 overflow-hidden whitespace-nowrap py-2"
+          style={{
+            background: "rgba(0,0,0,0.55)",
+            color: theme.text.captionColor,
+            fontFamily: theme.text.fontFamily,
+            fontSize: `${1.5 * scale}rem`,
+          }}
+        >
+          <div
+            style={
+              ticker.still
+                ? { textAlign: "center" }
+                : {
+                    display: "inline-block",
+                    paddingLeft: "100%",
+                    animation: `proj-crawl ${ticker.seconds}s linear infinite`,
+                  }
+            }
+          >
+            {ticker.text}
+          </div>
+        </div>
       )}
 
       {showAlert && (

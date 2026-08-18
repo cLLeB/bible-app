@@ -71,6 +71,25 @@ pub struct Alert {
     pub until_ms: i64,
 }
 
+/// A line of announcements crawling along the foot of the screen.
+///
+/// Deliberately not an `Alert` and not a `ProjectionState`. An alert interrupts and
+/// then goes away, which is right for "the car park is blocked" and wrong for
+/// "youth meets Thursday". A projection state would take the wall, which is worse
+/// still: the whole point is that this runs *underneath* a verse for twenty minutes
+/// without disturbing it. So it is its own channel, like the audio one, and for the
+/// same reason - something else owns the screen throughout.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Ticker {
+    /// Empty means nothing is showing.
+    pub text: String,
+    /// Seconds for one full pass across the screen. Lower is faster.
+    pub seconds: f32,
+    /// Hold it still rather than scrolling, for a single short line.
+    pub still: bool,
+}
+
 /// Sound playing under the service, independent of what is on the wall.
 ///
 /// Audio is deliberately *not* a `ProjectionState`. The common uses are music
