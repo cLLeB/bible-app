@@ -80,11 +80,21 @@ fn ms_of(samples: usize) -> f32 {
 /// small used to be excluded: it took ~20s per pass. With the model resident and
 /// the encoder window fitted it takes ~1.3s, so it now qualifies. medium does not.
 fn model_is_fast(model: &Path) -> bool {
-    model
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.contains("tiny") || n.contains("base") || n.contains("small"))
-        .unwrap_or(false)
+    let name = model.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if name.contains("tiny") || name.contains("base") || name.contains("small") {
+        return true;
+    }
+    // medium was excluded outright, which was right when every pass ran on the
+    // processor. With a graphics card behind it the arithmetic changes: `small` went
+    // from ~8500ms to ~1450ms on Iris Xe, and medium is roughly three times small.
+    //
+    // It is close to the four-second cadence rather than comfortably inside it, and
+    // that is fine now in a way it would not have been before: interim work sits
+    // behind a queue that keeps only the newest of them, so passes that cannot keep
+    // up are dropped rather than piling into a backlog. The worst case is that medium
+    // gets fewer interim passes than small, not that the app falls behind.
+    name.contains("medium")
+        && matches!(crate::accel::chosen(), Some(b) if b != crate::accel::Backend::Cpu)
 }
 
 /// Trim trailing silence (keeping ~0.2s) so whisper isn't fed a second-plus of
@@ -484,6 +494,20 @@ mod tests {
 
     fn interim(n: usize) -> Job {
         Job::Interim(vec![0.0; n])
+    }
+
+    #[test]
+    fn medium_gets_no_interim_passes_until_a_graphics_card_is_settled_on() {
+        use super::model_is_fast;
+        use std::path::Path;
+        // The small models keep up on anything.
+        assert!(model_is_fast(Path::new("ggml-small.en.bin")));
+        assert!(model_is_fast(Path::new("ggml-base.en.bin")));
+        // medium only when something faster than the processor has been chosen. With
+        // nothing chosen yet — which is where every launch starts — it waits for the
+        // endpoint rather than starting passes it cannot finish in time.
+        assert!(!model_is_fast(Path::new("ggml-medium.en.bin")));
+        assert!(!model_is_fast(Path::new("ggml-large-v3.bin")));
     }
 
     #[test]
