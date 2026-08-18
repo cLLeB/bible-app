@@ -28,6 +28,10 @@ import { usePreviewStore } from "../services";
  */
 export function PreviewPane() {
   const { staged, clear } = usePreviewStore();
+  // Read off the clip itself once its metadata arrives. Null until then, and reset
+  // whenever the staged item changes so a stale length is never shown against a new
+  // clip.
+  const [duration, setDuration] = useState<number | null>(null);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,11 +61,26 @@ export function PreviewPane() {
     }
   }
 
+  // A length read from the previous clip must never be shown against this one.
+  useEffect(() => {
+    setDuration(null);
+  }, [staged?.kind === "video" ? staged.src : null]);
+
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="panel-title">Preview</h2>
         <span className="truncate text-xs text-[var(--faint)]">{previewLabel(staged)}</span>
+        {staged.kind === "video" && (
+          // The three things worth knowing before a clip reaches the wall. Length is
+          // read off the file; the other two are how it will actually be played, and
+          // both have surprised an operator before now.
+          <span className="text-xs text-[var(--muted)]">
+            {duration !== null && `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, "0")}`}
+            {staged.muted ? " · silent" : " · with sound"}
+            {staged.looping ? " · loops" : ""}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => void goLive(staged)} className="btn btn-sm btn-primary">
             Go live
@@ -109,13 +128,22 @@ export function PreviewPane() {
           />
         )}
         {staged.kind === "video" && (
+          // Scrubbable and playable, muted, with its own controls.
+          //
+          // A single frozen frame was nearly useless: the first frame of a clip is
+          // usually black or a title card, so it answered neither "is this the right
+          // one" nor "what happens when it starts". Controls here are safe in a way
+          // they never are on the wall - this pane is the operator's own screen, and
+          // the point of a preview is to find out before the congregation does.
           <video
             src={convertFileSrc(staged.src)}
             className="absolute inset-0 h-full w-full"
             style={{ objectFit: "contain", background: "#000000" }}
             muted
+            controls
             playsInline
             preload="metadata"
+            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           />
         )}
 
