@@ -8,11 +8,11 @@ import {
   searchScripture,
   type MediaLibraryItem,
   type SongSummary,
+  type VersePayload,
 } from "../api";
 import { present } from "../present";
 import {
   capPerKind,
-  looksLikeReference,
   rank,
   titleMatches,
   worthSearching,
@@ -57,8 +57,19 @@ export function GlobalSearch() {
     }
     const found: Hit[] = [];
 
-    if (looksLikeReference(q)) {
-      found.push({ kind: "reference", id: `ref:${q}`, title: `Go to ${q.trim()}` });
+    // Whether this is a reference is the parser's question, not a regex's. It knows
+    // the books, the abbreviations and the spoken forms; a pattern here got "John
+    // 3:3" right and "John chapter 3 verse 3" wrong, which meant Enter fell through
+    // to the text search and opened whatever verse happened to contain those words.
+    const asReference = await lookupReference(q).catch(() => null);
+    if (asReference) {
+      found.push({
+        kind: "reference",
+        id: `ref:${asReference.bookOsis}:${asReference.chapter}:${asReference.verse}`,
+        title: asReference.reference,
+        detail: asReference.text,
+        verse: asReference,
+      });
     }
     for (const s of songs.current) {
       if (titleMatches(s.title, q)) {
@@ -98,8 +109,9 @@ export function GlobalSearch() {
   async function choose(h: Hit): Promise<void> {
     try {
       if (h.kind === "reference" || h.kind === "verse") {
-        const ref = h.kind === "reference" ? query.trim() : h.title;
-        const v = await lookupReference(ref);
+        // A reference hit already holds the resolved verse, so clicking it cannot
+        // re-parse the query and land somewhere else.
+        const v = (h.verse as VersePayload | undefined) ?? (await lookupReference(h.title));
         await present(v);
         addVerse(v);
       } else if (h.kind === "media") {

@@ -20,6 +20,16 @@ export interface Hit {
   title: string;
   /** Second line, when there is more worth showing. */
   detail?: string;
+  /**
+   * For a reference hit: the verse the backend already resolved.
+   *
+   * Carried rather than re-parsed on click. Whether a query is a reference is a
+   * question only the app's own parser can answer - it knows the books, the
+   * abbreviations, the mishearings and the spoken forms. A regex here got "John
+   * 3:3" right and "John chapter 3 verse 3" wrong, so Enter ran the *text* search's
+   * first hit and opened Luke 17:36.
+   */
+  verse?: unknown;
 }
 
 /** Does `title` match everything the operator has typed, in any order? */
@@ -28,18 +38,6 @@ export function titleMatches(title: string, query: string): boolean {
   if (words.length === 0) return false;
   const hay = title.toLowerCase();
   return words.every((w) => hay.includes(w));
-}
-
-/**
- * Does this look like someone typing a reference rather than searching for words?
- *
- * Deliberately loose: "john 3", "1 cor 13:4", "psalm 23" all count. It only decides
- * whether to *offer* a "go to" hit at the top; the backend parser has the final say
- * on whether it resolves, so a false positive here costs nothing but a row that
- * quietly fails to appear.
- */
-export function looksLikeReference(query: string): boolean {
-  return /^\s*\d?\s*[a-z]{2,}\s*\.?\s*\d+(\s*[:\-–]\s*\d+)?\s*$/i.test(query.trim());
 }
 
 /**

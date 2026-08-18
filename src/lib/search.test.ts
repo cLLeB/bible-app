@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   capPerKind,
-  looksLikeReference,
   rank,
   titleMatches,
   worthSearching,
@@ -32,21 +31,13 @@ describe("matching a title", () => {
   });
 });
 
-describe("spotting a typed reference", () => {
-  it("recognises the ways people type one", () => {
-    for (const q of ["John 3", "john 3:16", "1 cor 13:4", "Psalm 23", "Rom 8-28", "Gen. 1"]) {
-      expect(looksLikeReference(q)).toBe(true);
-    }
-  });
-
-  it("leaves ordinary searches alone", () => {
-    for (const q of ["amazing grace", "love", "shepherd psalm", "how great"]) {
-      expect(looksLikeReference(q)).toBe(false);
-    }
-  });
-});
-
 describe("ordering the results", () => {
+  // There is no "is this a reference" test any more, and deliberately so. The
+  // question is answered by the backend's own parser, which knows the books, the
+  // abbreviations and the spoken forms. A regex here recognised "John 3:3" and not
+  // "John chapter 3 verse 3", so Enter fell through to the text search and opened
+  // Luke 17:36 - a verse that merely contained those words.
+
   it("puts a typed reference first", () => {
     // Someone who types "John 3:16" wants that verse, not a discussion of it.
     const out = rank([hit("media", "m"), hit("verse", "v"), hit("reference", "r")]);
