@@ -26,7 +26,7 @@ import {
   type ProjectionState,
 } from "../api";
 import { clampInterval, everyMediaExtension, SLIDESHOW_DEFAULT_SECONDS } from "../lib/media";
-import { usePreviewStore, useServiceStore } from "../services";
+import { rememberMedia, usePreviewStore, useServiceStore } from "../services";
 
 /**
  * The media library, the video transport, and the slideshow.
@@ -332,7 +332,13 @@ export function MediaPanel() {
                 place in the row, because to the operator it is the same act. */}
             <button
               onClick={() =>
-                void guard(() => (m.kind === "audio" ? playAudio(m.id) : projectMedia(m.id)))
+                void guard(async () => {
+                  // Recorded whatever it was, so Recent shows the picture the
+                  // operator just put up and not only the verses.
+                  const r = m.kind === "audio" ? await playAudio(m.id) : await projectMedia(m.id);
+                  rememberMedia(m.id, m.title, m.kind);
+                  return r;
+                })
               }
               disabled={!m.present}
               className="btn btn-sm"

@@ -11,7 +11,7 @@ import {
   type VersePayload,
 } from "../api";
 import { present } from "../present";
-import { useServiceStore } from "../services";
+import { rememberMedia, rememberSong, useServiceStore } from "../services";
 import {
   capPerKind,
   rank,
@@ -123,12 +123,16 @@ export function GlobalSearch() {
         const v = (h.verse as VersePayload | undefined) ?? (await lookupReference(h.title));
         await present(v);
       } else if (h.kind === "media") {
-        await projectMedia(Number(h.id.split(":")[1]));
+        const mediaId = Number(h.id.split(":")[1]);
+        await projectMedia(mediaId);
+        rememberMedia(mediaId, h.title, h.detail === "video" || h.detail === "audio" ? h.detail : "image");
       } else if (h.kind === "song") {
         // From the top. Any other slide would be a guess about where the operator
         // means to come in, and the first one is the only answer that is never
         // surprising - they can step forward from there in a keypress.
-        await projectSlide(Number(h.id.split(":")[1]), 0);
+        const songId = Number(h.id.split(":")[1]);
+        await projectSlide(songId, 0);
+        rememberSong(songId, h.title);
       }
       setQuery("");
       setHits([]);

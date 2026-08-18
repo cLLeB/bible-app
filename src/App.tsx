@@ -8,7 +8,7 @@ import { OutputsPanel } from "./components/OutputsPanel";
 import { PdfImport } from "./components/PdfImport";
 import { PlanningCenterPanel } from "./components/PlanningCenterPanel";
 import { ProjectorPanel } from "./components/ProjectorPanel";
-import { RecentVerses } from "./components/RecentVerses";
+import { Recent } from "./components/Recent";
 import { ResultCard } from "./components/ResultCard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
@@ -128,7 +128,7 @@ export default function App() {
                     it, which meant three boxes in one card, each answering a
                     different slice of the same question. */}
                 <GlobalSearch />
-                <RecentVerses />
+                <Recent />
                 <ResultCard />
               </div>
             </div>

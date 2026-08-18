@@ -1,5 +1,5 @@
 import { projectVerse, type VersePayload } from "./api";
-import { useLiveStore, useScriptureStore } from "./services";
+import { rememberVerse, useLiveStore, useScriptureStore } from "./services";
 
 /**
  * Project a scripture verse AND make it the active, navigable presentation:
@@ -10,5 +10,6 @@ export async function present(verse: VersePayload): Promise<void> {
   useLiveStore.getState().setOwner("scripture");
   useScriptureStore.getState().setCurrent(verse);
   useScriptureStore.getState().pushRecent(verse);
+  rememberVerse(verse);
   await projectVerse(verse);
 }

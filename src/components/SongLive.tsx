@@ -9,7 +9,7 @@ import {
   type SongSummary,
 } from "../api";
 import { blockAt, replaceBlock, sections, shortLabel } from "../lib/sections";
-import { useLiveStore } from "../services";
+import { rememberSong, useLiveStore } from "../services";
 import { clearStage, slideSlot } from "../stage";
 import { setStage } from "../api";
 
@@ -91,6 +91,7 @@ export function SongLive({ song }: SongLiveProps) {
     const all = slidesRef.current;
     if (i < 0 || i >= all.length) return;
     useLiveStore.getState().setOwner("song");
+    rememberSong(song.id, song.title);
     setIndex(i);
     void projectSlide(song.id, i);
     const next = all[i + 1];
