@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { blankProjection, clearAlert, setProjection, showStage } from "../api";
-import { grouped, isShortcut, lookup } from "../lib/hotkeys";
+import { grouped, isShortcut, lookup, runSheetIndex } from "../lib/hotkeys";
+import { runSheet, usePreviewStore } from "../services";
 
 /**
  * The service-wide shortcuts, and the `?` sheet that says what they are.
@@ -20,6 +21,15 @@ export function Hotkeys() {
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (!isShortcut(e)) return;
+
+      // The run sheet's number keys are one entry in the sheet but nine bindings.
+      const row = runSheetIndex(e.key);
+      if (row !== null) {
+        e.preventDefault();
+        runSheet.projectIndex?.(row);
+        return;
+      }
+
       const hit = lookup(e.key);
       if (!hit) return;
 
@@ -44,9 +54,33 @@ export function Hotkeys() {
           // Also the way out of the sheet, so it never traps anyone.
           if (showSheet) {
             setShowSheet(false);
+          } else if (usePreviewStore.getState().staged) {
+            usePreviewStore.getState().clear();
           } else {
             void clearAlert().catch(() => undefined);
           }
+          break;
+        case "Enter": {
+          // Completes the one rule: a click previews, and this puts it up.
+          const staged = usePreviewStore.getState().staged;
+          if (staged) {
+            e.preventDefault();
+            void setProjection(staged).then(() => usePreviewStore.getState().clear());
+          }
+          break;
+        }
+        case "/":
+          // The convention everywhere else a search box exists.
+          e.preventDefault();
+          document.querySelector<HTMLInputElement>("[data-search]")?.focus();
+          break;
+        case "n":
+          e.preventDefault();
+          runSheet.step?.(1);
+          break;
+        case "p":
+          e.preventDefault();
+          runSheet.step?.(-1);
           break;
         case "?":
           e.preventDefault();

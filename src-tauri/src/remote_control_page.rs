@@ -302,6 +302,16 @@ const REMOTE_BODY: &str = r#"
   </div>
 
   <div class="sec">
+    <div class="lbl">Announcement crawl</div>
+    <input id="ticker" placeholder="e.g. Youth meets Thursday, 7pm" autocomplete="off">
+    <div class="row">
+      <button onclick="sendTicker()">Start crawl</button>
+      <button onclick="stopTicker()">Stop</button>
+    </div>
+    <p class="hint">Runs along the foot of the screen under whatever is live, until you stop it.</p>
+  </div>
+
+  <div class="sec">
     <div class="lbl">Text size on the wall</div>
     <div class="row">
       <button onclick="size('down')">A&#8722;</button>

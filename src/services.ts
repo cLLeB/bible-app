@@ -142,3 +142,18 @@ export const useTemplateStore = create<TemplateState>()(
     { name: "service-templates", version: 1 },
   ),
 );
+
+/**
+ * Actions the keyboard needs that live inside a panel.
+ *
+ * The run sheet is owned by ServicePanel, and a global key handler cannot reach into
+ * it. Rather than lift the whole thing into the store - which would mean moving the
+ * slide bookkeeping too - the panel registers what it can do, and unregisters when
+ * it goes away. Nothing else may call these; they exist so a keypress and a click
+ * take exactly the same path.
+ */
+interface RunSheetActions {
+  projectIndex: ((i: number) => void) | null;
+  step: ((delta: 1 | -1) => void) | null;
+}
+export const runSheet: RunSheetActions = { projectIndex: null, step: null };

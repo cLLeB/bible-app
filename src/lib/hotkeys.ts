@@ -27,17 +27,28 @@ export interface Hotkey {
 
 /** Everything bound, in the order the cheat sheet lists it. */
 export const HOTKEYS: Hotkey[] = [
+  { key: "Enter", label: "Put the preview live", group: "Projection" },
   { key: "b", label: "Blank the screen", group: "Projection" },
   { key: "k", label: "Blackout", group: "Projection" },
   { key: "l", label: "Logo", group: "Projection" },
-  { key: "Escape", label: "Clear the alert", group: "Projection" },
+  { key: "Escape", label: "Clear the alert, or the preview", group: "Projection" },
   { key: "ArrowRight", label: "Next verse", group: "Scripture" },
   { key: "ArrowLeft", label: "Previous verse", group: "Scripture" },
   { key: "PageDown", label: "Next chapter", group: "Scripture" },
   { key: "PageUp", label: "Previous chapter", group: "Scripture" },
+  { key: "/", label: "Jump to the search box", group: "Scripture" },
+  { key: "n", label: "Next item on the run sheet", group: "Service" },
+  { key: "p", label: "Previous item", group: "Service" },
+  { key: "1", label: "Item 1 to 9 on the run sheet", group: "Service" },
   { key: "s", label: "Stage display", group: "Service" },
   { key: "?", label: "Show this list", group: "Help" },
 ];
+
+/** The run-sheet number keys, which the sheet lists as one row. */
+export function runSheetIndex(key: string): number | null {
+  if (key.length !== 1 || key < "1" || key > "9") return null;
+  return Number(key) - 1;
+}
 
 /**
  * Is the operator typing into something?

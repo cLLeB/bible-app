@@ -121,6 +121,7 @@ export function GlobalSearch() {
     <div className="space-y-1.5">
       <input
         className="input w-full"
+        data-search
         placeholder="Search scripture, songs, media"
         value={query}
         onChange={(e) => setQuery(e.target.value)}

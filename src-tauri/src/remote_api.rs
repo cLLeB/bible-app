@@ -24,6 +24,9 @@ use crate::events::ProjectionState;
 
 /// How long a phone-sent alert stays up before dismissing itself.
 const ALERT_SECONDS: i64 = 12;
+/// One pass of the crawl, when it is started from the phone. The console can pick a
+/// speed; the remote is a one-button surface and this is a readable default.
+const TICKER_SECONDS: f32 = 30.0;
 
 /// The band the phone's text-size buttons may move the projection through, and
 /// the step they move it by. Wide enough to fix a back-row complaint, narrow
@@ -534,6 +537,18 @@ pub fn route(app: &AppHandle, method: &str, path: &str, query: &str, body: &str)
                 return (400, "Nothing to search for.".into());
             }
             (200, search_json(app, body))
+        }
+
+        // The announcement crawl, so the notice can be started and stopped from the
+        // back of the hall like everything else. An empty body stops it, matching
+        // /api/alert - the phone has no room for a second button per action.
+        ("POST", "/api/ticker") => {
+            let state = app.state::<AppState>();
+            let text = body.to_string();
+            match crate::commands::set_ticker(app.clone(), state, text, TICKER_SECONDS, false) {
+                Ok(()) => (200, "ok".into()),
+                Err(e) => (500, e),
+            }
         }
 
         ("POST", "/api/alert") => {

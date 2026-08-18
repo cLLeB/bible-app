@@ -18,6 +18,7 @@ import {
 } from "../services";
 import { slideSlot, verseSlot } from "../stage";
 import { dropIndex, moveTo } from "../lib/reorder";
+import { runSheet } from "../services";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const tag = (el as HTMLElement | null)?.tagName;
@@ -124,6 +125,23 @@ export function ServicePanel() {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
+
+  // Let the keyboard drive the run sheet by the same path a click takes. Cleared on
+  // unmount so a key pressed after leaving Live cannot reach a dead component.
+  useEffect(() => {
+    runSheet.projectIndex = (i: number) => {
+      if (i >= 0 && i < cues.length) void projectItem(i);
+    };
+    runSheet.step = (delta: 1 | -1) => {
+      const next = item < 0 ? 0 : item + delta;
+      if (next >= 0 && next < cues.length) void projectItem(next);
+    };
+    return () => {
+      runSheet.projectIndex = null;
+      runSheet.step = null;
+    };
+  }, [cues, item]);
+
 
   async function next(): Promise<void> {
     const { cues, item, slide, slides } = st.current;
