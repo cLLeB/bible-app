@@ -110,7 +110,10 @@ export default function App() {
         {/* And what it will see next. Staged from Prepare (media) as readily as
             from Live (scripture), so it sits outside the tab switch too, and
             renders nothing at all until something is staged. */}
-        <div className="card empty:hidden">
+        {/* The card wraps the preview rather than the column. The box is sized to
+            what it holds, so a full-width card left a band of empty card beside a
+            portrait photo or a short verse - the same wasted space, moved. */}
+        <div className="card w-fit max-w-full empty:hidden">
           <PreviewPane />
         </div>
 

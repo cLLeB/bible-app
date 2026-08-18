@@ -123,8 +123,8 @@ export function PreviewPane() {
 
 
   return (
-    <section className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <section className="w-fit max-w-full space-y-2">
+      <div className="flex w-full flex-wrap items-center gap-2">
         <h2 className="panel-title">Preview</h2>
         <span className="truncate text-xs text-[var(--faint)]">{previewLabel(staged)}</span>
         {staged.kind === "video" && (
