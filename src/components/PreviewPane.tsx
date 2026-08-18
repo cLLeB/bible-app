@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -10,6 +10,7 @@ import {
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "../lib/theme";
 import { previewLabel, previewLines } from "../lib/preview";
 import { needsAssetUrl } from "../lib/projection";
+import { applyOutput } from "../lib/audioSink";
 import { defaultProjectionSettings } from "../lib/themeDefaults";
 import { usePreviewStore } from "../services";
 
@@ -26,12 +27,38 @@ import { usePreviewStore } from "../services";
  *
  * Nothing here touches the projection until Go live is pressed.
  */
+/**
+ * How wide the preview box may get, by what is in it.
+ *
+ * A preview is a check, not a second congregation screen. Text only has to be
+ * legible enough to confirm the reference and the wording, which takes less room
+ * than a picture does to recognise; a video wants a little more again because the
+ * operator is watching it rather than reading it. Capped in every case, because at
+ * full column width the preview pushes the run sheet and the transport off the
+ * bottom of the window.
+ */
+function previewWidth(kind: string): string {
+  switch (kind) {
+    case "video":
+      return "34rem";
+    case "image":
+      return "30rem";
+    default:
+      // Verses, songs, messages, countdowns: words on a background.
+      return "26rem";
+  }
+}
+
 export function PreviewPane() {
   const { staged, clear } = usePreviewStore();
   // Read off the clip itself once its metadata arrives. Null until then, and reset
   // whenever the staged item changes so a stale length is never shown against a new
   // clip.
   const [duration, setDuration] = useState<number | null>(null);
+  // The preview clip itself, so extra transport can reach it without remounting.
+  const clipRef = useRef<HTMLVideoElement | null>(null);
+  const [rate, setRate] = useState(1);
+  const [hushed, setHushed] = useState(true);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,9 +88,27 @@ export function PreviewPane() {
     }
   }
 
+  /** Step the preview clip, clamped so it cannot run off either end. */
+  function nudge(seconds: number): void {
+    const el = clipRef.current;
+    if (!el) return;
+    const end = Number.isFinite(el.duration) ? el.duration : 0;
+    el.currentTime = Math.min(Math.max(0, el.currentTime + seconds), end || el.currentTime);
+  }
+
+  /** Cycle the speed. Half speed for reading a caption, double for scanning. */
+  function cycleRate(): void {
+    const order = [1, 1.5, 2, 0.5];
+    const next = order[(order.indexOf(rate) + 1) % order.length];
+    setRate(next);
+    if (clipRef.current) clipRef.current.playbackRate = next;
+  }
+
   // A length read from the previous clip must never be shown against this one.
   useEffect(() => {
     setDuration(null);
+    setRate(1);
+    setHushed(true);
   }, [staged?.kind === "video" ? staged.src : null]);
 
   return (
@@ -93,12 +138,14 @@ export function PreviewPane() {
 
       {error && <p className="tint tint-bad rounded px-2 py-1 text-sm">{error}</p>}
 
-      {/* A 16:9 still of the congregation screen. Video previews as its first
-          frame rather than playing: two copies of the same clip running out of
-          step is a distraction at exactly the wrong moment. */}
+      {/* Sized to the format, not to the column it happens to sit in.
+          A preview is a check, not a second congregation screen: it only has to be
+          big enough to read a reference and recognise a picture, and a half-metre of
+          it pushes the run sheet and the transport off the bottom of the window. */}
       <div
-        className="relative w-full overflow-hidden rounded border"
+        className="relative overflow-hidden rounded border"
         style={{
+          maxWidth: previewWidth(staged.kind),
           aspectRatio: "16 / 9",
           borderColor: "var(--border)",
           background: dark ? "#000000" : backgroundCss(theme),
@@ -136,14 +183,22 @@ export function PreviewPane() {
           // they never are on the wall - this pane is the operator's own screen, and
           // the point of a preview is to find out before the congregation does.
           <video
+            ref={clipRef}
             src={convertFileSrc(staged.src)}
             className="absolute inset-0 h-full w-full"
             style={{ objectFit: "contain", background: "#000000" }}
-            muted
+            muted={hushed}
             controls
             playsInline
             preload="metadata"
-            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+            onLoadedMetadata={(e) => {
+              setDuration(e.currentTarget.duration);
+              // A preview belongs on the machine the operator is sitting at, whatever
+              // the congregation screen has been pointed at. Checking a clip must not
+              // put its sound through the hall - so this element is pinned to the
+              // system default while the projection window uses the chosen device.
+              void applyOutput(e.currentTarget, "");
+            }}
           />
         )}
 
@@ -164,6 +219,7 @@ export function PreviewPane() {
               </p>
             )}
           </div>
+
         )}
 
         {lines.caption && (
@@ -181,6 +237,32 @@ export function PreviewPane() {
           </p>
         )}
       </div>
+      {staged.kind === "video" && (
+        // Beyond what the browser's own controls offer. Skipping in fives is how an
+        // operator finds the bit they half remember; the speed is for scanning a long
+        // clip without watching all of it; sound is off to begin with because a
+        // preview that starts talking over the service would be worse than no
+        // preview, and on demand because half of checking a clip is hearing it.
+        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <button className="btn btn-sm" onClick={() => nudge(-5)} title="Back 5 seconds">
+            ⏴ 5s
+          </button>
+          <button className="btn btn-sm" onClick={() => nudge(5)} title="Forward 5 seconds">
+            5s ⏵
+          </button>
+          <button className="btn btn-sm" onClick={cycleRate} title="Playback speed">
+            {rate}×
+          </button>
+          <button
+            className={`btn btn-sm ${hushed ? "" : "btn-primary"}`}
+            onClick={() => setHushed((v) => !v)}
+            title="Preview sound plays on this laptop, never on the chosen output"
+          >
+            {hushed ? "Silent" : "Sound"}
+          </button>
+          <span className="text-xs text-[var(--faint)]">on this laptop only</span>
+        </div>
+      )}
     </section>
   );
 }
