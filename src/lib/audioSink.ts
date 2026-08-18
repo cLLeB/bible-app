@@ -117,3 +117,54 @@ export function resolveRemembered(
   }
   return "";
 }
+
+/**
+ * This machine's own speakers, out of everything the OS offers.
+ *
+ * Used to pin the preview, which must play where the operator is sitting whatever
+ * the congregation screen has been pointed at. Falling back to "the system default"
+ * was nearly right and not safe: the default is whatever Windows says, and a church
+ * that once set the TV as their default would have the preview talking through the
+ * hall.
+ *
+ * Names are all there is to go on, so this reads them the way the input side already
+ * reads microphone names. A display device is ruled out first - HDMI and DisplayPort
+ * audio is how a TV appears - and then the onboard chip is looked for. Returns "" when
+ * nothing can be identified, which means the system default: worse than a named
+ * device, better than silence.
+ */
+export function laptopOutput(outputs: readonly SoundOutput[]): string {
+  const named = outputs.filter((o) => o.id !== "default" && o.label);
+
+  const isDisplay = (label: string): boolean => {
+    const n = label.toLowerCase();
+    return [
+      "hdmi",
+      "displayport",
+      "display audio",
+      "high definition audio", // how NVIDIA/AMD present a TV's audio
+      "nvidia",
+      "tv",
+      "samsung",
+      "lg ",
+      "sony",
+      "philips",
+      "hisense",
+      "monitor",
+      "projector",
+    ].some((hint) => n.includes(hint));
+  };
+
+  const isOnboard = (label: string): boolean => {
+    const n = label.toLowerCase();
+    return ["realtek", "internal", "built-in", "builtin", "smart sound", "laptop", "speakers"].some(
+      (hint) => n.includes(hint),
+    );
+  };
+
+  const onboard = named.find((o) => isOnboard(o.label) && !isDisplay(o.label));
+  if (onboard) return onboard.id;
+  // No onboard speakers named as such: take anything that is at least not a screen.
+  const notAScreen = named.find((o) => !isDisplay(o.label));
+  return notAScreen?.id ?? "";
+}

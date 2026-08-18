@@ -10,7 +10,7 @@ import {
 import { backgroundCss, bodyStyle, captionStyle, mediaBackground } from "../lib/theme";
 import { previewLabel, previewLines } from "../lib/preview";
 import { needsAssetUrl } from "../lib/projection";
-import { applyOutput } from "../lib/audioSink";
+import { applyOutput, laptopOutput, listOutputs } from "../lib/audioSink";
 import { defaultProjectionSettings } from "../lib/themeDefaults";
 import { usePreviewStore } from "../services";
 
@@ -59,6 +59,16 @@ export function PreviewPane() {
   const clipRef = useRef<HTMLVideoElement | null>(null);
   const [rate, setRate] = useState(1);
   const [hushed, setHushed] = useState(true);
+  // This machine's own speakers, found once and held. The preview is pinned to them
+  // by name rather than to "the system default": the default is whatever Windows
+  // says, and a church that once made the TV their default would have the preview
+  // talking through the hall.
+  const [ownSpeakers, setOwnSpeakers] = useState("");
+  useEffect(() => {
+    void listOutputs()
+      .then((outs) => setOwnSpeakers(laptopOutput(outs)))
+      .catch(() => undefined);
+  }, []);
   const [settings, setSettings] = useState<ProjectionSettings>(defaultProjectionSettings);
   const [error, setError] = useState<string | null>(null);
 
@@ -194,10 +204,10 @@ export function PreviewPane() {
             onLoadedMetadata={(e) => {
               setDuration(e.currentTarget.duration);
               // A preview belongs on the machine the operator is sitting at, whatever
-              // the congregation screen has been pointed at. Checking a clip must not
-              // put its sound through the hall - so this element is pinned to the
-              // system default while the projection window uses the chosen device.
-              void applyOutput(e.currentTarget, "");
+              // the congregation screen has been pointed at. Pinned to this laptop's
+              // own speakers by name; an empty id means none could be identified, and
+              // the system default is the only remaining answer.
+              void applyOutput(e.currentTarget, ownSpeakers);
             }}
           />
         )}
