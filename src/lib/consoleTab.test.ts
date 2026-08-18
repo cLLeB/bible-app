@@ -25,8 +25,8 @@ describe("consoleTab", () => {
   });
 
   it("round-trips a saved tab", () => {
-    saveTab("prepare");
-    expect(loadTab()).toBe("prepare");
+    saveTab("plan");
+    expect(loadTab()).toBe("plan");
     saveTab("live");
     expect(loadTab()).toBe("live");
   });
@@ -46,6 +46,18 @@ describe("consoleTab", () => {
       },
     } as unknown as Storage);
     expect(loadTab()).toBe("live");
-    expect(() => saveTab("prepare")).not.toThrow();
+    expect(() => saveTab("plan")).not.toThrow();
+  });
+
+  it("moves an operator who left the console on the old Prepare tab to Plan", () => {
+    // "prepare" was split in two. Landing them on Plan rather than Setup is the
+    // safer guess: the weekly job, not the once-a-machine one.
+    localStorage.setItem("console-tab", "prepare");
+    expect(loadTab()).toBe("plan");
+  });
+
+  it("still falls back to Live for anything unrecognised", () => {
+    localStorage.setItem("console-tab", "nonsense");
+    expect(loadTab()).toBe("live");
   });
 });

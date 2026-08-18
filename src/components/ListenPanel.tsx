@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AudioInputPicker } from "./AudioInputPicker";
-import { CalibrationPanel } from "./CalibrationPanel";
-import { LearningPanel } from "./LearningPanel";
-import { ServiceReview } from "./ServiceReview";
 import {
   appFlavor,
   audioInputs,
@@ -124,7 +120,6 @@ export function ListenPanel() {
     : `Projects by itself at ${Math.round(threshold * 100)}%${useRunSheet ? " · run sheet trusted" : ""}`;
 
   const [recording, setRecordingState] = useState(false);
-  const [reviewKey, setReviewKey] = useState(0);
 
   // Consent is not mirrored here on purpose. The switch used to be hidden without it,
   // which made the feature look absent rather than unauthorised; the backend refuses
@@ -135,12 +130,6 @@ export function ListenPanel() {
   }
   useEffect(loadRecording, []);
 
-  // The speaker (or their answer) changed: re-read both, and rebuild the panels that
-  // are about that speaker's recordings.
-  function profileChanged(): void {
-    loadRecording();
-    setReviewKey((k) => k + 1);
-  }
 
   function changeRecording(v: boolean): void {
     setRecordingState(v);
@@ -441,74 +430,62 @@ export function ListenPanel() {
         </div>
       </div>
 
-      {/* Everything below is set once and left alone. It opens itself when it is the
-          thing standing between the operator and a working service — an unchosen
-          sound input — and stays out of the way the rest of the time. */}
-      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }} open={needsInput}>
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-          Before the service
-          <span className="text-[var(--muted)]">
-            {needsInput ? " · choose the sound input" : " · sound input, auto-project"}
-          </span>
-          {onRoomMic && (
-            <span
-              className="tint tint-warn ml-2 rounded border px-1.5 py-0.5 text-xs font-normal"
-            >
-              room mic
-            </span>
-          )}
-        </summary>
-        <div className="space-y-3 px-3 pb-3">
-          <AudioInputPicker disabled={listening} onChanged={refreshInput} />
+      {/* Two facts an operator must not have to go looking for. Without an input the
+          app will not listen at all, and listening on the laptop's own microphone
+          hears the room rather than the preacher - which looks exactly like working.
+          The settings themselves are under Setup; the warnings belong here. */}
+      {needsInput && (
+        <p className="tint tint-bad rounded px-2 py-1 text-sm">
+          No sound input chosen. Setup → Voice.
+        </p>
+      )}
+      {onRoomMic && (
+        <p className="tint tint-warn rounded px-2 py-1 text-sm">
+          Listening on this laptop's own microphone, which hears the room.
+        </p>
+      )}
 
-          <div className="space-y-1.5">
-            <div className="panel-title">When to project by itself</div>
-            <label
-              className="flex items-center gap-1.5 text-sm"
-            >
-              <input
-                type="checkbox"
-                checked={autoProject}
-                onChange={(e) => changeAuto(e.target.checked)}
-              />
-              Project a verse on its own when the app is at least
-              <input
-                type="number"
-                min={50}
-                max={100}
-                value={Math.round(threshold * 100)}
-                onChange={(e) => changeThreshold(Number(e.target.value))}
-                disabled={!autoProject}
-                className="input w-16 px-2 text-center"
-              />
-              % sure
-            </label>
-            <label
-              className="flex items-center gap-1.5 text-sm"
-            >
-              <input
-                type="checkbox"
-                checked={useRunSheet}
-                disabled={!autoProject}
-                onChange={(e) => changeRunSheet(e.target.checked)}
-              />
-              Trust a fair match when its chapter is on the run sheet
-              {runSheetVerses > 0 ? ` (${runSheetVerses} queued)` : ""}
-            </label>
-          </div>
+      {/* The one thing in the old fold that an operator really does change during a
+          service, when the app is being too eager or too shy. Everything else that
+          used to live here - sound input, calibration, learning, recorded services -
+          is under Setup now. */}
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          When to project by itself
+          <span className="text-[var(--muted)]"> · {autoSummary.toLowerCase()}</span>
+        </summary>
+        <div className="space-y-1.5 px-3 pb-3">
+          <label className="flex items-center gap-1.5 text-sm">
+            <input
+              type="checkbox"
+              checked={autoProject}
+              onChange={(e) => changeAuto(e.target.checked)}
+            />
+            Project a verse on its own when the app is at least
+            <input
+              type="number"
+              min={50}
+              max={100}
+              value={Math.round(threshold * 100)}
+              onChange={(e) => changeThreshold(Number(e.target.value))}
+              disabled={!autoProject}
+              className="input w-16 px-2 text-center"
+            />
+            % sure
+          </label>
+          <label className="flex items-center gap-1.5 text-sm">
+            <input
+              type="checkbox"
+              checked={useRunSheet}
+              disabled={!autoProject}
+              onChange={(e) => changeRunSheet(e.target.checked)}
+            />
+            Trust a fair match when its chapter is on the run sheet
+            {runSheetVerses > 0 ? ` (${runSheetVerses} queued)` : ""}
+          </label>
         </div>
       </details>
 
-      <CalibrationPanel model={model} disabled={listening} onProfileChange={profileChanged} />
-
-      {/* Only after the service, when there is something to look back on. Keyed on the
-          speaker so switching preacher never shows the previous one's services. */}
-      {!listening && (
-        <>
-          <ServiceReview key={`review-${reviewKey}`} />
-          <LearningPanel key={`learning-${reviewKey}`} />
-        </>
-      )}
     </section>
   );
 }

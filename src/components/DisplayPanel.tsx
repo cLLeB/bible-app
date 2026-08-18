@@ -55,6 +55,9 @@ export function DisplayPanel() {
     <section className="space-y-3">
       <h2 className="panel-title">Display</h2>
 
+      {/* The three an operator reaches for without looking. They stay put, always
+          in the same place, because the moment you need Blank is never the moment
+          to go hunting for it. */}
       <div className="flex flex-wrap gap-2">
         <button onClick={() => blankProjection()} className="btn">
           Blank
@@ -67,6 +70,15 @@ export function DisplayPanel() {
         </button>
       </div>
 
+
+      {/* Everything else here is occasional. It was all flat before - sixteen
+          controls in one card - which made the panic buttons above harder to find
+          than the things nobody presses twice a month. */}
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Show a message<span className="text-[var(--muted)]"> · full screen</span>
+        </summary>
+        <div className="space-y-3 px-3 pb-3">
       <div className="flex gap-2">
         <input
           value={message}
@@ -82,6 +94,14 @@ export function DisplayPanel() {
         </button>
       </div>
 
+        </div>
+      </details>
+
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Announce<span className="text-[var(--muted)]"> · lower-third alert, or a crawl under the service</span>
+        </summary>
+        <div className="space-y-3 px-3 pb-3">
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={alertText}
@@ -114,6 +134,7 @@ export function DisplayPanel() {
 
       {/* The announcement crawl. Unlike an alert it has no timeout: it runs under
           the welcome for as long as the operator wants and stops when they say so. */}
+
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={ticker}
@@ -158,6 +179,14 @@ export function DisplayPanel() {
         </button>
       </div>
 
+        </div>
+      </details>
+
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Stage monitor<span className="text-[var(--muted)]"> · private note and timers, seen only by the platform</span>
+        </summary>
+        <div className="space-y-3 px-3 pb-3">
       <div className="flex gap-2">
         <input
           value={stageMsg}
@@ -184,6 +213,7 @@ export function DisplayPanel() {
           Clear
         </button>
       </div>
+
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-[var(--muted)]">Stage timer</span>
@@ -229,6 +259,14 @@ export function DisplayPanel() {
         </button>
       </div>
 
+        </div>
+      </details>
+
+      <details className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Text size<span className="text-[var(--muted)]"> · how large the words are on the wall</span>
+        </summary>
+        <div className="space-y-3 px-3 pb-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-3">
         <label className="flex items-center gap-2 text-sm">
           Font
@@ -242,8 +280,10 @@ export function DisplayPanel() {
           />
           <span className="tabular-nums text-[var(--muted)]">{Math.round(settings.fontScale * 100)}%</span>
         </label>
-        <span className="text-xs text-[var(--muted)]">Theme &amp; backgrounds → Themes panel</span>
-      </div>
+          <span className="text-xs text-[var(--muted)]">Backgrounds are under Setup → Themes</span>
+        </div>
+        </div>
+      </details>
     </section>
   );
 }

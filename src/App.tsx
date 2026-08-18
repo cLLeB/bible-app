@@ -4,7 +4,6 @@ import { appFlavor } from "./api";
 import { DisplayPanel } from "./components/DisplayPanel";
 import { ListenPanel } from "./components/ListenPanel";
 import { LiveNow } from "./components/LiveNow";
-import { LookupBar } from "./components/LookupBar";
 import { OutputsPanel } from "./components/OutputsPanel";
 import { PdfImport } from "./components/PdfImport";
 import { PlanningCenterPanel } from "./components/PlanningCenterPanel";
@@ -15,10 +14,10 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { LiveSync } from "./components/LiveSync";
 import { Hotkeys } from "./components/Hotkeys";
 import { GlobalSearch } from "./components/GlobalSearch";
+import { VoiceSetupPanel } from "./components/VoiceSetupPanel";
 import { MediaPanel } from "./components/MediaPanel";
 import { PreviewPane } from "./components/PreviewPane";
 import { ScripturePresenter } from "./components/ScripturePresenter";
-import { ScriptureSearch } from "./components/ScriptureSearch";
 import { ServicePanel } from "./components/ServicePanel";
 import { SongsPanel } from "./components/SongsPanel";
 import { SongUsageReport } from "./components/SongUsageReport";
@@ -72,11 +71,18 @@ export default function App() {
               Live
             </button>
             <button
-              onClick={() => changeTab("prepare")}
-              aria-pressed={tab === "prepare"}
-              className={`btn btn-sm ${tab === "prepare" ? "btn-primary" : ""}`}
+              onClick={() => changeTab("plan")}
+              aria-pressed={tab === "plan"}
+              className={`btn btn-sm ${tab === "plan" ? "btn-primary" : ""}`}
             >
-              Prepare
+              Plan
+            </button>
+            <button
+              onClick={() => changeTab("setup")}
+              aria-pressed={tab === "setup"}
+              className={`btn btn-sm ${tab === "setup" ? "btn-primary" : ""}`}
+            >
+              Setup
             </button>
           </nav>
 
@@ -110,7 +116,7 @@ export default function App() {
 
         {tab === "live" ? (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
-            {/* Left: the listening loop and finding scripture */}
+            {/* Left: finding scripture and hearing it */}
             <div className="space-y-4">
               <ScripturePresenter />
               <div className="card">
@@ -118,18 +124,16 @@ export default function App() {
               </div>
               <div className="card space-y-3">
                 <h2 className="panel-title">Scripture</h2>
-                {/* One box for scripture, songs and media. Above the scripture-only
-                    lookup because mid-service the operator rarely knows, or cares,
-                    which kind of thing they are reaching for. */}
+                {/* One box. Lookup and the scripture-text search used to sit beside
+                    it, which meant three boxes in one card, each answering a
+                    different slice of the same question. */}
                 <GlobalSearch />
-                <LookupBar />
                 <RecentVerses />
                 <ResultCard />
-                <ScriptureSearch />
               </div>
             </div>
 
-            {/* Right: the run sheet and the controls you reach for mid-service */}
+            {/* Right: the run sheet, and the screen */}
             <div className="space-y-4">
               <div className="card">
                 <ServicePanel />
@@ -139,44 +143,49 @@ export default function App() {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
-              <div className="space-y-4">
-                <div className="card">
-                  <SongsPanel />
-                </div>
-                <div className="card">
-                  <MediaPanel />
-                </div>
-                <div className="card">
-                  <PdfImport />
-                </div>
+        ) : tab === "plan" ? (
+          /* This Sunday: what will be sung, shown and read. */
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
+            <div className="space-y-4">
+              <div className="card">
+                <SongsPanel />
               </div>
-              <div className="space-y-4">
-                <div className="card">
-                  <OutputsPanel />
-                </div>
-                <div className="card">
-                  <ThemesPanel />
-                </div>
-                <div className="card">
-                  <ProjectorPanel />
-                </div>
+              <div className="card">
+                <MediaPanel />
               </div>
             </div>
-
-            {/* Occasional admin. Collapsed by default, so it opens only when you
-                deliberately go looking for it. */}
-            <details className="card">
-              <summary className="cursor-pointer select-none panel-title">
-                Admin &amp; integrations
-              </summary>
-              <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
+            <div className="space-y-4">
+              <div className="card">
+                <PdfImport />
+              </div>
+              <div className="card">
                 <PlanningCenterPanel />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Set once, per machine and per church. Nothing here is touched during a
+             service, which is the whole reason it is not on Live. */
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
+            <div className="space-y-4">
+              <div className="card">
+                <OutputsPanel />
+              </div>
+              <div className="card">
+                <VoiceSetupPanel />
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="card">
+                <ThemesPanel />
+              </div>
+              <div className="card">
+                <ProjectorPanel />
+              </div>
+              <div className="card">
                 <SongUsageReport />
               </div>
-            </details>
+            </div>
           </div>
         )}
       </main>
