@@ -30,6 +30,11 @@ data/web.canonical.json
 /models/
 /bin/
 
+# Toolchain installers downloaded into the project while setting a machine up
+# (the Vulkan SDK is ~275 MB and lands here by default).
+/*.exe
+/whisper.cpp/
+
 # All generated Bible data (downloaded, large, public-domain)
 data/*.canonical.json
 
