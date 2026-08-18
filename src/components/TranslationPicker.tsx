@@ -10,23 +10,17 @@ export function TranslationPicker() {
     async function load(): Promise<void> {
       const list = await listTranslations();
       setTranslations(list);
-      // Keyed by version on purpose. The console remembers the operator's choice,
-      // which is right, but it also meant a machine that had ever opened WEB would
-      // keep opening WEB no matter what the shipped default became - the remembered
-      // value is read first and then pushed back to the backend. Bumping the key
-      // retires the old answer once, so the new default applies, and every choice
-      // made after that is remembered as before.
-      const saved = localStorage.getItem("translation.v2");
-      const current = saved && list.some((t) => t.code === saved) ? saved : await getTranslation();
-      setActive(current);
-      if (saved && saved !== (await getTranslation())) await setTranslation(saved);
+      // The backend is the only place this is kept. The console used to remember it
+      // too, in localStorage, and the two disagreed: a machine that had once opened
+      // WEB kept opening WEB however the shipped default changed.
+      setActive(await getTranslation());
     }
+
     void load();
 
     // A spoken/typed "...in ASV" switches translation on the backend — reflect it.
     const sub = listen<string>("translation-changed", (e) => {
       setActive(e.payload);
-      localStorage.setItem("translation.v2", e.payload);
     });
     // A newly downloaded translation should appear in the picker immediately.
     const installed = listen<string>("translation-installed", () => {
@@ -40,7 +34,6 @@ export function TranslationPicker() {
 
   async function onChange(code: string): Promise<void> {
     setActive(code);
-    localStorage.setItem("translation.v2", code);
     await setTranslation(code);
   }
 

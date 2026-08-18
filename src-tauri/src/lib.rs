@@ -144,6 +144,9 @@ pub fn run() {
             db.migrate().expect("migrate");
             // Appearance persists across restarts (theme + font scale).
             let initial_settings = themes::load_projection_settings(&db);
+            // As does the chosen translation, which the console used to remember
+            // for itself and disagree about.
+            let initial_translation = commands::startup_translation(&db);
             // Settle which processor whisper will run on before anything asks for it,
             // so the first listen of the day does not have to work it out. This reads
             // the stored verdict only; proving a graphics card actually works costs a
@@ -159,7 +162,7 @@ pub fn run() {
             let ready = Arc::new(AtomicBool::new(false));
             app.manage(AppState {
                 db: Mutex::new(db),
-                translation: Mutex::new(commands::DEFAULT_TRANSLATION.into()),
+                translation: Mutex::new(initial_translation),
                 current: Mutex::new(ProjectionState::Blank),
                 settings: Mutex::new(initial_settings),
                 stage: Mutex::new(crate::events::StageInfo::default()),

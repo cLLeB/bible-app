@@ -703,9 +703,29 @@ pub fn get_translation(state: tauri::State<'_, AppState>) -> String {
 
 #[tauri::command]
 pub fn set_translation(code: String, state: tauri::State<'_, AppState>) {
+    // Written to the database, not just held in memory, and deliberately not left to
+    // the console to remember. It used to live in the browser's localStorage, which
+    // meant two answers existed: any machine that had once opened WEB kept opening
+    // WEB whatever the shipped default became, because the remembered value was read
+    // first and then pushed back down. One place to look, and the phone remote reads
+    // the same one.
+    if let Ok(db) = state.db.lock() {
+        let _ = db.set_setting(SETTING_TRANSLATION, &code);
+    }
     if let Ok(mut t) = state.translation.lock() {
         *t = code;
     }
+}
+
+/// Where the operator's chosen translation is kept between runs.
+pub const SETTING_TRANSLATION: &str = "translation";
+
+/// The translation to open on: whatever was last chosen here, else the shipped
+/// default.
+pub fn startup_translation(db: &crate::db::Db) -> String {
+    db.get_setting(SETTING_TRANSLATION)
+        .filter(|c| !c.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_TRANSLATION.to_string())
 }
 
 // ---- Songs ----
