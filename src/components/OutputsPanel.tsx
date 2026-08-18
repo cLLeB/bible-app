@@ -267,6 +267,20 @@ export function OutputsPanel() {
                   </button>
                 </div>
 
+                {/* The projection mirror doubles as a stream source. OBS and vMix
+                    both take a Browser Source, and the app already serves the live
+                    projection as a page, so a church that streams needs no capture
+                    card and no second machine reading a monitor. */}
+                <div className="mt-3">
+                  <p className="text-xs text-[var(--faint)]">For OBS / vMix (Browser Source)</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm">{`${picked}/projection`}</span>
+                    <button className="btn btn-sm" onClick={() => copy(`${picked}/projection`)}>
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
                 {urls.length > 1 && (
                   <div className="mt-3">
                     <p className="text-xs text-[var(--faint)]">Other addresses</p>
