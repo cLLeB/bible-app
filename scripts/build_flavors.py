@@ -55,6 +55,7 @@ machines use the processor.
   was interrupted before the Tauri compile, or when bolls.life is unreachable.
   The flavor's tier + model env-vars are still baked into the binary correctly.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -66,7 +67,11 @@ PUBLIC_DOMAIN = ["BSB", "WEB", "KJV", "ASV", "YLT", "DARBY", "BBE", "GNV", "DRB"
 LICENSED = ["NIV", "NLT", "ESV", "NKJV", "NASB", "CSB17", "AMP", "MSG", "NET",
             "GNT", "GNTD", "RSV", "NRSVCE", "CEB", "CEVD", "CJB", "TLV", "LSB",
             "MEV", "ISV", "ERV", "NLV", "NABRE"]
-MODELS = ["base", "small", "tiny"]
+# medium was left out while everything ran on the processor, where it could not keep
+# up with live speech. A graphics card changes that (see src-tauri/src/accel.rs), so
+# it is a flavor worth building again. Its model file is ~1.5 GB, which the installer
+# carries, so it is not a default anyone should reach for without meaning to.
+MODELS = ["base", "small", "tiny", "medium"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -175,6 +180,75 @@ def stage_runtime(models: list) -> None:
         print("  WARNING: no bin/ dir — whisper binary won't be bundled (STT unavailable)", file=sys.stderr)
 
 
+def backend_resources_config():
+    """A --config override listing each per-processor directory explicitly.
+
+    Tauri's resource map does not preserve directory structure: a `bin/**/*` glob
+    copies every match into the single destination, so bin/ggml-base.dll and
+    bin/cpu/ggml-base.dll both land on bin/ggml-base.dll. WiX then refuses to build,
+    which is at least loud — but the underlying problem was that only one of them
+    would ever have arrived.
+
+    One entry per directory keeps them apart. They cannot be written statically in
+    tauri.conf.json because which backends exist varies by build, and a glob matching
+    nothing is not worth risking, so the map is built from what was actually staged.
+
+    Returns the path to a temporary config file, or None when there is nothing but
+    the loose CPU files (in which case tauri.conf.json already covers it).
+    """
+    staged = BUNDLED / "bin"
+    dirs = sorted(d.name for d in staged.iterdir() if d.is_dir()) if staged.is_dir() else []
+    if not dirs:
+        return None
+    resources = {
+        "../data/*.canonical.json": "data/",
+        "../bundled/models/*.bin": "models/",
+        "../bundled/bin/*": "bin/",
+    }
+    for d in dirs:
+        resources[f"../bundled/bin/{d}/*"] = f"bin/{d}/"
+    path = ROOT / "src-tauri" / ".backends.tauri.conf.json"
+    path.write_text(json.dumps({"bundle": {"resources": resources}}, indent=2), encoding="utf-8")
+    print(f"  packaging processors: {', '.join(dirs)}")
+    return path
+
+
+def verify_packaged(models: list) -> None:
+    """Check that what we staged actually reached the package.
+
+    Worth its own step because of how this failed once: tauri.conf listed
+    `bundled/bin/*`, a single-level glob, so the per-processor subdirectories were
+    copied into bundled/ by stage_runtime, reported as bundled, and then silently
+    left out of the installer. The build succeeded, the log said "processors
+    bundled: cpu, cuda, vulkan", and the installer had none of them.
+
+    Nothing downstream would have caught it either: the app falls back to the
+    processor exactly as designed when a backend is absent, so the only symptom
+    would have been a church wondering why it was slow.
+    """
+    staged = BUNDLED / "bin"
+    packaged = ROOT / "src-tauri" / "target" / "release" / "bin"
+    if not staged.is_dir() or not packaged.is_dir():
+        return
+
+    want = sorted(d.name for d in staged.iterdir() if d.is_dir())
+    got = sorted(d.name for d in packaged.iterdir() if d.is_dir())
+    missing = [b for b in want if b not in got]
+    if missing:
+        print(f"  ERROR: staged {want} but the package only has {got or 'none'}; "
+              f"missing {missing}", file=sys.stderr)
+        print("  The installer would run on the processor only. Check the "
+              "`resources` globs in src-tauri/tauri.conf.json.", file=sys.stderr)
+        sys.exit(1)
+
+    for m in models:
+        if not (packaged.parent / "models" / f"ggml-{m}.en.bin").exists():
+            print(f"  WARNING: model {m} was staged but is not in the package",
+                  file=sys.stderr)
+    if want:
+        print(f"  verified in package: {', '.join(want)}")
+
+
 def build(name: str, spec: dict, reuse_data: bool = False) -> None:
     print(f"\n=== Building flavor '{name}' (tier={spec['tier']}, models={spec['models']}) ===")
     check_models(spec["models"])
@@ -189,11 +263,18 @@ def build(name: str, spec: dict, reuse_data: bool = False) -> None:
     env = dict(os.environ)
     env["BIBLE_APP_TIER"] = spec["tier"]
     env["BIBLE_APP_MODELS"] = ",".join(spec["models"])
+    cmd = ["npm", "run", "tauri", "build"]
+    override = backend_resources_config()
+    if override:
+        cmd += ["--", "--config", str(override)]
     try:
-        subprocess.check_call(["npm", "run", "tauri", "build"], cwd=ROOT, env=env, shell=(os.name == "nt"))
+        subprocess.check_call(cmd, cwd=ROOT, env=env, shell=(os.name == "nt"))
     finally:
         if hidden and hidden.exists():
             hidden.rename(personal_songs)
+        if override:
+            override.unlink(missing_ok=True)
+    verify_packaged(spec["models"])
     collect_outputs(name)
     print(f"=== '{name}' built. Installers in {DIST / name} ===")
 
