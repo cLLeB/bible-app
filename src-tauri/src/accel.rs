@@ -21,15 +21,25 @@
 //! winner is what gets used.
 //!
 //! That check was built expecting integrated graphics to be a close call. It is not.
-//! Measured on a 15W i5-1334U with Intel Iris Xe, on eleven seconds of real speech,
-//! `small`, with the decode settings a service actually uses:
+//! Measured on a 15W i5-1334U with Intel Iris Xe: eleven seconds of real speech,
+//! `small`, the decode settings a service actually uses, five runs of each
+//! interleaved so drift cancels rather than accumulates (milliseconds of compute
+//! per utterance, model loading excluded):
 //!
-//!     Vulkan (Iris Xe)   1503 ms      CPU (8 threads)  10201 ms
+//!                        min    median    max
+//!     Vulkan (Iris Xe)  1075      1452   1755
+//!     CPU (8 threads)   5667      8487   9398
 //!
-//! Nearly seven times faster, from the integrated graphics that come free with the
-//! chip, and the transcript is identical character for character. The check stays
-//! because the answer will not be seven times on every machine and could still go the
-//! other way on some, but the expectation it was guarding against was wrong.
+//! About five times faster, from the graphics chip that comes free with the
+//! processor, and the transcript is identical character for character. The clearest
+//! way to put it: the GPU's *worst* run still beat the CPU's *best* run threefold.
+//!
+//! Single readings are worth little here — an earlier pass on a busy machine read
+//! 10201 ms for the CPU, which flattered the GPU. Hence the repeats.
+//!
+//! The check stays, because this will not be five times on every machine and could
+//! still go the other way on some. But the expectation it was guarding against —
+//! that integrated graphics might lose outright — was simply wrong.
 
 use std::path::{Path, PathBuf};
 

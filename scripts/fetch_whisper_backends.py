@@ -23,9 +23,9 @@ WHAT EACH BACKEND COSTS AND BUYS
   vulkan  NOT PUBLISHED as a prebuilt binary by upstream — see --list, there is
           no Vulkan asset. It has to be compiled, and the recipe is printed by
           `--how vulkan`. Do it anyway: on a 15W laptop with Intel Iris Xe it ran
-          an utterance in 1503 ms against the CPU's 10201 ms, for an identical
-          transcript. It is the only backend covering Intel and AMD graphics,
-          which is what most church laptops have. A few megabytes once built.
+          an utterance in ~1450 ms against the CPU's ~8500 ms (medians of five),
+          for an identical transcript. It is the only backend covering Intel and
+          AMD graphics, which is what most church laptops have. A few megabytes.
 
 There is also a `blas` asset upstream (~21 MB, OpenBLAS on the CPU). It is
 deliberately not offered here: ggml's own CPU kernels, which the app already
@@ -62,13 +62,16 @@ REQUIRED = ["whisper-cli.exe", "whisper-server.exe"]
 
 VULKAN_RECIPE = """Vulkan has no prebuilt release asset, so it has to be compiled once. It is worth
 the trouble: measured on a 15W i5-1334U with Intel Iris Xe integrated graphics, on
-eleven seconds of real speech with `small` and the app's own decode settings,
+eleven seconds of real speech with `small` and the app's own decode settings, five
+interleaved runs each (ms of compute per utterance):
 
-    Vulkan   1503 ms        CPU (8 threads)   10201 ms
+                       min    median    max
+    Vulkan (Iris Xe)  1075      1452   1755
+    CPU (8 threads)   5667      8487   9398
 
-which is nearly seven times faster, for a transcript identical character for
-character. It is also the only backend covering Intel and AMD graphics, which is
-what most church laptops have.
+About five times faster, for a transcript identical character for character; the
+GPU's worst run beat the CPU's best run threefold. It is also the only backend
+covering Intel and AMD graphics, which is what most church laptops have.
 
 Needs: git, cmake, the Vulkan SDK (https://vulkan.lunarg.com/sdk/home) and the MSVC
 build tools. These exact commands produced the build measured above.
