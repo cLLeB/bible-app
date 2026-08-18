@@ -34,12 +34,21 @@ pub struct Detection {
 pub struct RefContext {
     pub book_osis: Option<String>,
     pub chapter: Option<u16>,
+    /// Numbers heard with no book yet: "chapter four verse one ... Leviticus".
+    ///
+    /// The mirror of `book_osis`/`chapter`, which remember a book while the numbers
+    /// are still coming. Preachers do it the other way round often enough to matter,
+    /// sometimes in one breath and sometimes after a pause, and until now the whole
+    /// reference was simply lost. Cleared as soon as anything resolves, and by
+    /// `clear`, so it can only ever attach to the utterance right after it.
+    pub pending_numbers: Option<(u16, Option<u16>)>,
 }
 
 impl RefContext {
     pub fn clear(&mut self) {
         self.book_osis = None;
         self.chapter = None;
+        self.pending_numbers = None;
     }
 }
 
@@ -218,6 +227,117 @@ fn valid_end(start: Option<u16>, end: Option<u16>) -> Option<u16> {
 
 /// Detect references in a transcript, using and updating `ctx` so bare
 /// continuations ("look at verse 28") resolve against a remembered book/chapter.
+/// "chapter two verse one of Exodus": the numbers first, the book at the end.
+///
+/// Preachers reach for the reference and name the book last as often as first. The
+/// main scan only reads book-then-numbers, so this looks for a book on the tail and
+/// hands the rest to `lone_numbers`.
+fn numbers_then_book(tokens: &[String]) -> Option<(u16, Option<u16>, String)> {
+    if tokens.len() < 2 {
+        return None;
+    }
+    // A book name is at most three words ("song of solomon"), and may be introduced
+    // by "of" or "in".
+    for len in 1..=3.min(tokens.len() - 1) {
+        let start = tokens.len() - len;
+        let joined = tokens[start..].join(" ");
+        let Some(b) = resolve_book_fuzzy(joined.trim_matches(|c: char| !c.is_alphanumeric())) else {
+            continue;
+        };
+        let mut head = &tokens[..start];
+        if let Some(last) = head.last() {
+            let w = last.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            if w == "of" || w == "in" || w == "from" {
+                head = &head[..head.len() - 1];
+            }
+        }
+        if let Some((chapter, verse)) = lone_numbers(head) {
+            return Some((chapter, verse, b.osis.to_string()));
+        }
+    }
+    None
+}
+
+/// A whole utterance that is nothing but a book name, e.g. "Leviticus." Returns its
+/// OSIS id.
+///
+/// Deliberately strict. A book named in passing ("as Leviticus tells us, God is
+/// holy") must not swallow numbers from the previous breath, so anything beyond the
+/// name itself disqualifies it. Filler words that carry no meaning are allowed
+/// through, because "the book of Leviticus" is the same utterance said politely.
+fn lone_book(tokens: &[String]) -> Option<String> {
+    const FILLER: [&str; 6] = ["the", "book", "of", "in", "to", "from"];
+    let meaningful: Vec<&String> = tokens
+        .iter()
+        .filter(|t| {
+            let w = t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            !w.is_empty() && !FILLER.contains(&w.as_str())
+        })
+        .collect();
+    if meaningful.is_empty() || meaningful.len() > 3 {
+        return None;
+    }
+    // Longest first, so "song of solomon" beats "song".
+    for len in (1..=meaningful.len()).rev() {
+        let joined = meaningful[..len].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
+        if len == meaningful.len() {
+            if let Some(b) = resolve_book_fuzzy(&joined) {
+                return Some(b.osis.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// A whole utterance that is chapter and verse with no book: "chapter four verse one".
+///
+/// As strict as `lone_book`, and for the same reason. Bare numbers are everywhere in
+/// speech - times, ages, counts - so this only fires when the utterance is explicitly
+/// about a chapter and holds nothing else.
+fn lone_numbers(tokens: &[String]) -> Option<(u16, Option<u16>)> {
+    let words: Vec<String> = tokens
+        .iter()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+    // "chapter" and "verse" are both things a preacher drops: "Leviticus ... four
+    // one" is the same reference said quickly. So the utterance need only *say* it is
+    // a reference somehow - by naming chapter or verse, or by gluing the two numbers
+    // ("4:1"). Bare "four" on its own stays out: numbers are everywhere in speech.
+    let says_reference = words.iter().any(|w| w == "chapter" || w == "verse" || w == "verses")
+        || words.iter().any(|w| matches!(parse_num_token(w), Some((_, Some(_)))));
+    if words.is_empty() || !says_reference {
+        return None;
+    }
+    // Nothing but the reference words and their numbers.
+    const ALLOWED: [&str; 4] = ["chapter", "verse", "verses", "and"];
+    let mut chapter: Option<u16> = None;
+    let mut verse: Option<u16> = None;
+    let mut expecting_verse = false;
+    for w in &words {
+        if let Some((n, glued)) = parse_num_token(w) {
+            // "4:1" arrives glued, and carries both halves at once.
+            if expecting_verse {
+                verse.get_or_insert(n);
+            } else {
+                chapter.get_or_insert(n);
+                if let Some(g) = glued {
+                    verse.get_or_insert(g);
+                    expecting_verse = true;
+                }
+            }
+            continue;
+        }
+        if !ALLOWED.contains(&w.as_str()) {
+            return None; // a real word: this is a sentence, not a bare reference
+        }
+        if w == "verse" || w == "verses" {
+            expecting_verse = true;
+        }
+    }
+    chapter.map(|c| (c, verse))
+}
+
 pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
     let tokens = tokenize(text);
     let mut out: Vec<Detection> = Vec::new();
@@ -427,6 +547,66 @@ pub fn detect_with_context(text: &str, ctx: &mut RefContext) -> Vec<Detection> {
         i += 1;
     }
 
+    // A reference split across the pause, or spoken back to front.
+    //
+    // The main scan reads book-then-numbers in one breath. Real speech does neither
+    // reliably: a preacher names the book, pauses while finding the place, and reads
+    // the numbers into the next breath - which is how "Leviticus." then "chapter 4
+    // verse 1" arrived as two utterances and resolved to nothing at all. Others put
+    // the book last, "chapter two verse one of Exodus".
+    //
+    // Only ever reached when nothing else matched, so an ordinary sentence that
+    // happens to mention a book is untouched.
+    if out.is_empty() {
+        if let Some((chapter, verse, book)) = numbers_then_book(&tokens) {
+            ctx.book_osis = Some(book.clone());
+            ctx.chapter = Some(chapter);
+            out.push(Detection {
+                reference: ParsedRef { book_osis: book, chapter, verse },
+                source: DetectSource::Context,
+                verse_end: None,
+            });
+        } else if let Some(book) = lone_book(&tokens) {
+            match ctx.pending_numbers.take() {
+                // Numbers were waiting from the previous breath: this completes them.
+                Some((chapter, verse)) => {
+                    ctx.book_osis = Some(book.clone());
+                    ctx.chapter = Some(chapter);
+                    out.push(Detection {
+                        reference: ParsedRef { book_osis: book, chapter, verse },
+                        source: DetectSource::Context,
+                        verse_end: None,
+                    });
+                }
+                // Nothing waiting, so this is the *start* of a split reference.
+                // Remember it and project nothing: a book with no chapter is not yet
+                // a place to turn to.
+                None => {
+                    ctx.book_osis = Some(book);
+                    ctx.chapter = None;
+                }
+            }
+        } else if let Some((chapter, verse)) = lone_numbers(&tokens) {
+            match ctx.book_osis.clone() {
+                // The book was named a moment ago: this is the rest of it.
+                Some(book) => {
+                    ctx.chapter = Some(chapter);
+                    out.push(Detection {
+                        reference: ParsedRef { book_osis: book, chapter, verse },
+                        source: DetectSource::Context,
+                        verse_end: None,
+                    });
+                }
+                // No book yet. Hold them for the next breath; a newer pair replaces
+                // this one, so nothing stale can latch on minutes later.
+                None => ctx.pending_numbers = Some((chapter, verse)),
+            }
+        }
+    }
+    if !out.is_empty() {
+        ctx.pending_numbers = None;
+    }
+
     // Famous stories/passages ("the prodigal son" → Luke 15:11), added as
     // suggestions unless that book+chapter was already detected explicitly.
     for (osis, chapter, verse) in crate::knowledge::detect_stories(text) {
@@ -580,6 +760,51 @@ mod tests {
             find("mach 4 verse 1").map(|(b, _, _)| b),
             Some("Mal".to_string()),
             "a guess this far off must not become a confident wrong book"
+        );
+    }
+
+    /// A reference split across a pause, in either order.
+    ///
+    /// From a service: the preacher said "Leviticus", paused while finding the place,
+    /// and read "chapter 4 verse 1" into the next breath. Both halves were correct and
+    /// nothing was projected, because the scan only ever read book-then-numbers within
+    /// one utterance. Naming the book last is just as common: "chapter two verse one
+    /// of Exodus".
+    #[test]
+    fn a_reference_split_across_a_pause_still_resolves() {
+        let run = |parts: &[&str]| {
+            let mut ctx = super::RefContext::default();
+            let mut last = None;
+            for p in parts {
+                last = super::detect_with_context(p, &mut ctx)
+                    .into_iter()
+                    .find(|d| d.source != super::DetectSource::Story)
+                    .map(|d| (d.reference.book_osis, d.reference.chapter, d.reference.verse));
+            }
+            last
+        };
+        let lev41 = Some(("Lev".to_string(), 4, Some(1)));
+
+        // The book first, then the numbers a breath later. "chapter" and "verse" are
+        // both words a preacher drops, so all three forms have to work.
+        assert_eq!(run(&["leviticus", "chapter 4 verse 1"]), lev41);
+        assert_eq!(run(&["leviticus", "4 verse 1"]), lev41);
+        assert_eq!(run(&["leviticus", "4:1"]), lev41);
+
+        // The numbers first, then the book: in one breath and across two.
+        assert_eq!(run(&["chapter 2 verse 1 of exodus"]), Some(("Exod".to_string(), 2, Some(1))));
+        assert_eq!(run(&["chapter 4 verse 1", "leviticus"]), lev41);
+
+        // And the guards. A book mentioned in passing is not half a reference, and a
+        // bare number is not the other half: numbers are everywhere in speech.
+        assert_eq!(run(&["as leviticus tells us god is holy"]), None);
+        assert_eq!(run(&["leviticus", "four"]), None);
+        // A book on its own projects nothing yet: it is not a place to turn to.
+        assert_eq!(run(&["leviticus"]), None);
+        // Ordinary references are untouched.
+        assert_eq!(
+            run(&["john chapter 3 verse 16"]),
+            Some(("John".to_string(), 3, Some(16)))
         );
     }
 
