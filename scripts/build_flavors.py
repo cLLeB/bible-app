@@ -270,10 +270,18 @@ def verify_packaged(models: list) -> None:
     """
     staged = BUNDLED / "bin"
     packaged = ROOT / "src-tauri" / "target" / "release" / "bin"
-    if not staged.is_dir() or not packaged.is_dir():
-        return
+    if not staged.is_dir():
+        return  # nothing was staged, so there is nothing to check
 
     want = sorted(d.name for d in staged.iterdir() if d.is_dir())
+    if want and not packaged.is_dir():
+        print(f"  Note: staged {want} but target release bin does not exist at {packaged}.",
+              file=sys.stderr)
+        print("  On Tauri v2, resources are bundled directly from the source directory. Skipping verification.",
+              file=sys.stderr)
+        return
+    if not packaged.is_dir():
+        return
     got = sorted(d.name for d in packaged.iterdir() if d.is_dir())
     missing = [b for b in want if b not in got]
     if missing:

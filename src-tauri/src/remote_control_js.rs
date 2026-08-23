@@ -303,19 +303,17 @@ async function sendAlert(){
  err(r.ok?'':await r.text());
 }
 async function clearAlert(){
- await req('/api/alert',{method:'POST',body:''}
+ await req('/api/alert',{method:'POST',body:''});
+ $('alert').value=''; err('');
+}
 async function sendTicker(){
- var t=document.getElementById('ticker').value.trim();
- if(!t) return;
+ var t=$('ticker').value.trim(); if(!t)return;
  var r=await req('/api/ticker',{method:'POST',body:t});
- toast(r.ok?'Crawling':'Failed');
+ err(r.ok?'':'Failed to start crawl');
 }
 async function stopTicker(){
  await req('/api/ticker',{method:'POST',body:''});
- document.getElementById('ticker').value='';
- toast('Stopped');
-});
- $('alert').value=''; err('');
+ $('ticker').value=''; err('');
 }
 async function sendMessage(){
  var t=$('msg').value.trim(); if(!t)return;
