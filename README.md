@@ -1,7 +1,4 @@
 # Bible App (offline)
-
-Phase 1A: manual reference lookup → second-monitor projection, WEB in SQLite. No cloud, no AI yet — this is the projection seam every later phase plugs into.
-
 ## Dev setup
 1. Install Rust, Node 18+, and (Windows) MSVC Build Tools + WebView2.
 2. `npm install`
@@ -17,6 +14,3 @@ connected, the verse fills it on black; **Blank** clears it.
 ## Tests
 - Rust: `cd src-tauri && cargo test` (13 tests)
 - Frontend build/type-check: `npm run build`
-
-See `docs/superpowers/specs/2026-07-11-offline-bible-app-design.md` for the frozen architecture
-and `docs/superpowers/plans/2026-07-11-phase1-core-seam.md` for this phase's plan.
