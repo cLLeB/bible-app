@@ -19,11 +19,7 @@ We provide different installers to ensure optimal performance based on your hard
 - **Small**: Uses the "small" Whisper model. Extremely fast and lightweight. Recommended for most machines.
 - **Medium**: Uses the "medium" Whisper model. More accurate, but requires significantly more processing power (and the installer is much larger).
 
-**2. License Tiers:**
-- **Personal**: Includes both public-domain and copyrighted Bible translations. *Note: Only for personal, private use (not for redistribution) due to copyright restrictions.*
-- **Distribution**: Includes only public-domain translations. Safe to share with anyone.
-
-**3. Hardware Acceleration (GPU):**
+**2. Hardware Acceleration (GPU):**
 - **CPU**: Runs entirely on your processor. Works on *any* computer, but transcription may be slower.
 - **Vulkan**: Optimized for machines with Intel or AMD graphics cards.
 - **CUDA**: Extremely fast, but only works if your computer has an **NVIDIA** graphics card.
